@@ -11,6 +11,7 @@ import {
   Moon,
   Play,
   Plus,
+  Radio,
   RefreshCw,
   RotateCcw,
   Server,
@@ -37,7 +38,16 @@ import { DirectoryPicker } from "@/components/directory-picker";
 import { CertificateFilePicker } from "@/components/certificate-file-picker";
 import { useI18n } from "@/i18n/provider";
 import { dashboardSummary, type Translate } from "@/i18n/messages";
-import type { DashboardResponse, DevServerTlsMode, Project, ProjectSnapshot, RuntimeFailure, RuntimePhase } from "@/shared/contracts";
+import type { ControllerDashboardResponse, DevServerTlsMode, McpStatus, Project, ProjectSnapshot, RuntimeFailure, RuntimePhase } from "@/shared/contracts";
+
+const EMPTY_MCP_STATUS: McpStatus = {
+  phase: "unknown",
+  endpoint: null,
+  transport: "streamable-http",
+  network: "loopback",
+  authentication: "bearer",
+  activeSessions: 0,
+};
 
 async function parseResponse<T>(response: Response, fallback: string): Promise<T> {
   const body = await response.json() as T & { error?: string };
@@ -47,7 +57,7 @@ async function parseResponse<T>(response: Response, fallback: string): Promise<T
 
 export function Dashboard() {
   const { locale, setLocale, t } = useI18n();
-  const [data, setData] = useState<DashboardResponse>({ projects: [] });
+  const [data, setData] = useState<ControllerDashboardResponse>({ projects: [], mcp: EMPTY_MCP_STATUS });
   const [token, setToken] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +70,8 @@ export function Dashboard() {
         cache: "no-store",
         headers: { "Accept-Language": locale, "X-Worktree-Switcher-Token": accessToken },
       });
-      setData(await parseResponse<DashboardResponse>(response, t("http.error", { status: response.status })));
+      const dashboard = await parseResponse<ControllerDashboardResponse>(response, t("http.error", { status: response.status }));
+      setData({ ...dashboard, mcp: dashboard.mcp ?? EMPTY_MCP_STATUS });
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -132,6 +143,7 @@ export function Dashboard() {
               </span>
               {dashboardSummary(locale, runningCount, data.projects.length)}
             </Badge>
+            <McpStatusDialog status={data.mcp} />
             <Button
               variant="outline"
               size="sm"
@@ -171,6 +183,72 @@ export function Dashboard() {
         )}
       </div>
     </main>
+  );
+}
+
+function McpStatusDialog({ status }: { status: McpStatus }) {
+  const { t } = useI18n();
+  const running = status.phase === "running";
+  const description = status.phase === "running"
+    ? t("mcp.readyDescription")
+    : status.phase === "disabled"
+      ? t("mcp.disabledDescription")
+      : status.phase === "unknown"
+        ? t("mcp.unknownDescription")
+        : t("mcp.stoppedDescription");
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-2" aria-label={t("mcp.openStatus")}>
+          <Radio aria-hidden />
+          MCP
+          <span
+            className={`size-2 rounded-full ${running ? "bg-emerald-400" : "bg-muted-foreground"}`}
+            aria-hidden
+          />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Radio className="size-5 text-indigo-300" aria-hidden />
+            {t("mcp.title")}
+          </DialogTitle>
+          <DialogDescription>{t("mcp.description")}</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <Alert className={running ? "border-emerald-400/25 bg-emerald-400/7 text-emerald-100" : undefined}>
+            {running ? <ShieldCheck aria-hidden /> : <AlertTriangle aria-hidden />}
+            <AlertTitle>{t(`mcp.phase.${status.phase}`)}</AlertTitle>
+            <AlertDescription>{description}</AlertDescription>
+          </Alert>
+
+          <dl className="grid grid-cols-2 gap-x-5 gap-y-4 text-sm">
+            <Metric label={t("mcp.sessions")} value={String(status.activeSessions)} />
+            <Metric label={t("mcp.transport")} value={t("mcp.streamableHttp")} />
+            <Metric label={t("mcp.network")} value={t("mcp.loopback")} />
+            <Metric label={t("mcp.authentication")} value={t("mcp.bearerToken")} />
+          </dl>
+
+          <div className="space-y-2">
+            <Label>{t("mcp.endpoint")}</Label>
+            <div className="overflow-x-auto rounded-md border bg-black/20 px-3 py-2 font-mono text-xs text-muted-foreground">
+              {status.endpoint ?? "—"}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>{t("mcp.clientConfig")}</Label>
+            <div className="rounded-md border bg-black/20 px-3 py-2 font-mono text-xs text-muted-foreground">
+              worktree-switcher config mcp
+            </div>
+            <p className="text-xs text-muted-foreground">{t("mcp.securityHint")}</p>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -257,7 +335,7 @@ function ProjectCard({
     }
   };
 
-  const reserve = async (action: "acquire" | "release") => {
+  const reserve = async (action: "acquire" | "release" | "force-release") => {
     setPending(action);
     try {
       await mutate(
@@ -307,7 +385,16 @@ function ProjectCard({
           <Alert className="mb-4 border-amber-400/25 bg-amber-400/7 text-amber-100">
             <LockKeyhole aria-hidden />
             <AlertTitle>{t("project.lockedBy", { owner: reservation.owner })}</AlertTitle>
-            <AlertDescription className="truncate">{t("project.pinnedTo", { path: reservation.worktreePath })}</AlertDescription>
+            <AlertDescription className="space-y-1">
+              <p className="truncate">{t("project.pinnedTo", { path: reservation.worktreePath })}</p>
+              <p>
+                {reservation.kind === "agent" ? t("project.agentLease") : t("project.humanLock")}
+                {reservation.expiresAt
+                  ? ` · ${t("project.expires", { time: new Date(reservation.expiresAt).toLocaleTimeString(locale === "pl" ? "pl-PL" : "en-US") })}`
+                  : ""}
+              </p>
+              {reservation.reason && <p>{t("project.reason", { reason: reservation.reason })}</p>}
+            </AlertDescription>
           </Alert>
         )}
         {selectedWorktree?.dirty && (
@@ -402,8 +489,17 @@ function ProjectCard({
         <div className="mt-5 flex items-center justify-between gap-3 border-t border-white/7 pt-4">
           <p className="truncate text-xs text-muted-foreground" title={selectedWorktree?.path}>{selectedWorktree?.path ?? t("project.noSelection")}</p>
           {reservation ? (
-            <Button size="sm" variant="ghost" onClick={() => void reserve("release")} disabled={isBusy}>
-              <UnlockKeyhole aria-hidden />{t("project.release")}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                if (reservation.kind === "agent" && !window.confirm(t("project.forceReleaseConfirm"))) return;
+                void reserve(reservation.kind === "agent" ? "force-release" : "release");
+              }}
+              disabled={isBusy}
+            >
+              <UnlockKeyhole aria-hidden />
+              {reservation.kind === "agent" ? t("project.forceRelease") : t("project.release")}
             </Button>
           ) : (
             <Button size="sm" variant="ghost" onClick={() => void reserve("acquire")} disabled={isBusy || !selected}>

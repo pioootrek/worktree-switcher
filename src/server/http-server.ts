@@ -3,7 +3,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
 
-import type { DashboardResponse } from "@/shared/contracts";
+import type { DashboardResponse, McpStatus } from "@/shared/contracts";
 import { ControlService } from "./control-service";
 import { localeFrom } from "../i18n/messages";
 import { localizeServerMessage } from "../i18n/server-errors";
@@ -175,6 +175,7 @@ export function createControllerServer(options: {
   service: ControlService;
   directoryBrowser: DirectoryBrowser;
   events: EventStream;
+  mcpStatus: () => McpStatus;
   webRoot: string;
   host: string;
   port: number;
@@ -196,7 +197,10 @@ export function createControllerServer(options: {
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/dashboard") {
-          json(response, 200, localizedDashboard(await options.service.dashboard(), locale));
+          json(response, 200, {
+            ...localizedDashboard(await options.service.dashboard(), locale),
+            mcp: options.mcpStatus(),
+          });
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/directories") {
@@ -253,7 +257,7 @@ export function createControllerServer(options: {
               reason: input.reason,
             });
           } else {
-            options.service.release(projectId, input.action === "force-release");
+            await options.service.release(projectId, input.action === "force-release");
           }
           options.events.publish();
           json(response, 200, { ok: true });
@@ -280,6 +284,7 @@ export function createControllerServer(options: {
     server,
     async close() {
       options.events.close();
+      if (!server.listening) return;
       await new Promise<void>((resolveClose, reject) => {
         server.close((error) => error ? reject(error) : resolveClose());
       });

@@ -1,14 +1,13 @@
 ---
 audience: "product owner and contributors discussing agent coordination"
 last_reviewed: "2026-08-29"
-source_of_truth: "approved reservation model and proposed MCP integration design"
+source_of_truth: "implemented reservation and local MCP integration design"
 status: "active"
 ---
 
-# Reservations and proposed MCP integration
+# Reservations and MCP integration
 
-Decision state: the reservation model is approved for MVP. The MCP adapter is a
-follow-up proposal and is not required to complete the first usable release.
+Decision state: the reservation model and local MCP integration are implemented.
 
 ## Use an exclusive reservation, not a semaphore
 
@@ -88,16 +87,19 @@ status reconciliation must continue to report external changes.
 MCP is an adapter over the same application services used by UI and CLI. It
 does not receive direct filesystem, Git, process, or persistence access.
 
-For local clients, the proposed entry point is:
+The primary local transport is MCP Streamable HTTP on a dedicated loopback-only
+listener:
 
 ```text
-worktree-switcher mcp
+http://127.0.0.1:47832/mcp
 ```
 
-This command runs a small stdio MCP bridge only while the client needs it. The
-bridge connects to the existing controller through its authenticated local
-endpoint, so there is still one owner of runtime state and process operations.
-It writes protocol messages only to stdout and diagnostics only to stderr.
+It runs inside the existing controller, so connecting an agent does not create
+another persistent Node.js process. The MCP SDK is loaded lazily on first use.
+The endpoint requires a persistent bearer token stored in an owner-only file;
+`worktree-switcher config mcp` prints the client configuration on explicit
+request. A future stdio command may act as a compatibility proxy for clients
+without Streamable HTTP support.
 
 Read-only MCP resources:
 
@@ -116,10 +118,11 @@ renew_project_claim
 release_project_claim
 ```
 
-`claim_project` accepts a project, discovered worktree identifier, reason,
+`claim_project` accepts a project, discovered worktree path, reason,
 requested TTL, and idempotency key. It atomically acquires an agent lease and,
 when needed, switches the server. Its result contains an explicit lease handle
-that subsequent renew/release calls must present.
+but never exposes the raw lease token. The MCP session retains that secret and
+uses it for explicit and automatic renewals and release operations.
 
 Listing and status remain available without acquiring a lease. Mutations that
 would violate an existing reservation return a typed conflict. Arbitrary shell
@@ -128,8 +131,8 @@ exposed as MCP tools.
 
 ## Security and audit
 
-- The stdio bridge obtains controller credentials from a protected local file
-  or environment, never from command-line arguments.
+- The MCP endpoint binds only to `127.0.0.1`, validates `Origin`, and requires a
+  bearer token read from a protected local file rather than command-line args.
 - Every mutation records actor, MCP client identity, project, worktree, reason,
   timestamp, outcome, and lease ID without recording the raw token.
 - SQLite persists reservations and append-only audit events; the controller is
@@ -138,12 +141,10 @@ exposed as MCP tools.
   against controller-owned discovery results.
 - UI and CLI clearly show owner, reason, age, expiry, and whether the process
   still matches the reserved worktree.
-- A future Streamable HTTP MCP transport must remain loopback-only by default,
-  validate `Origin`, and require authentication. Remote and multi-user access
-  is a separate security design.
+- Remote and multi-user MCP access remains a separate security design.
 
-## Remaining MCP decisions
+## Deferred MCP work
 
-The MCP adapter can be specified after the reservation service is working. The
-remaining questions are client discovery/configuration, whether its first
-release is bundled or optional, and which clients receive installation guides.
+- Optional stdio compatibility proxy.
+- Client-specific configuration helpers beyond the generic JSON output.
+- Remote authorization and user accounts.

@@ -39,6 +39,7 @@ export interface Reservation {
   reason: string | null;
   createdAt: string;
   expiresAt: string | null;
+  maximumExpiresAt: string | null;
 }
 
 export interface RuntimeSnapshot {
@@ -69,6 +70,19 @@ export interface ProjectSnapshot {
 
 export interface DashboardResponse {
   projects: ProjectSnapshot[];
+}
+
+export interface McpStatus {
+  phase: "running" | "stopped" | "disabled" | "unknown";
+  endpoint: string | null;
+  transport: "streamable-http";
+  network: "loopback";
+  authentication: "bearer";
+  activeSessions: number;
+}
+
+export interface ControllerDashboardResponse extends DashboardResponse {
+  mcp: McpStatus;
 }
 
 export interface DirectoryListing {

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -34,6 +34,10 @@ type ReservationRow = {
   reason: string | null;
   created_at: string;
   expires_at: string | null;
+  maximum_expires_at: string | null;
+  token_hash: string | null;
+  idempotency_key: string | null;
+  released_at?: string | null;
 };
 
 const schema = `
@@ -69,9 +73,16 @@ const schema = `
     reason TEXT,
     created_at TEXT NOT NULL,
     expires_at TEXT,
+    maximum_expires_at TEXT,
+    token_hash TEXT,
+    idempotency_key TEXT,
     released_at TEXT,
     released_by TEXT,
-    CHECK((kind = 'human' AND expires_at IS NULL) OR (kind = 'agent' AND expires_at IS NOT NULL))
+    CHECK(
+      (kind = 'human' AND expires_at IS NULL AND maximum_expires_at IS NULL AND token_hash IS NULL)
+      OR
+      (kind = 'agent' AND expires_at IS NOT NULL AND maximum_expires_at IS NOT NULL AND token_hash IS NOT NULL AND idempotency_key IS NOT NULL)
+    )
   );
 
   CREATE UNIQUE INDEX IF NOT EXISTS one_active_reservation_per_project
@@ -120,7 +131,15 @@ function mapReservation(row: ReservationRow): Reservation {
     reason: row.reason,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
+    maximumExpiresAt: row.maximum_expires_at,
   };
+}
+
+function equalHash(actual: string | null, expected: string): boolean {
+  if (!actual) return false;
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
 export class SqliteStateStore implements StateStore {
@@ -210,7 +229,8 @@ export class SqliteStateStore implements StateStore {
   getActiveReservation(projectId: string): Reservation | null {
     this.expireReservations(projectId);
     const row = this.database.prepare(`
-      SELECT id, project_id, worktree_path, kind, owner, reason, created_at, expires_at
+      SELECT id, project_id, worktree_path, kind, owner, reason, created_at, expires_at,
+             maximum_expires_at, token_hash, idempotency_key, released_at
       FROM reservations WHERE project_id = ? AND released_at IS NULL
     `).get(projectId) as ReservationRow | undefined;
     return row ? mapReservation(row) : null;
@@ -219,14 +239,41 @@ export class SqliteStateStore implements StateStore {
   acquireReservation(input: ReservationRequest): Reservation {
     return this.database.transaction(() => {
       this.expireReservations(input.projectId);
+      if (input.kind === "agent") {
+        if (!input.ttlSeconds || input.ttlSeconds < 30) {
+          throw new Error("Dzierżawa agenta musi trwać co najmniej 30 sekund.");
+        }
+        if (!input.maximumLifetimeSeconds || input.maximumLifetimeSeconds < input.ttlSeconds) {
+          throw new Error("Maksymalny czas dzierżawy nie może być krótszy od jej czasu początkowego.");
+        }
+        if (!input.leaseTokenHash || !input.idempotencyKey) {
+          throw new Error("Dzierżawa agenta wymaga tokenu i klucza idempotencji.");
+        }
+        const repeated = this.database.prepare(`
+          SELECT id, project_id, worktree_path, kind, owner, reason, created_at, expires_at,
+                 maximum_expires_at, token_hash, idempotency_key, released_at
+          FROM reservations
+          WHERE owner = ? AND idempotency_key = ? AND kind = 'agent' AND released_at IS NULL
+        `).get(input.owner, input.idempotencyKey) as ReservationRow | undefined;
+        if (repeated) {
+          if (
+            repeated.project_id !== input.projectId
+            || repeated.worktree_path !== input.worktreePath
+            || !equalHash(repeated.token_hash, input.leaseTokenHash)
+          ) {
+            throw new Error("Klucz idempotencji jest już używany przez inną dzierżawę.");
+          }
+          return mapReservation(repeated);
+        }
+      }
       const active = this.getActiveReservation(input.projectId);
       if (active) throw new Error(`Projekt jest zablokowany przez ${active.owner}.`);
-      if (input.kind === "agent" && (!input.ttlSeconds || input.ttlSeconds < 30)) {
-        throw new Error("Dzierżawa agenta musi trwać co najmniej 30 sekund.");
-      }
       const createdAt = new Date().toISOString();
       const expiresAt = input.kind === "agent"
         ? new Date(Date.now() + input.ttlSeconds! * 1000).toISOString()
+        : null;
+      const maximumExpiresAt = input.kind === "agent"
+        ? new Date(Date.now() + input.maximumLifetimeSeconds! * 1000).toISOString()
         : null;
       const reservation: Reservation = {
         id: randomUUID(),
@@ -237,10 +284,13 @@ export class SqliteStateStore implements StateStore {
         reason: input.reason ?? null,
         createdAt,
         expiresAt,
+        maximumExpiresAt,
       };
       this.database.prepare(`
-        INSERT INTO reservations (id, project_id, worktree_path, kind, owner, reason, created_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO reservations (
+          id, project_id, worktree_path, kind, owner, reason, created_at, expires_at,
+          maximum_expires_at, token_hash, idempotency_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         reservation.id,
         reservation.projectId,
@@ -250,9 +300,59 @@ export class SqliteStateStore implements StateStore {
         reservation.reason,
         reservation.createdAt,
         reservation.expiresAt,
+        reservation.maximumExpiresAt,
+        input.leaseTokenHash ?? null,
+        input.idempotencyKey ?? null,
       );
       this.audit(input.projectId, "reservation.acquired", input.owner, reservation);
       return reservation;
+    })();
+  }
+
+  authorizeReservation(projectId: string, owner: string, leaseTokenHash?: string): Reservation | null {
+    const reservation = this.getActiveReservation(projectId);
+    if (!reservation) return null;
+    const row = this.activeReservationRow(projectId)!;
+    if (reservation.owner !== owner) throw new Error(`Projekt jest zablokowany przez ${reservation.owner}.`);
+    if (reservation.kind === "agent" && (!leaseTokenHash || !equalHash(row.token_hash, leaseTokenHash))) {
+      throw new Error("Nieprawidłowy token dzierżawy agenta.");
+    }
+    return reservation;
+  }
+
+  renewAgentReservation(
+    projectId: string,
+    reservationId: string,
+    owner: string,
+    leaseTokenHash: string,
+    ttlSeconds: number,
+  ): Reservation {
+    return this.database.transaction(() => {
+      if (ttlSeconds < 30) throw new Error("Dzierżawa agenta musi trwać co najmniej 30 sekund.");
+      this.expireReservations(projectId);
+      const row = this.activeReservationRow(projectId);
+      if (!row || row.id !== reservationId) throw new Error("Dzierżawa agenta wygasła lub nie istnieje.");
+      if (row.kind !== "agent" || row.owner !== owner || !equalHash(row.token_hash, leaseTokenHash)) {
+        throw new Error("Nieprawidłowy token dzierżawy agenta.");
+      }
+      const maximum = new Date(row.maximum_expires_at!).getTime();
+      const expiresAt = new Date(Math.min(Date.now() + ttlSeconds * 1000, maximum)).toISOString();
+      if (new Date(expiresAt).getTime() <= Date.now()) throw new Error("Dzierżawa agenta osiągnęła maksymalny czas życia.");
+      this.database.prepare("UPDATE reservations SET expires_at = ? WHERE id = ?").run(expiresAt, row.id);
+      this.audit(projectId, "reservation.renewed", owner, { id: row.id, expiresAt });
+      return { ...mapReservation(row), expiresAt };
+    })();
+  }
+
+  releaseAgentReservation(projectId: string, reservationId: string, owner: string, leaseTokenHash: string): void {
+    this.database.transaction(() => {
+      this.expireReservations(projectId);
+      const row = this.activeReservationRow(projectId);
+      if (!row || row.id !== reservationId) return;
+      if (row.kind !== "agent" || row.owner !== owner || !equalHash(row.token_hash, leaseTokenHash)) {
+        throw new Error("Nieprawidłowy token dzierżawy agenta.");
+      }
+      this.releaseRow(row, owner, false);
     })();
   }
 
@@ -261,11 +361,10 @@ export class SqliteStateStore implements StateStore {
       this.expireReservations(projectId);
       const active = this.getActiveReservation(projectId);
       if (!active) return;
+      if (!force && active.kind === "agent") throw new Error("Dzierżawę agenta może zdjąć tylko jej właściciel lub człowiek przez force release.");
       if (!force && active.owner !== owner) throw new Error("Tylko właściciel może zdjąć tę blokadę.");
-      this.database.prepare(`
-        UPDATE reservations SET released_at = ?, released_by = ? WHERE id = ?
-      `).run(new Date().toISOString(), owner, active.id);
-      this.audit(projectId, force ? "reservation.force_released" : "reservation.released", owner, { id: active.id });
+      const row = this.activeReservationRow(projectId)!;
+      this.releaseRow(row, owner, force);
     })();
   }
 
@@ -294,6 +393,21 @@ export class SqliteStateStore implements StateStore {
         this.recordMigration(3);
       })();
     }
+    if (!this.hasMigration(4)) {
+      this.database.transaction(() => {
+        const columns = this.database.prepare("PRAGMA table_info(reservations)").all() as Array<{ name: string }>;
+        const names = new Set(columns.map(({ name }) => name));
+        if (!names.has("maximum_expires_at")) this.database.exec("ALTER TABLE reservations ADD COLUMN maximum_expires_at TEXT");
+        if (!names.has("token_hash")) this.database.exec("ALTER TABLE reservations ADD COLUMN token_hash TEXT");
+        if (!names.has("idempotency_key")) this.database.exec("ALTER TABLE reservations ADD COLUMN idempotency_key TEXT");
+        this.database.exec(`
+          CREATE UNIQUE INDEX IF NOT EXISTS active_agent_idempotency_key
+          ON reservations(owner, idempotency_key)
+          WHERE kind = 'agent' AND released_at IS NULL AND idempotency_key IS NOT NULL
+        `);
+        this.recordMigration(4);
+      })();
+    }
   }
 
   private hasMigration(version: number): boolean {
@@ -306,10 +420,36 @@ export class SqliteStateStore implements StateStore {
   }
 
   private expireReservations(projectId: string): void {
+    this.database.transaction(() => {
+      const now = new Date().toISOString();
+      const expired = this.database.prepare(`
+        SELECT id, project_id, worktree_path, kind, owner, reason, created_at, expires_at,
+               maximum_expires_at, token_hash, idempotency_key, released_at
+        FROM reservations
+        WHERE project_id = ? AND released_at IS NULL AND expires_at IS NOT NULL AND expires_at <= ?
+      `).all(projectId, now) as ReservationRow[];
+      for (const row of expired) {
+        this.database.prepare(`
+          UPDATE reservations SET released_at = ?, released_by = 'system:expiry' WHERE id = ?
+        `).run(now, row.id);
+        this.audit(projectId, "reservation.expired", "system:expiry", { id: row.id });
+      }
+    })();
+  }
+
+  private activeReservationRow(projectId: string): ReservationRow | undefined {
+    return this.database.prepare(`
+      SELECT id, project_id, worktree_path, kind, owner, reason, created_at, expires_at,
+             maximum_expires_at, token_hash, idempotency_key, released_at
+      FROM reservations WHERE project_id = ? AND released_at IS NULL
+    `).get(projectId) as ReservationRow | undefined;
+  }
+
+  private releaseRow(row: ReservationRow, owner: string, force: boolean): void {
     this.database.prepare(`
-      UPDATE reservations SET released_at = ?, released_by = 'system:expiry'
-      WHERE project_id = ? AND released_at IS NULL AND expires_at IS NOT NULL AND expires_at <= ?
-    `).run(new Date().toISOString(), projectId, new Date().toISOString());
+      UPDATE reservations SET released_at = ?, released_by = ? WHERE id = ?
+    `).run(new Date().toISOString(), owner, row.id);
+    this.audit(row.project_id, force ? "reservation.force_released" : "reservation.released", owner, { id: row.id });
   }
 
   private audit(projectId: string, eventType: string, actor: string, details: unknown): void {

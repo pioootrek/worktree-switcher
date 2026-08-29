@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 export interface AppPaths {
   dataDirectory: string;
   databasePath: string;
+  mcpTokenPath: string;
   stateDirectory: string;
   logDirectory: string;
 }
@@ -30,6 +31,7 @@ export function resolveAppPaths(dataDirectory?: string, stateDirectory?: string)
   return {
     dataDirectory: appDirectory,
     databasePath: join(appDirectory, "state.sqlite3"),
+    mcpTokenPath: join(appDirectory, "mcp-token"),
     stateDirectory: appStateDirectory,
     logDirectory: join(appStateDirectory, "logs"),
   };

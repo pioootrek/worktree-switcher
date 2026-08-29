@@ -1,0 +1,105 @@
+import { timingSafeEqual } from "node:crypto";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+
+import type { ControlService } from "./control-service";
+
+const BODY_LIMIT = 1024 * 1024;
+
+interface McpRuntimeLike {
+  handle(request: IncomingMessage, response: ServerResponse, body?: unknown): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface McpControllerServer {
+  server: Server;
+  close(): Promise<void>;
+}
+
+function authorized(request: IncomingMessage, expected: string): boolean {
+  const header = request.headers.authorization;
+  if (!header?.startsWith("Bearer ")) return false;
+  const supplied = Buffer.from(header.slice("Bearer ".length));
+  const expectedBuffer = Buffer.from(expected);
+  return supplied.length === expectedBuffer.length && timingSafeEqual(supplied, expectedBuffer);
+}
+
+function validOrigin(request: IncomingMessage, port: number): boolean {
+  const origin = request.headers.origin;
+  if (!origin) return true;
+  try {
+    const parsed = new URL(origin);
+    return parsed.protocol === "http:"
+      && (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === "[::1]")
+      && parsed.port === String(port);
+  } catch {
+    return false;
+  }
+}
+
+function jsonError(response: ServerResponse, status: number, message: string): void {
+  response.writeHead(status, {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json; charset=utf-8",
+    "X-Content-Type-Options": "nosniff",
+  });
+  response.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message }, id: null }));
+}
+
+async function readJson(request: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > BODY_LIMIT) throw new Error("MCP request is too large.");
+    chunks.push(buffer);
+  }
+  if (chunks.length === 0) return undefined;
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+export function createMcpControllerServer(options: {
+  service: ControlService;
+  port: number;
+  accessToken: string;
+  onDiagnostic?: (message: string, details?: Record<string, unknown>) => void;
+}): McpControllerServer {
+  let runtimePromise: Promise<McpRuntimeLike> | null = null;
+  const runtime = () => {
+    runtimePromise ??= import("./mcp-runtime").then(({ McpRuntime }) => new McpRuntime(
+      options.service,
+      options.onDiagnostic,
+    ));
+    return runtimePromise;
+  };
+
+  const server = createServer((request, response) => {
+    void (async () => {
+      if (request.url !== "/mcp") return jsonError(response, 404, "MCP endpoint not found.");
+      if (!authorized(request, options.accessToken)) return jsonError(response, 401, "A valid MCP bearer token is required.");
+      if (!validOrigin(request, options.port)) return jsonError(response, 403, "The request origin was rejected.");
+      if (request.method !== "POST" && request.method !== "GET" && request.method !== "DELETE") {
+        response.setHeader("Allow", "POST, GET, DELETE");
+        return jsonError(response, 405, "Method not allowed.");
+      }
+      try {
+        const body = request.method === "POST" ? await readJson(request) : undefined;
+        await (await runtime()).handle(request, response, body);
+      } catch (error) {
+        options.onDiagnostic?.("mcp.request_failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        if (!response.headersSent) jsonError(response, 500, "MCP request failed.");
+      }
+    })();
+  });
+
+  return {
+    server,
+    async close() {
+      if (runtimePromise) await (await runtimePromise).close();
+      if (!server.listening) return;
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    },
+  };
+}

@@ -33,6 +33,14 @@ async function fixture() {
     service,
     directoryBrowser: { list: listDirectories } as unknown as DirectoryBrowser,
     events: new EventStream(),
+    mcpStatus: () => ({
+      phase: "running",
+      endpoint: "http://127.0.0.1:47832/mcp",
+      transport: "streamable-http",
+      network: "loopback",
+      authentication: "bearer",
+      activeSessions: 2,
+    }),
     webRoot: directory,
     host: "0.0.0.0",
     port: 0,
@@ -68,7 +76,17 @@ describe("controller access boundary", () => {
       headers: { "X-Worktree-Switcher-Token": "test-access-token" },
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ projects: [] });
+    expect(await response.json()).toEqual({
+      projects: [],
+      mcp: {
+        phase: "running",
+        endpoint: "http://127.0.0.1:47832/mcp",
+        transport: "streamable-http",
+        network: "loopback",
+        authentication: "bearer",
+        activeSessions: 2,
+      },
+    });
     expect(dashboard).toHaveBeenCalledOnce();
   });
 

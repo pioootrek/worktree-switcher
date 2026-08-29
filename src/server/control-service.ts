@@ -1,11 +1,40 @@
+import { createHash, randomBytes } from "node:crypto";
 import { basename, resolve } from "node:path";
 
-import type { DashboardResponse, Project, ProjectSnapshot, Worktree } from "@/shared/contracts";
+import type { DashboardResponse, Project, ProjectSnapshot, Reservation, Worktree } from "@/shared/contracts";
 import type { GitWorktreeReader } from "./git-worktrees";
 import { type LaunchCommandResolver, type NextTlsConfiguration, NodeLaunchCommandResolver } from "./launch-command";
 import { type LogWriter, nullLogWriter } from "./log-writer";
 import { ProcessManager } from "./process-manager";
 import type { NewProject, ReservationRequest, StateStore } from "./state-store";
+
+const AGENT_LEASE_DEFAULT_SECONDS = 30 * 60;
+const AGENT_LEASE_MAX_SECONDS = 8 * 60 * 60;
+
+interface OperationActor {
+  owner: string;
+  leaseToken?: string;
+}
+
+export interface AgentClaimRequest {
+  projectId: string;
+  worktreePath: string;
+  owner: string;
+  reason: string;
+  idempotencyKey: string;
+  ttlSeconds?: number;
+}
+
+export interface AgentClaimResult {
+  reservation: Reservation;
+  leaseToken: string;
+  snapshot: ProjectSnapshot;
+  operationError: string | null;
+}
+
+function leaseTokenHash(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
 export class ControlService {
   private readonly locks = new Map<string, Promise<unknown>>();
@@ -52,18 +81,28 @@ export class ControlService {
     return this.requireProject(project.id);
   }
 
-  async operate(projectId: string, operation: "start" | "stop" | "restart" | "switch", worktreePath?: string): Promise<void> {
+  async operate(
+    projectId: string,
+    operation: "start" | "stop" | "restart" | "switch",
+    worktreePath?: string,
+    actor: OperationActor = { owner: "local-user" },
+  ): Promise<void> {
     try {
       await this.serialized(projectId, async () => {
         const project = this.requireProject(projectId);
         if (operation === "stop") {
+          this.assertReservationAllows(
+            projectId,
+            this.processes.snapshot(projectId).worktreePath ?? project.selectedWorktreePath,
+            actor,
+          );
           await this.processes.stop(projectId);
           this.logs.controller("project.stopped", { projectId });
           return;
         }
         const worktrees = await this.git.list(project.repositoryPath);
         const selected = this.resolveWorktree(project, worktrees, worktreePath);
-        this.assertReservationAllows(projectId, selected.path);
+        this.assertReservationAllows(projectId, selected.path, actor);
         if (operation === "restart" || operation === "switch") await this.processes.stop(projectId);
         if (operation === "switch") this.store.setSelectedWorktree(projectId, selected.path);
         await this.processes.start(this.requireProject(projectId), selected.path);
@@ -88,6 +127,7 @@ export class ControlService {
       }
       const worktrees = await this.git.list(project.repositoryPath);
       const selected = this.resolveWorktree(project, worktrees);
+      this.assertReservationAllows(projectId, selected.path, { owner: "local-user" });
       const command = this.commands.resolve(selected.path, project.port, input);
       this.store.updateProjectLaunch(projectId, {
         tlsMode: command.tls.mode,
@@ -108,17 +148,104 @@ export class ControlService {
   }
 
   async reserve(input: ReservationRequest): Promise<void> {
-    const project = this.requireProject(input.projectId);
-    const worktrees = await this.git.list(project.repositoryPath);
-    const selected = this.resolveWorktree(project, worktrees, input.worktreePath);
-    this.store.acquireReservation({ ...input, worktreePath: selected.path });
-    this.logs.controller("reservation.acquired", { projectId: input.projectId, worktreePath: selected.path, owner: input.owner });
+    await this.serialized(input.projectId, async () => {
+      const project = this.requireProject(input.projectId);
+      const worktrees = await this.git.list(project.repositoryPath);
+      const selected = this.resolveWorktree(project, worktrees, input.worktreePath);
+      this.store.acquireReservation({ ...input, worktreePath: selected.path });
+      this.logs.controller("reservation.acquired", { projectId: input.projectId, worktreePath: selected.path, owner: input.owner });
+    });
   }
 
-  release(projectId: string, force = false): void {
-    this.requireProject(projectId);
-    this.store.releaseReservation(projectId, "local-user", force);
-    this.logs.controller(force ? "reservation.force_released" : "reservation.released", { projectId });
+  async release(projectId: string, force = false): Promise<void> {
+    await this.serialized(projectId, async () => {
+      this.requireProject(projectId);
+      this.store.releaseReservation(projectId, "local-user", force);
+      this.logs.controller(force ? "reservation.force_released" : "reservation.released", { projectId });
+    });
+  }
+
+  async claimProject(input: AgentClaimRequest, existingLeaseToken?: string): Promise<AgentClaimResult> {
+    return this.serialized(input.projectId, async () => {
+      const ttlSeconds = input.ttlSeconds ?? AGENT_LEASE_DEFAULT_SECONDS;
+      if (!Number.isInteger(ttlSeconds) || ttlSeconds < 30 || ttlSeconds > AGENT_LEASE_DEFAULT_SECONDS) {
+        throw new Error(`Agent lease TTL must be between 30 and ${AGENT_LEASE_DEFAULT_SECONDS} seconds.`);
+      }
+      if (!input.owner.startsWith("agent:mcp:")) throw new Error("Invalid MCP agent owner.");
+      if (!input.reason.trim()) throw new Error("A claim reason is required.");
+      if (!input.idempotencyKey.trim() || input.idempotencyKey.length > 120) throw new Error("Invalid idempotency key.");
+
+      const project = this.requireProject(input.projectId);
+      const worktrees = await this.git.list(project.repositoryPath);
+      const selected = this.resolveWorktree(project, worktrees, input.worktreePath);
+      const leaseToken = existingLeaseToken ?? randomBytes(32).toString("base64url");
+      const reservation = this.store.acquireReservation({
+        projectId: input.projectId,
+        worktreePath: selected.path,
+        kind: "agent",
+        owner: input.owner,
+        reason: input.reason.trim(),
+        ttlSeconds,
+        maximumLifetimeSeconds: AGENT_LEASE_MAX_SECONDS,
+        leaseTokenHash: leaseTokenHash(leaseToken),
+        idempotencyKey: input.idempotencyKey,
+      });
+
+      let operationError: string | null = null;
+      try {
+        this.assertReservationAllows(input.projectId, selected.path, { owner: input.owner, leaseToken });
+        const runtime = this.processes.snapshot(input.projectId);
+        if (runtime.phase !== "running" || runtime.worktreePath !== selected.path) {
+          if (runtime.phase !== "stopped") await this.processes.stop(input.projectId);
+          if (project.selectedWorktreePath !== selected.path) this.store.setSelectedWorktree(input.projectId, selected.path);
+          await this.processes.start(this.requireProject(input.projectId), selected.path);
+        }
+      } catch (error) {
+        operationError = error instanceof Error ? error.message : String(error);
+        this.logs.controller("agent.claim_switch_failed", {
+          projectId: input.projectId,
+          reservationId: reservation.id,
+          owner: input.owner,
+          error: operationError,
+        });
+      }
+      this.logs.controller("agent.claimed", {
+        projectId: input.projectId,
+        reservationId: reservation.id,
+        owner: input.owner,
+        worktreePath: selected.path,
+      });
+      return {
+        reservation,
+        leaseToken,
+        snapshot: await this.snapshot(this.requireProject(input.projectId)),
+        operationError,
+      };
+    });
+  }
+
+  renewAgentClaim(projectId: string, reservationId: string, owner: string, leaseToken: string, ttlSeconds = AGENT_LEASE_DEFAULT_SECONDS): Reservation {
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds < 30 || ttlSeconds > AGENT_LEASE_DEFAULT_SECONDS) {
+      throw new Error(`Agent lease TTL must be between 30 and ${AGENT_LEASE_DEFAULT_SECONDS} seconds.`);
+    }
+    const reservation = this.store.renewAgentReservation(
+      projectId,
+      reservationId,
+      owner,
+      leaseTokenHash(leaseToken),
+      ttlSeconds,
+    );
+    this.logs.controller("agent.claim_renewed", { projectId, reservationId, owner, expiresAt: reservation.expiresAt });
+    return reservation;
+  }
+
+  releaseAgentClaim(projectId: string, reservationId: string, owner: string, leaseToken: string): void {
+    this.store.releaseAgentReservation(projectId, reservationId, owner, leaseTokenHash(leaseToken));
+    this.logs.controller("agent.claim_released", { projectId, reservationId, owner });
+  }
+
+  async projectSnapshot(projectId: string): Promise<ProjectSnapshot> {
+    return this.snapshot(this.requireProject(projectId));
   }
 
   async shutdown(): Promise<void> {
@@ -154,8 +281,12 @@ export class ControlService {
     return selected;
   }
 
-  private assertReservationAllows(projectId: string, worktreePath: string): void {
-    const reservation = this.store.getActiveReservation(projectId);
+  private assertReservationAllows(projectId: string, worktreePath: string | null, actor: OperationActor): void {
+    const reservation = this.store.authorizeReservation(
+      projectId,
+      actor.owner,
+      actor.leaseToken ? leaseTokenHash(actor.leaseToken) : undefined,
+    );
     if (reservation && reservation.worktreePath !== worktreePath) {
       throw new Error(`Projekt jest zablokowany na ${basename(reservation.worktreePath)} przez ${reservation.owner}.`);
     }

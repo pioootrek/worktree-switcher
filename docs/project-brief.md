@@ -159,12 +159,12 @@ text and an icon so meaning does not depend on color perception.
 - Reverse proxying with transparent HMR WebSocket support.
 - Windows process-tree support; the initial target is Linux and macOS.
 
-## Topic under discussion
+## Agent integration
 
-- A local MCP integration that exposes project/runtime status as resources and
-  lets an agent atomically reserve, switch, renew, and release its own lease.
-
-The MCP adapter is proposed after the reservation-capable MVP. Its working
+A loopback-only MCP Streamable HTTP listener exposes project/runtime status as
+resources and lets an agent atomically reserve, switch, renew, and release its
+own expiring lease. It shares the controller process and service layer, loads
+the MCP SDK lazily, and never gives the model a raw lease token. The complete
 design is in `docs/reservations-and-mcp.md`.
 
 ## Current decisions
@@ -179,6 +179,8 @@ design is in `docs/reservations-and-mcp.md`.
   `new-york` Radix variant, Tailwind CSS, and token-based theming.
 - Include visible reservations in MVP. Human locks may be indefinite; agent
   leases expire and renew. Force release remains a human UI/CLI action.
+- Serve authenticated MCP Streamable HTTP on a dedicated loopback listener in
+  the existing controller; keep remote MCP and stdio compatibility deferred.
 - Permit dirty worktrees with a warning, stop owned child processes when the
   controller exits, and never kill an unknown process occupying a port.
 - Publish the npm package and executable as `worktree-switcher`; default to a

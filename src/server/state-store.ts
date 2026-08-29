@@ -27,6 +27,9 @@ export interface ReservationRequest {
   owner: string;
   reason?: string;
   ttlSeconds?: number;
+  maximumLifetimeSeconds?: number;
+  leaseTokenHash?: string;
+  idempotencyKey?: string;
 }
 
 export interface StateStore {
@@ -37,6 +40,9 @@ export interface StateStore {
   setSelectedWorktree(projectId: string, path: string): void;
   getActiveReservation(projectId: string): Reservation | null;
   acquireReservation(input: ReservationRequest): Reservation;
+  authorizeReservation(projectId: string, owner: string, leaseTokenHash?: string): Reservation | null;
+  renewAgentReservation(projectId: string, reservationId: string, owner: string, leaseTokenHash: string, ttlSeconds: number): Reservation;
+  releaseAgentReservation(projectId: string, reservationId: string, owner: string, leaseTokenHash: string): void;
   releaseReservation(projectId: string, owner: string, force?: boolean): void;
   close(): void;
 }

@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -58,6 +59,36 @@ describe("SqliteStateStore", () => {
       kind: "agent",
       owner: "agent:test",
     })).toThrow("co najmniej");
+    store.close();
+  });
+
+  it("renews and releases an idempotent agent lease only with its token hash", () => {
+    const store = createStore();
+    const project = store.addProject(projectInput("Agent API", "/code/agent-api", 3215));
+    const leaseTokenHash = createHash("sha256").update("lease-secret").digest("hex");
+    const request = {
+      projectId: project.id,
+      worktreePath: "/code/agent-api",
+      kind: "agent" as const,
+      owner: "agent:mcp:session-1",
+      reason: "Run integration checks",
+      ttlSeconds: 60,
+      maximumLifetimeSeconds: 3600,
+      leaseTokenHash,
+      idempotencyKey: "run-1",
+    };
+    const lease = store.acquireReservation(request);
+    expect(store.acquireReservation(request).id).toBe(lease.id);
+    expect(() => store.authorizeReservation(project.id, request.owner, "wrong"))
+      .toThrow("token");
+    expect(store.authorizeReservation(project.id, request.owner, leaseTokenHash)?.id).toBe(lease.id);
+
+    const renewed = store.renewAgentReservation(project.id, lease.id, request.owner, leaseTokenHash, 120);
+    expect(new Date(renewed.expiresAt!).getTime()).toBeGreaterThan(new Date(lease.expiresAt!).getTime());
+    expect(() => store.releaseAgentReservation(project.id, lease.id, request.owner, "wrong"))
+      .toThrow("token");
+    store.releaseAgentReservation(project.id, lease.id, request.owner, leaseTokenHash);
+    expect(store.getActiveReservation(project.id)).toBeNull();
     store.close();
   });
 
@@ -122,5 +153,42 @@ describe("SqliteStateStore", () => {
     const migrated = new SqliteStateStore(databasePath);
     expect(migrated.getProject("legacy")).toMatchObject({ tlsMode: "off", tlsKeyPath: null });
     migrated.close();
+  });
+
+  it("adds agent lease columns to a version 3 database", () => {
+    const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-store-v3-"));
+    directories.push(directory);
+    const databasePath = join(directory, "state.sqlite3");
+    const database = new Database(databasePath);
+    database.exec(`
+      CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      INSERT INTO schema_migrations VALUES (1, 'now'), (2, 'now'), (3, 'now');
+      CREATE TABLE projects (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, repository_path TEXT NOT NULL UNIQUE,
+        port INTEGER NOT NULL UNIQUE, tls_mode TEXT NOT NULL DEFAULT 'off',
+        tls_key_path TEXT, tls_cert_path TEXT, tls_ca_path TEXT,
+        executable TEXT NOT NULL, args_json TEXT NOT NULL, healthcheck_path TEXT NOT NULL,
+        startup_timeout_ms INTEGER NOT NULL, selected_worktree_path TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE reservations (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, worktree_path TEXT NOT NULL,
+        kind TEXT NOT NULL, owner TEXT NOT NULL, reason TEXT, created_at TEXT NOT NULL,
+        expires_at TEXT, released_at TEXT, released_by TEXT
+      );
+    `);
+    database.close();
+
+    const migrated = new SqliteStateStore(databasePath);
+    migrated.close();
+    const inspected = new Database(databasePath);
+    const columns = inspected.prepare("PRAGMA table_info(reservations)").all() as Array<{ name: string }>;
+    expect(columns.map(({ name }) => name)).toEqual(expect.arrayContaining([
+      "maximum_expires_at",
+      "token_hash",
+      "idempotency_key",
+    ]));
+    expect(inspected.prepare("SELECT 1 FROM schema_migrations WHERE version = 4").get()).toBeTruthy();
+    inspected.close();
   });
 });

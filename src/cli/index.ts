@@ -13,10 +13,12 @@ import { ControlService } from "../server/control-service";
 import { DirectoryBrowser } from "../server/directory-browser";
 import { EventStream } from "../server/events";
 import { FileLogWriter } from "../server/log-writer";
+import { createMcpControllerServer } from "../server/mcp-http-server";
 import { SystemGitWorktreeReader } from "../server/git-worktrees";
 import { createControllerServer } from "../server/http-server";
 import { resolveAppPaths } from "../server/paths";
 import { ProcessManager } from "../server/process-manager";
+import { loadOrCreateSecret } from "../server/secret-file";
 import { SqliteStateStore } from "../server/sqlite-store";
 
 function option(name: string): string | undefined {
@@ -30,6 +32,17 @@ async function main(): Promise<void> {
   const paths = resolveAppPaths(option("--data-dir"), option("--state-dir"));
   if (command === "config" && process.argv[3] === "path") {
     console.log(paths.databasePath);
+    return;
+  }
+  const mcpPort = Number(option("--mcp-port") ?? 47832);
+  if (!Number.isInteger(mcpPort) || mcpPort < 1024 || mcpPort > 65535) {
+    throw new Error(translate(locale, "cli.invalidMcpPort"));
+  }
+  if (command === "config" && process.argv[3] === "mcp") {
+    console.log(JSON.stringify({
+      url: `http://127.0.0.1:${mcpPort}/mcp`,
+      headers: { Authorization: `Bearer ${loadOrCreateSecret(paths.mcpTokenPath)}` },
+    }, null, 2));
     return;
   }
   if (command !== "start") {
@@ -52,20 +65,50 @@ async function main(): Promise<void> {
   const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs);
   const accessToken = randomBytes(32).toString("base64url");
   const sessionId = randomBytes(8).toString("hex");
+  const mcpSessions = new Set<string>();
+  const mcpEndpoint = `http://127.0.0.1:${mcpPort}/mcp`;
+  const mcp = process.argv.includes("--no-mcp") ? null : createMcpControllerServer({
+    service,
+    port: mcpPort,
+    accessToken: loadOrCreateSecret(paths.mcpTokenPath),
+    onDiagnostic: (message, details) => {
+      const mcpSessionId = typeof details?.sessionId === "string" ? details.sessionId : null;
+      if (message === "mcp.session_started" && mcpSessionId) {
+        mcpSessions.add(mcpSessionId);
+        events.publish();
+      } else if (message === "mcp.session_closed" && mcpSessionId) {
+        mcpSessions.delete(mcpSessionId);
+        events.publish();
+      }
+      logs.controller(message, details);
+    },
+  });
   const controller = createControllerServer({
     service,
     directoryBrowser: new DirectoryBrowser(option("--browse-root") ?? homedir()),
     events,
+    mcpStatus: () => ({
+      phase: !mcp ? "disabled" : mcp.server.listening ? "running" : "stopped",
+      endpoint: mcp ? mcpEndpoint : null,
+      transport: "streamable-http",
+      network: "loopback",
+      authentication: "bearer",
+      activeSessions: mcpSessions.size,
+    }),
     webRoot,
     host,
     port,
     accessToken,
   });
-
-  await new Promise<void>((resolveListen, reject) => {
-    controller.server.once("error", reject);
-    controller.server.listen(port, host, resolveListen);
-  });
+  try {
+    await listen(controller.server, port, host);
+    if (mcp) await listen(mcp.server, mcpPort, "127.0.0.1");
+  } catch (error) {
+    await mcp?.close();
+    await controller.close();
+    await service.shutdown();
+    throw error;
+  }
   const browserHost = host === "0.0.0.0" ? "127.0.0.1" : host;
   const lanHost = host === "0.0.0.0" ? findLanAddress() ?? browserHost : host;
   const localAddress = pairingUrl(browserHost, port, accessToken, sessionId);
@@ -74,6 +117,10 @@ async function main(): Promise<void> {
   writeCliLine(translate(locale, "cli.accessLink", { url: lanAddress }));
   writeCliLine(translate(locale, "cli.logs", { path: paths.logDirectory }));
   writeCliLine(translate(locale, "cli.secret"));
+  if (mcp) {
+    writeCliLine(translate(locale, "cli.mcpListening", { url: mcpEndpoint }));
+    writeCliLine(translate(locale, "cli.mcpConfig"));
+  }
 
   if (!process.argv.includes("--no-open")) openBrowser(localAddress);
   let closing = false;
@@ -81,11 +128,19 @@ async function main(): Promise<void> {
     if (closing) return;
     closing = true;
     writeCliLine(translate(locale, "cli.stopping"));
+    await mcp?.close();
     await controller.close();
     await service.shutdown();
   };
   process.once("SIGINT", () => void shutdown().then(() => process.exit(0)));
   process.once("SIGTERM", () => void shutdown().then(() => process.exit(0)));
+}
+
+async function listen(server: import("node:http").Server, port: number, host: string): Promise<void> {
+  await new Promise<void>((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(port, host, resolveListen);
+  });
 }
 
 function findLanAddress(): string | null {
