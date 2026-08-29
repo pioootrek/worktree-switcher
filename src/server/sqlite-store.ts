@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 
 import Database from "better-sqlite3";
 
-import type { Project, Reservation } from "@/shared/contracts";
+import type { Project, Reservation, ServerCapacitySettings } from "@/shared/contracts";
 import type { ProjectRegistration, ReservationRequest, StateStore } from "./state-store";
 
 type ProjectRow = {
@@ -91,6 +91,20 @@ const schema = `
   CREATE TABLE IF NOT EXISTS audit_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS controller_settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS controller_audit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_type TEXT NOT NULL,
     actor TEXT NOT NULL,
     details_json TEXT NOT NULL,
@@ -223,6 +237,32 @@ export class SqliteStateStore implements StateStore {
       ).run(path, now, projectId);
       if (result.changes === 0) throw new Error("Nie znaleziono projektu.");
       this.audit(projectId, "worktree.selected", "local-user", { path });
+    })();
+  }
+
+  getServerCapacitySettings(): ServerCapacitySettings {
+    const row = this.database.prepare("SELECT value_json FROM controller_settings WHERE key = 'server_capacity'")
+      .get() as { value_json: string } | undefined;
+    if (!row) return { enabled: false, limit: 2 };
+    const value = JSON.parse(row.value_json) as Partial<ServerCapacitySettings>;
+    return {
+      enabled: value.enabled === true,
+      limit: Number.isInteger(value.limit) && value.limit! >= 1 && value.limit! <= 64 ? value.limit! : 2,
+    };
+  }
+
+  setServerCapacitySettings(settings: ServerCapacitySettings): void {
+    this.database.transaction(() => {
+      const now = new Date().toISOString();
+      this.database.prepare(`
+        INSERT INTO controller_settings(key, value_json, updated_at)
+        VALUES ('server_capacity', ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+      `).run(JSON.stringify(settings), now);
+      this.database.prepare(`
+        INSERT INTO controller_audit_events(event_type, actor, details_json, created_at)
+        VALUES ('server_capacity.updated', 'local-user', ?, ?)
+      `).run(JSON.stringify(settings), now);
     })();
   }
 
@@ -406,6 +446,15 @@ export class SqliteStateStore implements StateStore {
           WHERE kind = 'agent' AND released_at IS NULL AND idempotency_key IS NOT NULL
         `);
         this.recordMigration(4);
+      })();
+    }
+    if (!this.hasMigration(5)) {
+      this.database.transaction(() => {
+        this.database.prepare(`
+          INSERT OR IGNORE INTO controller_settings(key, value_json, updated_at)
+          VALUES ('server_capacity', ?, ?)
+        `).run(JSON.stringify({ enabled: false, limit: 2 }), new Date().toISOString());
+        this.recordMigration(5);
       })();
     }
   }

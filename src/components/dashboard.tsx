@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   GitBranch,
   GitCommitHorizontal,
+  Gauge,
   LoaderCircle,
   LockKeyhole,
   Languages,
@@ -34,11 +35,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Switch } from "@/components/ui/switch";
 import { DirectoryPicker } from "@/components/directory-picker";
 import { CertificateFilePicker } from "@/components/certificate-file-picker";
 import { useI18n } from "@/i18n/provider";
 import { dashboardSummary, type Translate } from "@/i18n/messages";
-import type { ControllerDashboardResponse, DevServerTlsMode, McpStatus, Project, ProjectSnapshot, RuntimeFailure, RuntimePhase } from "@/shared/contracts";
+import type { ControllerDashboardResponse, DevServerTlsMode, McpStatus, Project, ProjectSnapshot, RuntimeFailure, RuntimePhase, ServerCapacityStatus } from "@/shared/contracts";
+
+const EMPTY_CAPACITY: ServerCapacityStatus = { enabled: false, limit: 2, used: 0, available: null, holders: [] };
 
 const EMPTY_MCP_STATUS: McpStatus = {
   phase: "unknown",
@@ -57,7 +61,7 @@ async function parseResponse<T>(response: Response, fallback: string): Promise<T
 
 export function Dashboard() {
   const { locale, setLocale, t } = useI18n();
-  const [data, setData] = useState<ControllerDashboardResponse>({ projects: [], mcp: EMPTY_MCP_STATUS });
+  const [data, setData] = useState<ControllerDashboardResponse>({ projects: [], capacity: EMPTY_CAPACITY, mcp: EMPTY_MCP_STATUS });
   const [token, setToken] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +75,7 @@ export function Dashboard() {
         headers: { "Accept-Language": locale, "X-Worktree-Switcher-Token": accessToken },
       });
       const dashboard = await parseResponse<ControllerDashboardResponse>(response, t("http.error", { status: response.status }));
-      setData({ ...dashboard, mcp: dashboard.mcp ?? EMPTY_MCP_STATUS });
+      setData({ ...dashboard, capacity: dashboard.capacity ?? EMPTY_CAPACITY, mcp: dashboard.mcp ?? EMPTY_MCP_STATUS });
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -143,6 +147,7 @@ export function Dashboard() {
               </span>
               {dashboardSummary(locale, runningCount, data.projects.length)}
             </Badge>
+            <CapacityDialog status={data.capacity} mutate={mutate} setError={setError} />
             <McpStatusDialog status={data.mcp} />
             <Button
               variant="outline"
@@ -183,6 +188,90 @@ export function Dashboard() {
         )}
       </div>
     </main>
+  );
+}
+
+function CapacityDialog({
+  status,
+  mutate,
+  setError,
+}: {
+  status: ServerCapacityStatus;
+  mutate: (path: string, body: unknown, success: string) => Promise<void>;
+  setError: (message: string | null) => void;
+}) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [enabled, setEnabled] = useState(status.enabled);
+  const [limit, setLimit] = useState(String(status.limit));
+  const [pending, setPending] = useState(false);
+
+  const changeOpen = (next: boolean) => {
+    if (next) {
+      setEnabled(status.enabled);
+      setLimit(String(status.limit));
+    }
+    setOpen(next);
+  };
+
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setPending(true);
+    try {
+      await mutate(
+        "/api/settings/capacity",
+        { enabled, limit: Number(limit) },
+        t("capacity.saved"),
+      );
+      setOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={changeOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-2" aria-label={t("capacity.openSettings")}>
+          <Gauge aria-hidden />
+          {status.enabled ? `${status.used}/${status.limit}` : status.used}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t("capacity.title")}</DialogTitle>
+          <DialogDescription>{t("capacity.description")}</DialogDescription>
+        </DialogHeader>
+        <form className="space-y-5" onSubmit={(event) => void save(event)}>
+          <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
+            <div>
+              <Label htmlFor="capacity-enabled">{t("capacity.enabled")}</Label>
+              <p className="text-xs text-muted-foreground">{t("capacity.enabledHint")}</p>
+            </div>
+            <Switch id="capacity-enabled" checked={enabled} onCheckedChange={setEnabled} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="capacity-limit">{t("capacity.limit")}</Label>
+            <Input id="capacity-limit" type="number" min="1" max="64" value={limit} onChange={(event) => setLimit(event.target.value)} required />
+          </div>
+          <div className="rounded-lg border bg-black/15 p-3 text-sm">
+            <p>{t("capacity.usage", { used: status.used, limit: status.enabled ? status.limit : "∞" })}</p>
+            {status.holders.length > 0 ? (
+              <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                {status.holders.map((holder) => <li key={holder.projectId}>{holder.projectName} · {t(`phase.${holder.phase}`)}</li>)}
+              </ul>
+            ) : null}
+          </div>
+          <p className="text-xs text-muted-foreground">{t("capacity.loweringHint")}</p>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => changeOpen(false)}>{t("common.cancel")}</Button>
+            <Button type="submit" disabled={pending}>{pending && <LoaderCircle className="animate-spin" aria-hidden />}{t("common.save")}</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

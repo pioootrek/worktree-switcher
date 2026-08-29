@@ -105,6 +105,7 @@ Read-only MCP resources:
 
 ```text
 worktree-switcher://projects
+worktree-switcher://capacity
 worktree-switcher://projects/{projectId}/status
 worktree-switcher://projects/{projectId}/worktrees
 ```
@@ -112,6 +113,8 @@ worktree-switcher://projects/{projectId}/worktrees
 Initial MCP tools:
 
 ```text
+list_projects
+get_server_capacity
 get_project_status
 claim_project
 renew_project_claim
@@ -123,6 +126,11 @@ requested TTL, and idempotency key. It atomically acquires an agent lease and,
 when needed, switches the server. Its result contains an explicit lease handle
 but never exposes the raw lease token. The MCP session retains that secret and
 uses it for explicit and automatic renewals and release operations.
+
+If controller-wide server capacity is exhausted, a new claim remains held but
+reports the startup error explicitly. Agents can call `get_server_capacity`
+before claiming to read the configured limit, current usage, available slots,
+and projects holding them.
 
 Listing and status remain available without acquiring a lease. Mutations that
 would violate an existing reservation return a typed conflict. Arbitrary shell

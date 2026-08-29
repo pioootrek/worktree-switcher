@@ -6,6 +6,7 @@ import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import packageJson from "../../package.json";
+import type { ControllerDashboardResponse } from "../shared/contracts";
 import { systemLocale, translate } from "../i18n/messages";
 import { openBrowser } from "./browser";
 import { writeCliLine } from "./output";
@@ -206,7 +207,7 @@ async function handleServiceCommand(args: string[], paths: ReturnType<typeof res
     return;
   }
   if (action === "status") {
-    printServiceStatus(manager, paths);
+    await printServiceStatus(manager, paths);
     return;
   }
   if (action === "start") manager.start();
@@ -227,10 +228,10 @@ async function handleServiceCommand(args: string[], paths: ReturnType<typeof res
     throw new Error("Available service commands: install, status, start, stop, restart, url, open, uninstall");
   }
   writeCliLine(`Service ${action} requested.`);
-  printServiceStatus(manager, paths);
+  await printServiceStatus(manager, paths);
 }
 
-function printServiceStatus(manager: UserServiceManager, paths: ReturnType<typeof resolveAppPaths>): void {
+async function printServiceStatus(manager: UserServiceManager, paths: ReturnType<typeof resolveAppPaths>): Promise<void> {
   const status = manager.status();
   const access = readServiceAccess(paths.serviceAccessPath);
   const currentAccess = access && status.pid === access.pid ? access : null;
@@ -248,6 +249,26 @@ function printServiceStatus(manager: UserServiceManager, paths: ReturnType<typeo
     if (currentAccess.mcpEndpoint) writeCliLine(`MCP: ${currentAccess.mcpEndpoint}`);
     writeCliLine(`Logs: ${currentAccess.logDirectory}`);
     writeCliLine("Access URL: worktree-switcher service url");
+    try {
+      const accessUrl = new URL(currentAccess.accessUrl);
+      const token = new URLSearchParams(accessUrl.hash.slice(1)).get("token");
+      if (token) {
+        const response = await fetch(`${currentAccess.dashboardEndpoint}/api/dashboard`, {
+          headers: { "X-Worktree-Switcher-Token": token },
+          signal: AbortSignal.timeout(1_000),
+        });
+        if (response.ok) {
+          const dashboard = await response.json() as ControllerDashboardResponse;
+          const capacity = dashboard.capacity;
+          if (capacity) {
+            writeCliLine(`Server capacity: ${capacity.used}/${capacity.enabled ? capacity.limit : "unlimited"}`);
+            if (capacity.holders.length) writeCliLine(`Capacity holders: ${capacity.holders.map(({ projectName }) => projectName).join(", ")}`);
+          }
+        }
+      }
+    } catch {
+      writeCliLine("Server capacity: unavailable");
+    }
   } else {
     writeCliLine(`Logs: ${paths.logDirectory}`);
   }

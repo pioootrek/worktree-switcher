@@ -1,4 +1,4 @@
-import type { DevServerTlsMode, Project, Reservation } from "@/shared/contracts";
+import type { DevServerTlsMode, Project, Reservation, ServerCapacitySettings } from "@/shared/contracts";
 
 export interface NewProject {
   name: string;
@@ -38,6 +38,8 @@ export interface StateStore {
   addProject(input: ProjectRegistration): Project;
   updateProjectLaunch(projectId: string, input: ProjectLaunchUpdate): void;
   setSelectedWorktree(projectId: string, path: string): void;
+  getServerCapacitySettings(): ServerCapacitySettings;
+  setServerCapacitySettings(settings: ServerCapacitySettings): void;
   getActiveReservation(projectId: string): Reservation | null;
   acquireReservation(input: ReservationRequest): Reservation;
   authorizeReservation(projectId: string, owner: string, leaseTokenHash?: string): Reservation | null;

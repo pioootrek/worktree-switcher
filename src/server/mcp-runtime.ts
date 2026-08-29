@@ -153,6 +153,12 @@ export class McpRuntime {
       async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(await projectList(), null, 2) }] }),
     );
     server.registerResource(
+      "server-capacity",
+      "worktree-switcher://capacity",
+      { description: "Global managed-server capacity and current slot holders", mimeType: "application/json" },
+      async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(await english(() => this.service.serverCapacity()), null, 2) }] }),
+    );
+    server.registerResource(
       "project-status",
       new ResourceTemplate("worktree-switcher://projects/{projectId}/status", {
         list: async () => ({ resources: (await projectList()).map((project) => ({
@@ -187,6 +193,11 @@ export class McpRuntime {
       description: "List registered projects with their runtime placement and active reservation.",
       annotations: { readOnlyHint: true, idempotentHint: true },
     }, async () => jsonContent(await projectList()));
+
+    server.registerTool("get_server_capacity", {
+      description: "Read the global managed-server limit, current usage, available slots, and slot holders.",
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    }, async () => jsonContent(await english(() => this.service.serverCapacity())));
 
     server.registerTool("get_project_status", {
       description: "Read the full runtime, reservation, and selected-worktree status of one project.",

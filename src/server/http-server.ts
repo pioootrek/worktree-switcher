@@ -80,6 +80,15 @@ function parseTlsSettings(value: unknown): {
   return { mode, keyPath: nullablePath("keyPath"), certPath: nullablePath("certPath"), caPath: nullablePath("caPath") };
 }
 
+function parseCapacitySettings(value: unknown): { enabled: boolean; limit: number } {
+  const record = strictRecord(value, ["enabled", "limit"]);
+  if (typeof record.enabled !== "boolean") throw new Error("Nieprawidłowe pole enabled.");
+  if (!Number.isInteger(record.limit) || (record.limit as number) < 1 || (record.limit as number) > 64) {
+    throw new Error("Limit serwerów musi być liczbą całkowitą od 1 do 64.");
+  }
+  return { enabled: record.enabled, limit: record.limit as number };
+}
+
 function parseReservation(value: unknown): {
   action: "acquire" | "release" | "force-release";
   worktreePath?: string;
@@ -129,6 +138,7 @@ function messageFrom(error: unknown): string {
 function localizedDashboard(dashboard: DashboardResponse, locale: "pl" | "en"): DashboardResponse {
   if (locale === "pl") return dashboard;
   return {
+    ...dashboard,
     projects: dashboard.projects.map((snapshot) => ({
       ...snapshot,
       discoveryError: snapshot.discoveryError
@@ -225,6 +235,12 @@ export function createControllerServer(options: {
           json(response, 201, { project });
           return;
         }
+        if (request.method === "POST" && url.pathname === "/api/settings/capacity") {
+          const capacity = options.service.setServerCapacity(parseCapacitySettings(await readJson(request)));
+          options.events.publish();
+          json(response, 200, { capacity });
+          return;
+        }
         const operationMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/operation$/);
         if (request.method === "POST" && operationMatch) {
           const input = parseOperation(await readJson(request));
@@ -274,7 +290,7 @@ export function createControllerServer(options: {
       serveStatic(options.webRoot, url.pathname, response, request.method === "HEAD");
     } catch (error) {
       const rawMessage = messageFrom(error);
-      const conflict = /zajęty|zablokowany|UNIQUE constraint/i.test(rawMessage);
+      const conflict = /zajęty|zablokowany|osiągnięto limit|UNIQUE constraint/i.test(rawMessage);
       const message = localizeServerMessage(rawMessage, locale);
       json(response, conflict ? 409 : 400, { error: message });
     }

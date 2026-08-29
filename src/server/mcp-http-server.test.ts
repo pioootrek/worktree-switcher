@@ -69,7 +69,8 @@ describe("MCP loopback server", () => {
       expiresAt: "2026-08-29T00:30:00.000Z",
       maximumExpiresAt: "2026-08-29T08:00:00.000Z",
     };
-    const dashboard = vi.fn(async (): Promise<DashboardResponse> => ({ projects: [snapshot] }));
+    const capacity = { enabled: true, limit: 2, used: 1, available: 1, holders: [{ projectId, projectName: "Web", phase: "running" as const }] };
+    const dashboard = vi.fn(async (): Promise<DashboardResponse> => ({ projects: [snapshot], capacity }));
     const claimProject = vi.fn(async () => ({
       reservation,
       leaseToken: "never-return-this-lease-secret",
@@ -79,6 +80,7 @@ describe("MCP loopback server", () => {
     const releaseAgentClaim = vi.fn();
     const service = {
       dashboard,
+      serverCapacity: vi.fn(() => capacity),
       projectSnapshot: vi.fn(async () => snapshot),
       claimProject,
       renewAgentClaim: vi.fn(() => reservation),
@@ -108,12 +110,17 @@ describe("MCP loopback server", () => {
     await client.connect(transport);
     expect((await client.listTools()).tools.map(({ name }) => name)).toEqual([
       "list_projects",
+      "get_server_capacity",
       "get_project_status",
       "list_worktrees",
       "claim_project",
       "renew_project_claim",
       "release_project_claim",
     ]);
+
+    const capacityResult = await client.callTool({ name: "get_server_capacity", arguments: {} });
+    const capacityText = (capacityResult as { content: Array<{ type: "text"; text: string }> }).content[0].text;
+    expect(JSON.parse(capacityText)).toMatchObject({ enabled: true, limit: 2, used: 1, available: 1 });
 
     const claim = await client.callTool({
       name: "claim_project",

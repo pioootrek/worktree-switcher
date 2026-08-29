@@ -70,6 +70,24 @@ export interface ProjectSnapshot {
 
 export interface DashboardResponse {
   projects: ProjectSnapshot[];
+  capacity: ServerCapacityStatus;
+}
+
+export interface ServerCapacitySettings {
+  enabled: boolean;
+  limit: number;
+}
+
+export interface ServerCapacityHolder {
+  projectId: string;
+  projectName: string;
+  phase: "starting" | "running" | "stopping";
+}
+
+export interface ServerCapacityStatus extends ServerCapacitySettings {
+  used: number;
+  available: number | null;
+  holders: ServerCapacityHolder[];
 }
 
 export interface McpStatus {

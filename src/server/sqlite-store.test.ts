@@ -129,6 +129,14 @@ describe("SqliteStateStore", () => {
     store.close();
   });
 
+  it("persists controller-wide server capacity settings", () => {
+    const store = createStore();
+    expect(store.getServerCapacitySettings()).toEqual({ enabled: false, limit: 2 });
+    store.setServerCapacitySettings({ enabled: true, limit: 3 });
+    expect(store.getServerCapacitySettings()).toEqual({ enabled: true, limit: 3 });
+    store.close();
+  });
+
   it("adds TLS columns to a version 2 database", () => {
     const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-store-v2-"));
     directories.push(directory);
@@ -189,6 +197,7 @@ describe("SqliteStateStore", () => {
       "idempotency_key",
     ]));
     expect(inspected.prepare("SELECT 1 FROM schema_migrations WHERE version = 4").get()).toBeTruthy();
+    expect(inspected.prepare("SELECT 1 FROM schema_migrations WHERE version = 5").get()).toBeTruthy();
     inspected.close();
   });
 });

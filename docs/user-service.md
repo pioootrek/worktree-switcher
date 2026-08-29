@@ -97,7 +97,8 @@ node dist/cli/index.js service status
 
 Status reports the service state, definition path, controller PID, uptime,
 restart count when available, version, endpoints, log directory, CPU use, and
-resident memory for the controller process.
+resident memory for the controller process. When the controller API is
+reachable, it also reports managed-server capacity and current slot holders.
 
 Open the dashboard:
 

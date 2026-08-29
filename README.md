@@ -30,6 +30,7 @@ second copy behind your back.
 - Let MCP clients inspect projects and manage their own claims.
 - Run Next.js development servers over HTTP or development HTTPS.
 - Run the controller in a terminal or as a user service on Linux and macOS.
+- Optionally cap the number of concurrently running managed servers.
 - Use the dashboard in English or Polish. English is the default.
 
 ## Quick start
@@ -92,6 +93,12 @@ configuration options, upgrades, logs, Linux session behavior, and removal.
 Each project owns one runtime slot. A switch stops that project's current
 process tree, starts the selected worktree on the same port, and waits for the
 port to become ready. Operations for other projects continue independently.
+
+The gauge in the dashboard configures an optional controller-wide capacity.
+Each starting or running server consumes one slot. A switch retains its current
+slot, while a failed start releases it. Lowering the limit never stops an
+already running server; new starts remain blocked until usage falls below the
+configured limit.
 
 Dirty worktrees are allowed. The dashboard warns you but does not block the
 server.
@@ -159,6 +166,7 @@ Available tools:
 | Tool | What it does |
 | --- | --- |
 | `list_projects` | Lists registered projects and their runtime placement |
+| `get_server_capacity` | Reads the global server limit, usage, and slot holders |
 | `get_project_status` | Reads runtime, claim, and selected-worktree state |
 | `list_worktrees` | Lists worktrees discovered for a project |
 | `claim_project` | Claims a worktree and moves or starts its server |
