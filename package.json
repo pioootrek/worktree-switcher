@@ -2,16 +2,31 @@
   "name": "worktree-switcher",
   "version": "0.0.1",
   "private": true,
-  "description": "Local control plane for worktree-backed development servers",
+  "description": "Switch development servers between Git worktrees without changing ports",
+  "license": "MIT",
+  "author": "pioootrek",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pioootrek/worktree-switcher.git"
+  },
+  "homepage": "https://github.com/pioootrek/worktree-switcher#readme",
+  "bugs": {
+    "url": "https://github.com/pioootrek/worktree-switcher/issues"
+  },
   "type": "module",
   "bin": {
     "worktree-switcher": "dist/cli/index.js"
   },
   "files": [
-    "dist",
+    "dist/cli",
     "out",
     "skills",
-    "README.md"
+    "docs/dependency-licenses.md",
+    "docs/user-service.md",
+    "docs/reservations-and-mcp.md",
+    "LICENSE",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "engines": {
     "node": ">=22"

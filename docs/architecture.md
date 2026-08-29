@@ -16,8 +16,8 @@ no `next start` process and no server rendering at runtime.
 
 The process contains four replaceable layers:
 
-1. A thin loopback HTTP layer serving static assets, JSON endpoints, and an
-   SSE event stream.
+1. A thin HTTP layer serving static assets, JSON endpoints, and an SSE event
+   stream on the configured local interface.
 2. Application services coordinating projects, switching, readiness, and
    configuration.
 3. Domain interfaces for persistence, Git inspection, process execution,
@@ -121,18 +121,18 @@ major supported platforms, and avoids depending on the current release-candidate
 status of Node's built-in `node:sqlite` module. The driver remains private to
 the adapter so it can be replaced without changing application services.
 
-On Linux the database lives below
-`$XDG_DATA_HOME/worktree-switcher/worktree-switcher.db`, falling back to
-`~/.local/share/worktree-switcher/worktree-switcher.db`. Logs live below
+On Linux the database lives at
+`$XDG_DATA_HOME/worktree-switcher/state.sqlite3`, falling back to
+`~/.local/share/worktree-switcher/state.sqlite3`. Logs live below
 `$XDG_STATE_HOME/worktree-switcher/`, falling back to
-`~/.local/state/worktree-switcher/`. Other platforms use their native user data
-and state locations.
+`~/.local/state/worktree-switcher/`. The same environment variables and
+fallback directories are used on the supported macOS build.
 
 The controller opens one database connection, enables foreign keys and WAL,
 uses prepared statements, and runs numbered migrations before accepting
-requests. A process lock prevents two controller instances from owning the
-same database and process set. Stored PIDs are hints only; restart
-reconciliation verifies process identity before acting on them.
+requests. A state-directory lock prevents two controller instances with the
+same runtime configuration from owning the process set. Stored PIDs are hints
+only; restart reconciliation verifies process identity before acting on them.
 
 Reservation acquisition uses a short `BEGIN IMMEDIATE` transaction: expire old
 leases, check the active reservation, insert the new reservation, and append
@@ -144,7 +144,7 @@ The initial schema contains `schema_migrations`, `settings`, `projects`,
 metadata are not stored as relational history in the MVP. Database backup uses
 the SQLite backup API rather than copying live database/WAL files.
 
-Accounts would additionally require authentication, authorization, ownership,
+Accounts would also require authentication, authorization, ownership,
 and audit semantics; SQLite alone does not make the application multi-user.
 
 ## Project configuration model
@@ -195,30 +195,68 @@ environment mechanism and must not be copied into the database by default.
 ## CLI and package
 
 The public npm package is `worktree-switcher` with one `bin` entry of the same
-name. The executable supports:
+name. The package has not been published yet. The built executable currently
+supports:
 
 ```text
-worktree-switcher                 # alias of start
-worktree-switcher start [--no-open]
-worktree-switcher project add <path>
-worktree-switcher project list
+worktree-switcher [start] [--no-open]
 worktree-switcher config path
-worktree-switcher doctor
+worktree-switcher config mcp
+worktree-switcher service install [--refresh]
+worktree-switcher service status|start|stop|restart|open|url|uninstall
 ```
 
-Recommended daily installation:
+Project registration still belongs to the dashboard. Project removal, CLI
+project management, and `doctor` are backlog items, not part of the current
+interface.
+
+Until the package is published, source-checkout commands use the built entry
+point:
 
 ```bash
-npm install --global worktree-switcher
-worktree-switcher
+node dist/cli/index.js start
+node dist/cli/index.js service install
 ```
 
-Evaluation without installation:
+Foreground mode is the evaluation and diagnostic path. The recommended daily
+setup is an explicit user-service installation. Linux uses
+`~/.config/systemd/user/worktree-switcher.service`; macOS uses
+`~/Library/LaunchAgents/dev.worktree-switcher.controller.plist`.
+
+The generated definition contains absolute executable, dashboard, data, and
+state paths. Its environment has `NODE_ENV=production` and a controlled `PATH`
+that includes the Node.js executable directory and standard system binary
+directories. The service starts with the user's platform session. Both
+platform definitions throttle failure retries to five seconds; systemd also
+caps the restart burst.
+
+The service never stores pairing URLs or bearer tokens in its definition or
+manager logs. Once listeners are ready, the controller writes the current
+browser URL to an owner-only state file. `service open` reads it without
+printing it; `service url` prints it only after an explicit request.
+
+`service status` combines manager state with the runtime access record and a
+single `ps` sample. It reports PID, uptime, version, endpoints, restart and exit
+data when the platform provides them, controller RSS, controller CPU, and log
+locations. Full process-tree resource monitoring for managed servers remains a
+separate feature.
+
+The controller acquires an atomic state-directory lock before opening SQLite,
+binding listeners, or creating a process manager. A live lock rejects a second
+foreground or service instance that uses the same state directory. A stale
+lock is replaced only after its PID no longer exists.
+
+On normal `SIGINT` or `SIGTERM`, the controller closes listeners and gracefully
+stops every process tree it owns. systemd's `KillMode=control-group` and the
+LaunchAgent process-group policy cover unexpected controller failure. Unknown
+processes that happen to occupy configured project ports remain untouched.
+
+Upgrade refresh is explicit:
 
 ```bash
-npx worktree-switcher@1
+worktree-switcher service install --refresh
 ```
 
-Foreground operation is the default because ownership, logs, shutdown, and
-resource use remain visible. Installation as a login/system service is a
-separate future feature and must be opt-in.
+Without `--refresh`, installation refuses to replace a definition that points
+at different paths or settings. Uninstall removes only the user-service
+artifact and preserves the database, tokens, configuration, and logs.

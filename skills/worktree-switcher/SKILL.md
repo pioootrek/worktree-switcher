@@ -20,6 +20,19 @@ logs, issues, or chat. If the Worktree Switcher tools are unavailable, say so
 and follow the repository's normal development instructions. Do not invent an
 endpoint or token.
 
+## Check the controller without exposing credentials
+
+When the user asks why MCP is unavailable and the local CLI exists, you may run
+`worktree-switcher service status`. This is read-only and does not print the
+browser pairing token or MCP bearer token.
+
+Do not install, uninstall, stop, or restart the user service unless the user
+explicitly asks for that lifecycle change. Do not run `service url` as a
+diagnostic command. It prints the private browser URL.
+
+If the service is stopped, report that state. Do not bypass it by starting the
+managed project with `pnpm`, `npm`, `yarn`, `bun`, or a framework CLI.
+
 ## Inspect before acting
 
 Use `list_projects` to find the registered project. Use `list_worktrees` to
