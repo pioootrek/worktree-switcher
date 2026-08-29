@@ -39,7 +39,7 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "config" && process.argv[3] === "path") {
-    console.log(paths.databasePath);
+    writeCliLine(paths.databasePath);
     return;
   }
   const mcpPort = Number(option("--mcp-port") ?? 47832);
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
     throw new Error(translate(locale, "cli.invalidMcpPort"));
   }
   if (command === "config" && process.argv[3] === "mcp") {
-    console.log(JSON.stringify({
+    writeCliLine(JSON.stringify({
       url: `http://127.0.0.1:${mcpPort}/mcp`,
       headers: { Authorization: `Bearer ${loadOrCreateSecret(paths.mcpTokenPath)}` },
     }, null, 2));

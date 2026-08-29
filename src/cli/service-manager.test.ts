@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { renderLaunchAgent, renderSystemdUnit, type ServiceCommandRunner, UserServiceManager } from "./service-manager";
+import { renderLaunchAgent, renderSystemdUnit, resolveServiceExecutablePath, type ServiceCommandRunner, UserServiceManager } from "./service-manager";
 
 const directories: string[] = [];
 const installOptions = {
@@ -28,7 +28,7 @@ describe("user service definitions", () => {
     expect(unit).toContain('"/home/me/data%%dir"');
     expect(unit).toContain("Restart=on-failure\nRestartSec=5");
     expect(unit).toContain("KillMode=control-group");
-    expect(unit).toContain('Environment="PATH=/opt/node/bin:/usr/local/bin:/usr/bin:/bin"');
+    expect(unit).toContain(`Environment="PATH=${resolveServiceExecutablePath(installOptions.nodePath)}"`);
     expect(unit).not.toContain("token=");
   });
 
@@ -38,8 +38,23 @@ describe("user service definitions", () => {
     expect(plist).toContain("<key>SuccessfulExit</key><false/>");
     expect(plist).toContain("<key>AbandonProcessGroup</key>\n  <false/>");
     expect(plist).toContain("/home/me/state/logs/service.stderr.log");
-    expect(plist).toContain("<key>PATH</key><string>/opt/node/bin:/usr/local/bin:/usr/bin:/bin</string>");
+    expect(plist).toContain(`<key>PATH</key><string>${resolveServiceExecutablePath(installOptions.nodePath)}</string>`);
     expect(plist).not.toContain("token=");
+  });
+
+  it("adds user-installed package managers without inheriting unrelated PATH entries", () => {
+    const root = mkdtempSync(join(tmpdir(), "worktree-switcher-path-"));
+    directories.push(root);
+    const packageBin = join(root, "package-bin");
+    const unrelatedBin = join(root, "temporary-agent-bin");
+    mkdirSync(packageBin);
+    mkdirSync(unrelatedBin);
+    writeFileSync(join(packageBin, "pnpm"), "#!/bin/sh\n", { mode: 0o700 });
+
+    const servicePath = resolveServiceExecutablePath("/opt/node/bin/node", `${unrelatedBin}:${packageBin}:/usr/bin`);
+
+    expect(servicePath.split(":")).toContain(packageBin);
+    expect(servicePath.split(":")).not.toContain(unrelatedBin);
   });
 });
 

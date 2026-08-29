@@ -47,8 +47,11 @@ Installation writes one user-owned definition and starts it immediately:
 | macOS | `~/Library/LaunchAgents/dev.worktree-switcher.controller.plist` |
 
 The definition stores absolute paths to Node.js, the built CLI, dashboard
-assets, data, and runtime state. It also stores the chosen host and ports. It
-does not contain the browser pairing token or MCP bearer token.
+assets, data, and runtime state. It also stores the chosen host and ports. Its
+controlled `PATH` includes standard system directories and the directories of
+any supported package managers (`pnpm`, `npm`, `yarn`, or `bun`) found during
+installation. It does not contain the browser pairing token or MCP bearer
+token.
 
 Installation is idempotent. Running the same command again keeps the existing
 process. If the generated definition would change, the command stops and asks
@@ -252,7 +255,13 @@ Stop that process yourself or assign a different project port in the dashboard.
 
 ### A package manager is missing in service mode
 
-The service gets a controlled `PATH` containing the directory of the Node.js
-executable plus `/usr/local/bin`, `/usr/bin`, and `/bin`. Make sure the required
-Corepack shim or package manager is available in one of those directories, then
-restart the service.
+The installer records the directories containing supported package managers
+that are available in your current terminal. If you install or move `pnpm`,
+`npm`, `yarn`, or `bun` later, rebuild Worktree Switcher and refresh the service
+definition from a terminal where the command is available:
+
+```bash
+command -v pnpm
+pnpm build
+node dist/cli/index.js service install --refresh
+```

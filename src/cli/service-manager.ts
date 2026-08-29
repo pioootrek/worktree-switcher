@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -253,7 +253,7 @@ export function renderSystemdUnit(options: ServiceInstallOptions): string {
   const command = [options.nodePath, options.entrypointPath, "start", ...options.startArguments]
     .map(systemdQuote)
     .join(" ");
-  const servicePath = controlledServicePath(options.nodePath);
+  const servicePath = resolveServiceExecutablePath(options.nodePath);
   return `[Unit]\nDescription=Worktree Switcher local control plane\nAfter=network.target\nStartLimitIntervalSec=60\nStartLimitBurst=5\n\n[Service]\nType=simple\nExecStart=${command}\nWorkingDirectory=${systemdDirectivePath(options.workingDirectory)}\nEnvironment=NODE_ENV=production\nEnvironment=${systemdQuote(`PATH=${servicePath}`)}\nRestart=on-failure\nRestartSec=5\nKillMode=control-group\nTimeoutStopSec=15\nUMask=0077\n\n[Install]\nWantedBy=default.target\n`;
 }
 
@@ -288,9 +288,27 @@ function xmlEscape(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 }
 
-function controlledServicePath(nodePath: string): string {
-  const directories = [dirname(nodePath), "/usr/local/bin", "/usr/bin", "/bin"];
+export function resolveServiceExecutablePath(nodePath: string, environmentPath = process.env.PATH ?? ""): string {
+  const packageManagers = ["pnpm", "npm", "yarn", "bun"];
+  const discoveredDirectories = environmentPath
+    .split(":")
+    .filter((directory) => directory.startsWith("/"))
+    .filter((directory) => packageManagers.some((executable) => isExecutableFile(join(directory, executable))));
+  const directories = [dirname(nodePath), ...discoveredDirectories, "/usr/local/bin", "/usr/bin", "/bin"];
   return [...new Set(directories)].join(":");
+}
+
+function controlledServicePath(nodePath: string): string {
+  return resolveServiceExecutablePath(nodePath);
+}
+
+function isExecutableFile(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function positiveInteger(value: string | undefined): number | null {
