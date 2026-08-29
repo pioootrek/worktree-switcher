@@ -91,6 +91,11 @@ zero-install evaluation path. Running `worktree-switcher` or
 `worktree-switcher start` starts one foreground controller, opens the browser,
 and owns its managed child processes. `--no-open` supports headless use.
 
+On normal shutdown or `SIGINT`/`SIGTERM`, the controller gracefully stops every
+process tree it started. It never terminates an unknown process merely because
+that process occupies a configured port. Leaving managed servers running after
+controller exit is not part of the MVP.
+
 Initial supporting commands are `project add <path>`, `project list`,
 `config path`, and `doctor`. Background service installation and standalone
 platform binaries are deferred until real usage justifies their maintenance.
@@ -113,8 +118,11 @@ text and an icon so meaning does not depend on color perception.
 - Discover worktrees using Git's stable porcelain output.
 - Show branch, commit, path, dirty state, and worktree health.
 - Start, stop, restart, and switch each project independently.
+- Reserve a project on a specific worktree with a human hard lock or expiring
+  agent lease.
 - Preserve a stable configured port per project.
 - Show readiness, failure details, and recent logs.
+- Allow a dirty worktree to run while showing a persistent warning.
 - Bind the control API to loopback and reject arbitrary commands or paths.
 - Persist project configuration and the last selection; reconcile live process
   state after a control-plane restart.
@@ -128,16 +136,13 @@ text and an icon so meaning does not depend on color perception.
 - Reverse proxying with transparent HMR WebSocket support.
 - Windows process-tree support; the initial target is Linux and macOS.
 
-## Topics under discussion
+## Topic under discussion
 
-- A visible project reservation model: humans may pin a server slot to a
-  worktree until explicit release, while agents use expiring renewable leases.
 - A local MCP integration that exposes project/runtime status as resources and
   lets an agent atomically reserve, switch, renew, and release its own lease.
-- Forced release of somebody else's reservation remains a human UI/CLI action.
 
-These are proposals, not yet committed MVP scope. Their working design is in
-`docs/reservations-and-mcp.md`.
+The MCP adapter is proposed after the reservation-capable MVP. Its working
+design is in `docs/reservations-and-mcp.md`.
 
 ## Current decisions
 
@@ -149,5 +154,9 @@ These are proposals, not yet committed MVP scope. Their working design is in
   ports, environment overrides, health checks, and timeouts.
 - Build the dashboard from owned shadcn/ui source components using the
   `new-york` Radix variant, Tailwind CSS, and token-based theming.
+- Include visible reservations in MVP. Human locks may be indefinite; agent
+  leases expire and renew. Force release remains a human UI/CLI action.
+- Permit dirty worktrees with a warning, stop owned child processes when the
+  controller exits, and never kill an unknown process occupying a port.
 - Publish the npm package and executable as `worktree-switcher`; default to a
   foreground process and make background operation opt-in later.

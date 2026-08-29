@@ -61,6 +61,26 @@ The shadcn CLI is initialized non-interactively with defaults and an explicit
 Radix base. Components are added selectively, reviewed as application source,
 and never bulk-installed with `--all`.
 
+## Process ownership and shutdown
+
+The controller records identity only for process trees it starts. On normal
+exit, `SIGINT`, or `SIGTERM`, it stops those trees gracefully, waits for the
+configured shutdown timeout, and then escalates only against the same verified
+owned tree. A PID loaded after restart is never trusted without identity
+reconciliation.
+
+An occupied project port owned by an unknown process is a conflict, not
+permission to terminate it. The dashboard reports the port and diagnostic
+information, while recovery stays an explicit user action outside the tool.
+
+Dirty worktrees are valid development targets. The dashboard displays a
+persistent warning and the dirty-state timestamp but does not block start,
+restart, switch, or reservation.
+
+`autoStart` defaults to false. Project registration is explicit, dependency
+installation is never automatic, and stopping a server does not release its
+reservation.
+
 ## Resource policy
 
 Managed development applications have priority over Worktree Switcher. The

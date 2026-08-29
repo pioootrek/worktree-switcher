@@ -32,6 +32,11 @@
       "author": "human:project-owner",
       "date": "2026-08-29",
       "text": "Use shadcn/ui for the dashboard GUI."
+    },
+    {
+      "author": "human:project-owner",
+      "date": "2026-08-29",
+      "text": "Approved: reservations are MVP scope; controller shutdown stops its owned managed processes; dirty worktrees remain runnable with a visible warning."
     }
   ],
   "priority": "now",
@@ -50,7 +55,8 @@
   "scope": [
     "Create a local control plane that registers multiple Git repositories, discovers their worktrees, and maintains one independently switchable server slot with a stable port for each project.",
     "Include serialized lifecycle operations per project, readiness checks, isolated logs, loopback-only control endpoints, and reconciliation after control-plane restart.",
-    "Ship a static Next.js dashboard composed from owned shadcn/ui source components inside one lightweight Node controller and isolate SQLite persistence behind a replaceable transactional StateStore contract."
+    "Ship a static Next.js dashboard composed from owned shadcn/ui source components inside one lightweight Node controller and isolate SQLite persistence behind a replaceable transactional StateStore contract.",
+    "Include human hard locks and expiring agent leases pinned to worktrees, allow dirty worktrees with a warning, and stop only controller-owned process trees during shutdown."
   ],
   "source": "Product planning conversation on 2026-08-29",
   "status": "open",
@@ -61,7 +67,8 @@
     "Verify concurrent requests for one project are serialized, failures are isolated, stale paths and arbitrary commands are rejected, and the dashboard reports readiness and logs accurately.",
     "Measure the release build on the supported Linux reference environment and verify at most 50 MiB idle RSS, negligible idle CPU, bounded log memory, and no repository-wide watcher or continuous Git polling.",
     "Verify concurrent reservation attempts are atomic, at most one active reservation exists per project, expired leases can be reclaimed, audit events commit with their mutation, and a failed transaction leaves no partial state.",
-    "Verify keyboard navigation, visible focus, reduced-motion behavior, and screen-reader announcements; runtime and reservation states must remain understandable without color."
+    "Verify keyboard navigation, visible focus, reduced-motion behavior, and screen-reader announcements; runtime and reservation states must remain understandable without color.",
+    "Verify dirty worktrees run with a persistent warning, controller shutdown terminates every owned process tree, and an unrelated process occupying a configured port is reported but never terminated."
   ],
   "value": [
     "A developer can move an entire local stack between branches from one dashboard without repeatedly navigating directories or disturbing unrelated services."

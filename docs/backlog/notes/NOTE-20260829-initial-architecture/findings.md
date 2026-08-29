@@ -60,15 +60,24 @@ Bind the control surface to loopback, validate browser origin/session state,
 resolve selections only from registered repositories and discovered worktrees,
 and never accept an arbitrary command or working directory from the browser.
 
-## Proposed reservation and MCP extension
+## Reservation and MCP extension
 
-Decision state: proposed. Treat a visible project claim as an exclusive
-reservation rather than a counting semaphore. Human hard locks may remain until
-explicit release; agent claims should be expiring renewable leases so an
-interrupted agent cannot deadlock a project indefinitely.
+Decision state: reservations are approved for MVP; MCP remains a follow-up
+proposal. Treat a visible project claim as an exclusive reservation rather than
+a counting semaphore. Human hard locks may remain until explicit release;
+agent claims are expiring renewable leases so an interrupted agent cannot
+deadlock a project indefinitely.
 
 MCP should be an adapter over the same application services as UI and CLI. A
 local `worktree-switcher mcp` stdio bridge can expose read-only project status
 and narrowly scoped claim, renew, and release tools while the main controller
 remains the sole process/state owner. Force release and indefinite agent locks
 should not be available to LLM tools.
+
+## Operational defaults
+
+On controller exit, stop all verified process trees started by the controller.
+Never terminate an unknown process merely because it owns a configured port.
+Allow dirty worktrees to run with a persistent warning. Registration is
+explicit, `autoStart` defaults to false, dependencies are never installed
+automatically, and stopping a server retains its reservation.

@@ -1,14 +1,14 @@
 ---
 audience: "product owner and contributors discussing agent coordination"
 last_reviewed: "2026-08-29"
-source_of_truth: "proposed reservation and MCP integration design"
-status: "reference"
+source_of_truth: "approved reservation model and proposed MCP integration design"
+status: "active"
 ---
 
-# Proposed reservations and MCP integration
+# Reservations and proposed MCP integration
 
-Decision state: proposed. This document records the current recommendation for
-discussion and does not add the features to committed MVP scope.
+Decision state: the reservation model is approved for MVP. The MCP adapter is a
+follow-up proposal and is not required to complete the first usable release.
 
 ## Use an exclusive reservation, not a semaphore
 
@@ -52,11 +52,17 @@ is required to renew or release an agent lease. Repeating an acquire request
 with the same idempotency key returns the existing lease instead of creating a
 second one.
 
-Human locks may be indefinite. Agent leases default to 30 minutes, have a
-configured maximum lifetime, and expire automatically if the client disappears.
-Agents can renew or release only leases for which they hold the token. A human
-can force-release any reservation through an explicit UI or CLI action; that
-action is audited and is not exposed as a normal LLM tool.
+Human locks may be indefinite. Agent leases default to 30 minutes, renew every
+10 minutes while their bridge remains alive, have an 8-hour maximum lifetime,
+and expire automatically if the client disappears. Agents can renew or release
+only leases for which they hold the token. A human can force-release any
+reservation through an explicit UI or CLI action; that action is audited and
+is not exposed as a normal LLM tool.
+
+A reservation is pinned to one worktree. Its owner may restart that worktree;
+other actors cannot switch, stop, or restart the reserved project. Stopping the
+server does not release the reservation. An owner that needs another worktree
+uses one atomic move operation so ownership is never briefly dropped.
 
 ## Conflict behavior
 
@@ -136,12 +142,8 @@ exposed as MCP tools.
   validate `Origin`, and require authentication. Remote and multi-user access
   is a separate security design.
 
-## Questions requiring product approval
+## Remaining MCP decisions
 
-1. Should reservations enter MVP, or land immediately after reliable manual
-   switching?
-2. Is a 30-minute default agent lease appropriate, and what maximum should be
-   allowed?
-3. Should a human hard lock block `restart` as well as `switch` and `stop`?
-4. May the owner agent switch between worktrees while retaining its lease, or
-   is every reservation permanently pinned to the original worktree?
+The MCP adapter can be specified after the reservation service is working. The
+remaining questions are client discovery/configuration, whether its first
+release is bundled or optional, and which clients receive installation guides.
