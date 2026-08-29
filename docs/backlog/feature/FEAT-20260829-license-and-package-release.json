@@ -22,6 +22,11 @@
       "author": "agent:codex",
       "date": "2026-08-29",
       "text": "Prepared public-source publication under MIT with copyright holder pioootrek, repository metadata, third-party notices, and a production dependency license review. The locked production graph contains 342 MIT, 18 ISC, 8 Apache-2.0, 7 BSD-3-Clause, 4 BSD-2-Clause, 2 BlueOak-1.0.0, and one each of 0BSD, CC-BY-4.0, LGPL-3.0-or-later, and Python-2.0. shadcn/ui copied-source attribution is preserved. Keep this item open because npm packing, clean global-install validation, pre-1.0 release confirmation, and npm publication are not part of the public repository operation."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-08-29",
+      "text": "Published https://github.com/pioootrek/worktree-switcher as a public GitHub repository with main as the default branch. GitHub recognizes the MIT license. The source archive was packed, inspected for state and secret files, installed into a clean npm prefix, and smoke-tested through config path, config mcp, and a loopback dashboard start. Keep the item open for the separate npm registry release decision; package.json intentionally remains private."
     }
   ],
   "priority": "now",
