@@ -1,0 +1,50 @@
+{
+  "area": "process-manager",
+  "created": "2026-08-29",
+  "id": "FEAT-20260829-reset-next-build-cache",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-multi-project-worktree-switching",
+      "FEAT-20260829-next-production-runtime"
+    ]
+  },
+  "notes": [
+    {
+      "author": "user",
+      "date": "2026-08-29",
+      "text": "Provide an explicit way to reset the selected worktree's .next cache when stale generated state interferes with development."
+    }
+  ],
+  "priority": "next",
+  "problem": [
+    "A stale Next.js .next directory can cause misleading development or build failures. Today the operator must leave Worktree Switcher, identify the exact selected worktree, stop its server, and delete the cache manually."
+  ],
+  "risk": {
+    "dimensions": [
+      "data-exposure",
+      "process"
+    ],
+    "level": "medium",
+    "rollback": "Remove the maintenance action and leave cache cleanup as a manual operation. The implementation must never delete outside the selected Git-discovered worktree."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Add a Next.js-only reset-cache action in the service layer, dashboard, CLI, and MCP where destructive operations are allowed by the relevant authority model.",
+    "Resolve the selected worktree from current Git discovery, derive exactly its .next directory, and reject symlink or canonical-path escape before deletion.",
+    "Require the managed process to be stopped; offer reset now and an optional one-shot reset before the next start without deleting source files or package-manager caches.",
+    "Show a destructive confirmation to humans and record actor, project, worktree, path, outcome, and reason in the audit trail without exposing unrelated filesystem contents."
+  ],
+  "source": "Product discussion on 2026-08-29",
+  "status": "open",
+  "title": "Reset a selected worktree's Next.js cache safely",
+  "type": "feature",
+  "validation": [
+    "Verify reset removes only <selected-worktree>/.next and refuses while its managed server is running.",
+    "Verify a .next symlink or replaced worktree path cannot cause deletion outside the current Git-discovered worktree.",
+    "Verify a missing .next directory is a successful no-op and every attempt is audited with a human-readable result.",
+    "Verify cache reset remains unavailable for unsupported frameworks and cannot be redirected through browser or MCP path input."
+  ],
+  "value": [
+    "Developers and agents can recover from stale Next.js build state without performing a risky manual filesystem operation in the wrong worktree."
+  ]
+}

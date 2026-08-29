@@ -1,0 +1,66 @@
+{
+  "area": "distribution",
+  "created": "2026-08-29",
+  "id": "FEAT-20260829-user-service-installation",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-cli-project-management",
+      "FEAT-20260829-license-and-package-release",
+      "FEAT-20260829-multi-project-worktree-switching",
+      "NOTE-20260829-readiness-assessment"
+    ]
+  },
+  "notes": [
+    {
+      "author": "user",
+      "date": "2026-08-29",
+      "text": "Before publication, Worktree Switcher must be able to register itself as a service or otherwise guarantee continuous controller operation."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-08-29",
+      "text": "Foreground operation remains useful for evaluation and diagnostics, but a user-level OS service becomes the recommended daily-use installation. Do not require root or copy host-specific llm-worker resource limits into portable units."
+    }
+  ],
+  "priority": "now",
+  "problem": [
+    "The controller currently lives only as a foreground terminal process. Closing the terminal, logging out, or an unexpected controller failure removes the dashboard and MCP control plane and stops or loses ownership of managed development servers, so the tool cannot reliably support daily background use."
+  ],
+  "risk": {
+    "dimensions": [
+      "availability",
+      "process",
+      "ci-release"
+    ],
+    "level": "medium",
+    "rollback": "Stop and uninstall only the generated user service while preserving the database, credentials, configuration, and logs. Foreground worktree-switcher start must remain available."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Add user-level service support for systemd on Linux and a LaunchAgent on macOS. Do not require sudo, install a system-wide daemon, alter firewall rules, or generate host-specific memory and CPU limits.",
+    "Add CLI commands service install, service status, service start, service stop, service restart, and service uninstall. Installation and removal are explicit, idempotent, and report the exact user-level artifact and controller endpoint without printing credentials.",
+    "Generate service definitions from controlled templates using absolute executable and data/state/config paths, --no-open, an explicit working directory, a bounded restart policy with backoff, and a minimal predictable environment that does not depend on an interactive shell or nvm initialization.",
+    "Keep the foreground worktree-switcher start command for evaluation, development, and diagnostics. Detect and reject a second controller through a real single-instance lock rather than allowing two process owners to share SQLite and runtime state.",
+    "Define service and managed-process lifecycle together: a deliberate service stop gracefully terminates controller-owned process trees; an unexpected crash or service restart must not leave orphan processes that a new controller mistakes for its own.",
+    "Use the OS service manager's process-group/cgroup behavior where available, then reconcile persisted runtime hints, occupied ports, reservations, and configured auto-start projects before accepting new operations after restart.",
+    "Expose service health, controller PID, uptime, effective version, bind endpoints, last exit/restart reason, and log locations through service status and doctor. Keep journal/LaunchAgent output and existing rotating application logs free of pairing links, bearer tokens, passwords, and secret environment values.",
+    "Handle upgrades explicitly: detect when a generated service points at an obsolete executable, provide service install --refresh or an equivalent safe update path, and restart only after the operator confirms the new installation is valid.",
+    "Document platform behavior: a systemd user service normally starts with the user session; optional loginctl linger for pre-login operation is an administrator choice that the installer explains but never enables silently."
+  ],
+  "source": "Pre-publication product decision on 2026-08-29",
+  "status": "open",
+  "title": "Install Worktree Switcher as a persistent user service",
+  "type": "feature",
+  "validation": [
+    "Install and enable the service from a packaged executable on supported Linux and macOS environments, log out or close the invoking terminal as appropriate, and verify the controller, dashboard, and MCP remain reachable according to platform session policy.",
+    "Verify service install, refresh, status, start, stop, restart, and uninstall are idempotent, require no root privileges, and never delete user state or logs unless a separate destructive command is explicitly confirmed.",
+    "Crash the controller and verify the service manager restarts it with bounded backoff, records the reason, leaves no duplicate/orphan managed process tree, and reconciles projects before serving mutations.",
+    "Attempt a foreground second instance while the service runs and verify it fails clearly before opening SQLite, binding listeners, or spawning a project.",
+    "Verify a deliberate service stop gracefully terminates every owned process tree while never killing an unrelated process merely because it occupies a configured port.",
+    "Upgrade the package so its executable path or version changes, refresh the service, and verify status reports the new version while database migrations and credentials remain intact.",
+    "Inspect generated units/plists, process arguments, environment, journal output, and application logs and verify no pairing URL, bearer token, password, or resolved secret is persisted there."
+  ],
+  "value": [
+    "Worktree Switcher becomes dependable workstation infrastructure instead of a terminal-bound utility, while retaining a reversible user-level installation and correct ownership of every managed server."
+  ]
+}

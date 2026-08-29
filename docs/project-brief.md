@@ -101,10 +101,19 @@ Switcher control plane.
 ## Distribution and operation
 
 The npm package and executable are both named `worktree-switcher`. A global
-user-level installation is the recommended daily-use path; `npx` remains the
-zero-install evaluation path. Running `worktree-switcher` or
-`worktree-switcher start` starts one foreground controller, opens the browser,
-and owns its managed child processes. `--no-open` supports headless use.
+user-level installation registered as an operating-system user service is the
+recommended daily-use path; `npx` and foreground operation remain evaluation
+and diagnostic paths. Running `worktree-switcher` or `worktree-switcher start`
+starts one foreground controller, opens the browser, and owns its managed child
+processes. `--no-open` supports headless use.
+
+The CLI installs a systemd user service on Linux or a LaunchAgent on macOS
+without requiring root. The service starts with the user's platform session,
+uses bounded restart backoff, and exposes status and recovery commands. A
+single-instance lock prevents a background and foreground controller from
+sharing the database or process state. Pre-login Linux operation through user
+lingering remains an explicit administrator choice and is never enabled
+silently.
 
 On normal shutdown or `SIGINT`/`SIGTERM`, the controller gracefully stops every
 process tree it started. It never terminates an unknown process merely because
@@ -112,8 +121,9 @@ that process occupies a configured port. Leaving managed servers running after
 controller exit is not part of the MVP.
 
 Initial supporting commands are `project add <path>`, `project list`,
-`config path`, and `doctor`. Background service installation and standalone
-platform binaries are deferred until real usage justifies their maintenance.
+`config path`, `doctor`, and the `service install|status|start|stop|restart|uninstall`
+lifecycle. Standalone platform binaries remain deferred until real usage
+justifies their maintenance.
 
 ## Interface system
 
@@ -143,6 +153,8 @@ text and an icon so meaning does not depend on color perception.
   agent lease.
 - Preserve a stable configured port per project.
 - Show readiness, failure details, and recent logs.
+- Install the controller as a persistent user-level service and prevent a
+  second controller from taking ownership of the same state.
 - Allow a dirty worktree to run while showing a persistent warning.
 - Listen on configured local interfaces (LAN by default), require an ephemeral
   pairing token for all control data and mutations, and reject arbitrary
@@ -183,8 +195,9 @@ design is in `docs/reservations-and-mcp.md`.
   the existing controller; keep remote MCP and stdio compatibility deferred.
 - Permit dirty worktrees with a warning, stop owned child processes when the
   controller exits, and never kill an unknown process occupying a port.
-- Publish the npm package and executable as `worktree-switcher`; default to a
-  foreground process and make background operation opt-in later.
+- Publish the npm package and executable as `worktree-switcher`; retain a
+  foreground mode for evaluation and make a user-level background service the
+  recommended daily-use installation.
 - Listen on LAN interfaces by default and print an ephemeral secret pairing
   link. Keep loopback-only operation available through `--host 127.0.0.1`;
   restrict any host firewall rule to the trusted LAN subnet.

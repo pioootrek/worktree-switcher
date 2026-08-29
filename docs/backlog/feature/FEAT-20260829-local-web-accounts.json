@@ -1,0 +1,64 @@
+{
+  "area": "core",
+  "created": "2026-08-29",
+  "id": "FEAT-20260829-local-web-accounts",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-controller-https",
+      "FEAT-20260829-independent-auth-modes",
+      "FEAT-20260829-scoped-mcp-agent-tokens"
+    ]
+  },
+  "notes": [
+    {
+      "author": "user",
+      "date": "2026-08-29",
+      "text": "Add simple local web accounts and support password reset and account administration from the CLI."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-08-29",
+      "text": "Keep the local model deliberately small: no public registration, email delivery, social login, organizations, or remote identity provider. Account recovery is an explicit local CLI operation."
+    }
+  ],
+  "priority": "next",
+  "problem": [
+    "The browser currently relies on one ephemeral controller pairing token. It cannot identify individual human users, preserve ordinary login sessions, revoke one person's access, or recover access through a controlled local administrator workflow."
+  ],
+  "risk": {
+    "dimensions": [
+      "auth-rbac",
+      "data-exposure",
+      "process"
+    ],
+    "level": "high",
+    "rollback": "Return Web authentication to the existing pairing-token mode. Preserve account records but invalidate all account sessions and do not silently fall back to anonymous LAN access."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Add local username-and-password accounts stored in SQLite with two roles only: admin and user. Admin manages authentication, accounts, projects, tokens, locks, and configuration; user may operate allowed projects but cannot change security settings or issue credentials.",
+    "Create accounts only through an authenticated admin screen or local CLI. Keep public registration, email addresses, email reset, social login, MFA, organizations, and hosted identity providers out of the first version.",
+    "Hash passwords with Argon2id using per-password salts and parameters calibrated near current OWASP guidance without blocking the event loop; never encrypt or log plaintext passwords.",
+    "Use random server-side sessions with owner-only persisted verifiers, idle and absolute expiry, rotation after login and privilege changes, HttpOnly and SameSite cookies, CSRF protection for mutations, and immediate invalidation after password reset or account disable.",
+    "Add CLI commands for user add, user list, user disable, user enable, user password, and user sessions revoke. Password entry must be interactive or read from protected stdin, never a command-line argument or normal log output.",
+    "Support local recovery without email: an administrator can set a new password directly through the CLI or generate a short-lived single-use reset link/code whose verifier is stored and whose raw value is displayed once. Reset does not automatically sign the user in.",
+    "Prevent removal or disablement of the last enabled admin while account authentication is active, and provide a documented local-console recovery command for a lost administrator password.",
+    "Apply login rate limiting and uniform failure responses to reduce guessing and username enumeration. Audit login success/failure metadata, account changes, password resets, and session revocations without recording passwords, reset tokens, cookies, or submitted secret values.",
+    "Allow account-password login on loopback HTTP for local use; require HTTPS or an explicitly recognized secure tunnel/proxy before accepting passwords and session cookies from a non-loopback client."
+  ],
+  "source": "Product discussion on 2026-08-29",
+  "status": "open",
+  "title": "Add simple local accounts for the web dashboard",
+  "type": "feature",
+  "validation": [
+    "Bootstrap the first admin from the CLI, log in through the dashboard, create a user, and verify role restrictions across project operations, security settings, and credential issuance.",
+    "Verify password hashes use Argon2id with unique salts and neither plaintext passwords nor reset/session tokens appear in SQLite, arguments, API payloads, logs, errors, audit events, or process listings.",
+    "Reset a password from the CLI and verify all prior sessions are invalidated, the reset token is single-use and expires, and the user must perform a normal login afterward.",
+    "Verify login responses do not enumerate usernames, repeated failures are rate-limited, session IDs rotate, CSRF attempts fail, and disabled accounts cannot create or continue sessions.",
+    "Verify the last enabled admin cannot be disabled or removed while account mode is active and local CLI recovery remains available when no browser session works.",
+    "Verify account login from a non-loopback client is rejected over plaintext HTTP and accepted only through the documented secure transport path."
+  ],
+  "value": [
+    "A small team or one developer with several devices can use recognizable, revocable browser identities without introducing a hosted authentication dependency."
+  ]
+}

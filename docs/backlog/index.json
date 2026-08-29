@@ -12,6 +12,16 @@
       "type": "feature"
     },
     {
+      "area": "core",
+      "id": "FEAT-20260829-dev-server-capacity",
+      "path": "feature/FEAT-20260829-dev-server-capacity.json",
+      "priority": "now",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Limit concurrently running managed servers",
+      "type": "feature"
+    },
+    {
       "area": "distribution",
       "id": "FEAT-20260829-license-and-package-release",
       "path": "feature/FEAT-20260829-license-and-package-release.json",
@@ -29,6 +39,96 @@
       "risk_level": "medium",
       "status": "open",
       "title": "Run and switch multiple worktree-backed projects",
+      "type": "feature"
+    },
+    {
+      "area": "distribution",
+      "id": "FEAT-20260829-user-service-installation",
+      "path": "feature/FEAT-20260829-user-service-installation.json",
+      "priority": "now",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Install Worktree Switcher as a persistent user service",
+      "type": "feature"
+    },
+    {
+      "area": "distribution",
+      "id": "FEAT-20260829-controller-https",
+      "path": "feature/FEAT-20260829-controller-https.json",
+      "priority": "next",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Serve the controller dashboard over HTTPS",
+      "type": "feature"
+    },
+    {
+      "area": "core",
+      "id": "FEAT-20260829-independent-auth-modes",
+      "path": "feature/FEAT-20260829-independent-auth-modes.json",
+      "priority": "next",
+      "risk_level": "high",
+      "status": "open",
+      "title": "Control Web and MCP authentication independently",
+      "type": "feature"
+    },
+    {
+      "area": "process-manager",
+      "id": "FEAT-20260829-launch-environment-profiles",
+      "path": "feature/FEAT-20260829-launch-environment-profiles.json",
+      "priority": "next",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Configure safe environment profiles for managed servers",
+      "type": "feature"
+    },
+    {
+      "area": "core",
+      "id": "FEAT-20260829-local-web-accounts",
+      "path": "feature/FEAT-20260829-local-web-accounts.json",
+      "priority": "next",
+      "risk_level": "high",
+      "status": "open",
+      "title": "Add simple local accounts for the web dashboard",
+      "type": "feature"
+    },
+    {
+      "area": "process-manager",
+      "id": "FEAT-20260829-monitor-managed-memory",
+      "path": "feature/FEAT-20260829-monitor-managed-memory.json",
+      "priority": "next",
+      "risk_level": "low",
+      "status": "open",
+      "title": "Monitor memory used by managed server process trees",
+      "type": "feature"
+    },
+    {
+      "area": "process-manager",
+      "id": "FEAT-20260829-next-production-runtime",
+      "path": "feature/FEAT-20260829-next-production-runtime.json",
+      "priority": "next",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Build and serve managed Next.js projects in production mode",
+      "type": "feature"
+    },
+    {
+      "area": "process-manager",
+      "id": "FEAT-20260829-reset-next-build-cache",
+      "path": "feature/FEAT-20260829-reset-next-build-cache.json",
+      "priority": "next",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Reset a selected worktree's Next.js cache safely",
+      "type": "feature"
+    },
+    {
+      "area": "core",
+      "id": "FEAT-20260829-scoped-mcp-agent-tokens",
+      "path": "feature/FEAT-20260829-scoped-mcp-agent-tokens.json",
+      "priority": "next",
+      "risk_level": "high",
+      "status": "open",
+      "title": "Issue scoped MCP access tokens for coding agents",
       "type": "feature"
     },
     {

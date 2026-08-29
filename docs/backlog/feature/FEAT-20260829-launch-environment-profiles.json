@@ -1,0 +1,68 @@
+{
+  "area": "process-manager",
+  "created": "2026-08-29",
+  "id": "FEAT-20260829-launch-environment-profiles",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-multi-project-worktree-switching",
+      "FEAT-20260829-next-production-runtime",
+      "FEAT-20260829-scoped-mcp-agent-tokens"
+    ]
+  },
+  "notes": [
+    {
+      "author": "user",
+      "date": "2026-08-29",
+      "text": "Pass project-specific parameters to a managed dev server generically; WinPath's E2E reset configuration is the motivating example."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-08-29",
+      "text": "WinPath uses environment variables such as E2E_RESET_DB_CONFIRM, PLAYWRIGHT_E2E_RESET_SECRET, PLAYWRIGHT_E2E_DB_LAB, and GOOGLE_CALENDAR_E2E_FIXTURES. Model this primarily as typed environment overrides and profiles, not shell text appended to a command."
+    },
+    {
+      "author": "user",
+      "date": "2026-08-29",
+      "text": "Extend environment configuration with directories and make appropriate profile operations available to agents through MCP."
+    }
+  ],
+  "priority": "next",
+  "problem": [
+    "Real development servers often need launch-time feature flags, fixture modes, database guards, or test profiles. Worktree Switcher currently supplies only its own port handling, so projects such as WinPath cannot reproduce an E2E-specific runtime without being started manually."
+  ],
+  "risk": {
+    "dimensions": [
+      "data-exposure",
+      "process"
+    ],
+    "level": "medium",
+    "rollback": "Disable custom profiles and fall back to the detected default launch environment. Stored secret references must remain removable without revealing their values."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Add named per-project launch profiles containing validated environment-variable overrides, initially shared by development and optionally scoped separately to production mode.",
+    "Support non-secret literal values and secret references resolved from the controller host environment by variable name; do not store secret values in SQLite or return them through HTTP, MCP, audit events, status, errors, or logs.",
+    "Allow a profile to select a relative working directory inside the current Git-discovered worktree, which supports applications located in a monorepo subdirectory without accepting an arbitrary child-process cwd.",
+    "Allow ordered environment-file references and PATH prefixes. Environment files inside the worktree may be selected by relative path; additional host directories require an explicitly trusted root created by a human and cannot be introduced by an ordinary agent token.",
+    "Allow profiles to declare required runtime directories that the controller creates before launch. Creation is confined to the selected worktree, rejects symlink or canonical-path escape, is idempotent, and never implies automatic deletion.",
+    "Reserve controller-owned variables including PORT and NODE_ENV so profiles cannot bypass stable-port or runtime-mode policy.",
+    "Validate variable names, pass values through the child-process env object with shell:false, display effective variable names and redacted sources, and require a restart when the active profile changes.",
+    "Expose profiles through the service layer, dashboard, CLI, and MCP. MCP may read names and redacted effective configuration with project read access, select an existing profile with profiles:select, and create, update, or delete configuration only with a separately granted config:write capability.",
+    "Never expose environment-file contents, resolved secret values, or inherited host environment values through MCP. Keep arbitrary executable or free-form shell command input out of scope."
+  ],
+  "source": "Product discussion and WinPath inspection on 2026-08-29",
+  "status": "open",
+  "title": "Configure safe environment profiles for managed servers",
+  "type": "feature",
+  "validation": [
+    "Configure a WinPath-style E2E profile and verify variables such as E2E_RESET_DB_CONFIRM reach the child process while PORT and NODE_ENV remain controller-owned.",
+    "Verify a referenced secret is read from the controller environment at launch and never appears in SQLite, API/MCP payloads, logs, errors, or audit records.",
+    "Verify invalid variable names, missing required secret references, and attempts to override reserved variables fail before spawning a process.",
+    "Verify profile changes require restart, apply to the selected worktree only through its managed process, and preserve shell-free spawning.",
+    "Verify relative working directories, environment files, PATH prefixes, and required directories resolve under their approved roots and reject traversal, symlink escape, missing files, and non-directory targets.",
+    "Verify an MCP token with profiles:select can choose an existing profile but cannot edit it, while config:write can mutate allowed non-secret configuration and every mutation is attributed and audited."
+  ],
+  "value": [
+    "Projects can express development, E2E, fixture, and diagnostic modes without project-specific code in Worktree Switcher or unsafe free-form command execution."
+  ]
+}
