@@ -1,0 +1,304 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+
+export const SYSTEMD_UNIT_NAME = "worktree-switcher.service";
+export const LAUNCHD_LABEL = "dev.worktree-switcher.controller";
+
+export interface ServiceCommandResult {
+  status: number;
+  stdout: string;
+  stderr: string;
+}
+
+export interface ServiceCommandRunner {
+  run(command: string, args: string[]): ServiceCommandResult;
+}
+
+export interface ServiceInstallOptions {
+  nodePath: string;
+  entrypointPath: string;
+  workingDirectory: string;
+  startArguments: string[];
+  stateDirectory: string;
+  refresh: boolean;
+}
+
+export interface ServiceStatus {
+  platform: "systemd" | "launchd";
+  installed: boolean;
+  active: boolean;
+  state: string;
+  pid: number | null;
+  restarts: number | null;
+  lastExitStatus: number | null;
+  definitionPath: string;
+  uptimeSeconds: number | null;
+  residentMemoryBytes: number | null;
+  cpuPercent: number | null;
+}
+
+export interface ServiceManagerOptions {
+  platform?: NodeJS.Platform;
+  homeDirectory?: string;
+  uid?: number;
+  environment?: NodeJS.ProcessEnv;
+  runner?: ServiceCommandRunner;
+}
+
+const defaultRunner: ServiceCommandRunner = {
+  run(command, args) {
+    try {
+      const stdout = execFileSync(command, args, {
+        encoding: "utf8",
+        env: process.env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      return { status: 0, stdout, stderr: "" };
+    } catch (error) {
+      const failure = error as { status?: number; stdout?: string | Buffer; stderr?: string | Buffer; message?: string };
+      return {
+        status: failure.status ?? 1,
+        stdout: String(failure.stdout ?? ""),
+        stderr: String(failure.stderr ?? failure.message ?? ""),
+      };
+    }
+  },
+};
+
+export class UserServiceManager {
+  readonly kind: "systemd" | "launchd";
+  readonly definitionPath: string;
+  private readonly runner: ServiceCommandRunner;
+  private readonly uid: number;
+
+  constructor(options: ServiceManagerOptions = {}) {
+    const platform = options.platform ?? process.platform;
+    const home = resolve(options.homeDirectory ?? homedir());
+    const environment = options.environment ?? process.env;
+    this.runner = options.runner ?? defaultRunner;
+    this.uid = options.uid ?? process.getuid?.() ?? -1;
+    if (platform === "linux") {
+      this.kind = "systemd";
+      const configHome = resolve(environment.XDG_CONFIG_HOME ?? join(home, ".config"));
+      this.definitionPath = join(configHome, "systemd", "user", SYSTEMD_UNIT_NAME);
+    } else if (platform === "darwin") {
+      this.kind = "launchd";
+      this.definitionPath = join(home, "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`);
+    } else {
+      throw new Error("Persistent user service installation is supported on Linux and macOS only.");
+    }
+  }
+
+  install(options: ServiceInstallOptions): { changed: boolean; definitionPath: string } {
+    const definition = this.kind === "systemd" ? renderSystemdUnit(options) : renderLaunchAgent(options);
+    const previous = existsSync(this.definitionPath) ? readFileSync(this.definitionPath, "utf8") : null;
+    if (previous !== null && previous !== definition && !options.refresh) {
+      throw new Error(`The service definition is outdated. Review the installed path and run service install --refresh: ${this.definitionPath}`);
+    }
+    const changed = previous !== definition;
+    if (changed) writeDefinition(this.definitionPath, definition);
+
+    if (this.kind === "systemd") {
+      this.requireSuccess("systemctl", ["--user", "daemon-reload"]);
+      this.requireSuccess("systemctl", ["--user", "enable", SYSTEMD_UNIT_NAME]);
+      if (options.refresh && previous !== null) this.requireSuccess("systemctl", ["--user", "restart", SYSTEMD_UNIT_NAME]);
+      else this.requireSuccess("systemctl", ["--user", "start", SYSTEMD_UNIT_NAME]);
+    } else {
+      const target = this.launchdTarget();
+      const loaded = this.runner.run("launchctl", ["print", `${target}/${LAUNCHD_LABEL}`]).status === 0;
+      if (loaded && changed) this.requireSuccess("launchctl", ["bootout", `${target}/${LAUNCHD_LABEL}`]);
+      if (!loaded || changed) this.requireSuccess("launchctl", ["bootstrap", target, this.definitionPath]);
+      this.requireSuccess("launchctl", ["enable", `${target}/${LAUNCHD_LABEL}`]);
+      if (!loaded || changed) this.requireSuccess("launchctl", ["kickstart", "-k", `${target}/${LAUNCHD_LABEL}`]);
+    }
+    return { changed, definitionPath: this.definitionPath };
+  }
+
+  start(): void {
+    if (!existsSync(this.definitionPath)) throw new Error("The Worktree Switcher user service is not installed.");
+    if (this.kind === "systemd") this.requireSuccess("systemctl", ["--user", "start", SYSTEMD_UNIT_NAME]);
+    else {
+      const target = this.launchdTarget();
+      const serviceTarget = `${target}/${LAUNCHD_LABEL}`;
+      if (this.runner.run("launchctl", ["print", serviceTarget]).status !== 0) {
+        this.requireSuccess("launchctl", ["bootstrap", target, this.definitionPath]);
+      }
+      this.requireSuccess("launchctl", ["enable", serviceTarget]);
+      this.requireSuccess("launchctl", ["kickstart", serviceTarget]);
+    }
+  }
+
+  stop(): void {
+    if (!existsSync(this.definitionPath)) return;
+    if (this.kind === "systemd") this.requireSuccess("systemctl", ["--user", "stop", SYSTEMD_UNIT_NAME]);
+    else {
+      const target = `${this.launchdTarget()}/${LAUNCHD_LABEL}`;
+      if (this.runner.run("launchctl", ["print", target]).status === 0) this.requireSuccess("launchctl", ["bootout", target]);
+    }
+  }
+
+  restart(): void {
+    if (!existsSync(this.definitionPath)) throw new Error("The Worktree Switcher user service is not installed.");
+    if (this.kind === "systemd") this.requireSuccess("systemctl", ["--user", "restart", SYSTEMD_UNIT_NAME]);
+    else {
+      const target = this.launchdTarget();
+      const serviceTarget = `${target}/${LAUNCHD_LABEL}`;
+      if (this.runner.run("launchctl", ["print", serviceTarget]).status === 0) {
+        this.requireSuccess("launchctl", ["kickstart", "-k", serviceTarget]);
+      } else {
+        this.requireSuccess("launchctl", ["bootstrap", target, this.definitionPath]);
+        this.requireSuccess("launchctl", ["enable", serviceTarget]);
+        this.requireSuccess("launchctl", ["kickstart", serviceTarget]);
+      }
+    }
+  }
+
+  uninstall(): { removed: boolean; definitionPath: string } {
+    const installed = existsSync(this.definitionPath);
+    if (this.kind === "systemd") {
+      this.runner.run("systemctl", ["--user", "disable", "--now", SYSTEMD_UNIT_NAME]);
+      if (installed) rmSync(this.definitionPath);
+      this.requireSuccess("systemctl", ["--user", "daemon-reload"]);
+    } else {
+      const target = `${this.launchdTarget()}/${LAUNCHD_LABEL}`;
+      if (this.runner.run("launchctl", ["print", target]).status === 0) this.runner.run("launchctl", ["bootout", target]);
+      if (installed) rmSync(this.definitionPath);
+    }
+    return { removed: installed, definitionPath: this.definitionPath };
+  }
+
+  status(): ServiceStatus {
+    if (!existsSync(this.definitionPath)) return this.emptyStatus();
+    if (this.kind === "systemd") {
+      const result = this.runner.run("systemctl", [
+        "--user", "show", SYSTEMD_UNIT_NAME,
+        "--property=ActiveState", "--property=SubState", "--property=MainPID",
+        "--property=NRestarts", "--property=ExecMainStatus", "--property=Result",
+      ]);
+      if (result.status !== 0) return { ...this.emptyStatus(), installed: true, state: "unavailable" };
+      const values = Object.fromEntries(result.stdout.split(/\r?\n/).map((line) => line.split("=", 2)).filter(([key]) => key));
+      const pid = positiveInteger(values.MainPID);
+      return {
+        ...this.resourceStatus(pid),
+        platform: this.kind,
+        installed: true,
+        active: values.ActiveState === "active",
+        state: [values.ActiveState, values.SubState].filter(Boolean).join("/") || values.Result || "unknown",
+        pid,
+        restarts: nonNegativeInteger(values.NRestarts),
+        lastExitStatus: nonNegativeInteger(values.ExecMainStatus),
+        definitionPath: this.definitionPath,
+      };
+    }
+    const result = this.runner.run("launchctl", ["print", `${this.launchdTarget()}/${LAUNCHD_LABEL}`]);
+    if (result.status !== 0) return { ...this.emptyStatus(), installed: true, state: "not loaded" };
+    const pid = positiveInteger(result.stdout.match(/\bpid\s*=\s*(\d+)/)?.[1]);
+    const state = result.stdout.match(/\bstate\s*=\s*([^\n]+)/)?.[1]?.trim() ?? "loaded";
+    const lastExitStatus = nonNegativeInteger(result.stdout.match(/\blast exit code\s*=\s*(-?\d+)/)?.[1]);
+    return {
+      ...this.resourceStatus(pid),
+      platform: this.kind,
+      installed: true,
+      active: pid !== null,
+      state,
+      pid,
+      restarts: null,
+      lastExitStatus,
+      definitionPath: this.definitionPath,
+    };
+  }
+
+  private emptyStatus(): ServiceStatus {
+    return {
+      platform: this.kind,
+      installed: false,
+      active: false,
+      state: "not installed",
+      pid: null,
+      restarts: null,
+      lastExitStatus: null,
+      definitionPath: this.definitionPath,
+      uptimeSeconds: null,
+      residentMemoryBytes: null,
+      cpuPercent: null,
+    };
+  }
+
+  private resourceStatus(pid: number | null): Pick<ServiceStatus, "uptimeSeconds" | "residentMemoryBytes" | "cpuPercent"> {
+    if (!pid) return { uptimeSeconds: null, residentMemoryBytes: null, cpuPercent: null };
+    const result = this.runner.run("ps", ["-p", String(pid), "-o", "etimes=,rss=,%cpu="]);
+    const match = result.status === 0 ? result.stdout.trim().match(/^(\d+)\s+(\d+)\s+([\d.,]+)$/) : null;
+    return match
+      ? { uptimeSeconds: Number(match[1]), residentMemoryBytes: Number(match[2]) * 1024, cpuPercent: Number(match[3].replace(",", ".")) }
+      : { uptimeSeconds: null, residentMemoryBytes: null, cpuPercent: null };
+  }
+
+  private launchdTarget(): string {
+    if (this.uid < 0) throw new Error("Could not determine the current user ID for launchd.");
+    return `gui/${this.uid}`;
+  }
+
+  private requireSuccess(command: string, args: string[]): void {
+    const result = this.runner.run(command, args);
+    if (result.status !== 0) {
+      const detail = result.stderr.trim() || result.stdout.trim() || `exit code ${result.status}`;
+      throw new Error(`${command} ${args.join(" ")} failed: ${detail}`);
+    }
+  }
+}
+
+export function renderSystemdUnit(options: ServiceInstallOptions): string {
+  const command = [options.nodePath, options.entrypointPath, "start", ...options.startArguments]
+    .map(systemdQuote)
+    .join(" ");
+  const servicePath = controlledServicePath(options.nodePath);
+  return `[Unit]\nDescription=Worktree Switcher local control plane\nAfter=network.target\nStartLimitIntervalSec=60\nStartLimitBurst=5\n\n[Service]\nType=simple\nExecStart=${command}\nWorkingDirectory=${systemdDirectivePath(options.workingDirectory)}\nEnvironment=NODE_ENV=production\nEnvironment=${systemdQuote(`PATH=${servicePath}`)}\nRestart=on-failure\nRestartSec=5\nKillMode=control-group\nTimeoutStopSec=15\nUMask=0077\n\n[Install]\nWantedBy=default.target\n`;
+}
+
+export function renderLaunchAgent(options: ServiceInstallOptions): string {
+  const stdoutPath = join(options.stateDirectory, "logs", "service.stdout.log");
+  const stderrPath = join(options.stateDirectory, "logs", "service.stderr.log");
+  const args = [options.nodePath, options.entrypointPath, "start", ...options.startArguments]
+    .map((value) => `    <string>${xmlEscape(value)}</string>`)
+    .join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>Label</key>\n  <string>${LAUNCHD_LABEL}</string>\n  <key>ProgramArguments</key>\n  <array>\n${args}\n  </array>\n  <key>WorkingDirectory</key>\n  <string>${xmlEscape(options.workingDirectory)}</string>\n  <key>EnvironmentVariables</key>\n  <dict>\n    <key>NODE_ENV</key><string>production</string>\n    <key>PATH</key><string>${xmlEscape(controlledServicePath(options.nodePath))}</string>\n  </dict>\n  <key>RunAtLoad</key>\n  <true/>\n  <key>KeepAlive</key>\n  <dict><key>SuccessfulExit</key><false/></dict>\n  <key>ThrottleInterval</key>\n  <integer>5</integer>\n  <key>ProcessType</key>\n  <string>Background</string>\n  <key>AbandonProcessGroup</key>\n  <false/>\n  <key>StandardOutPath</key>\n  <string>${xmlEscape(stdoutPath)}</string>\n  <key>StandardErrorPath</key>\n  <string>${xmlEscape(stderrPath)}</string>\n</dict>\n</plist>\n`;
+}
+
+function writeDefinition(path: string, contents: string): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const temporaryPath = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporaryPath, contents, { encoding: "utf8", mode: 0o600 });
+  renameSync(temporaryPath, path);
+}
+
+function systemdQuote(value: string): string {
+  if (/[\0\r\n]/.test(value)) throw new Error("Service arguments cannot contain NUL or newline characters.");
+  return `"${value.replaceAll("%", "%%").replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+function systemdDirectivePath(value: string): string {
+  if (!value.startsWith("/") || /[\0\r\n]/.test(value)) throw new Error("The service working directory must be an absolute path without control characters.");
+  return value.replaceAll("%", "%%").replaceAll("\\", "\\\\").replaceAll(" ", "\\x20").replaceAll("\t", "\\t");
+}
+
+function xmlEscape(value: string): string {
+  if (/[\0]/.test(value)) throw new Error("Service arguments cannot contain NUL characters.");
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+}
+
+function controlledServicePath(nodePath: string): string {
+  const directories = [dirname(nodePath), "/usr/local/bin", "/usr/bin", "/bin"];
+  return [...new Set(directories)].join(":");
+}
+
+function positiveInteger(value: string | undefined): number | null {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function nonNegativeInteger(value: string | undefined): number | null {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+}

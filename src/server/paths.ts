@@ -2,9 +2,11 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 export interface AppPaths {
+  controllerLockPath: string;
   dataDirectory: string;
   databasePath: string;
   mcpTokenPath: string;
+  serviceAccessPath: string;
   stateDirectory: string;
   logDirectory: string;
 }
@@ -29,9 +31,11 @@ export function resolveAppPaths(dataDirectory?: string, stateDirectory?: string)
     : join(stateBase, "worktree-switcher");
 
   return {
+    controllerLockPath: join(appStateDirectory, "controller.lock"),
     dataDirectory: appDirectory,
     databasePath: join(appDirectory, "state.sqlite3"),
     mcpTokenPath: join(appDirectory, "mcp-token"),
+    serviceAccessPath: join(appStateDirectory, "service-access.json"),
     stateDirectory: appStateDirectory,
     logDirectory: join(appStateDirectory, "logs"),
   };

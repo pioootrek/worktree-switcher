@@ -70,6 +70,77 @@ port.
 By default, the dashboard listens on port `47831` on every network interface.
 The MCP listener uses `127.0.0.1:47832` and is not exposed to the LAN.
 
+### Run continuously as a user service
+
+For daily use, install the built controller as a user-level service. This does
+not use `sudo`, change firewall rules, or install a system-wide daemon.
+
+From a source checkout:
+
+```bash
+node dist/cli/index.js service install
+node dist/cli/index.js service status
+node dist/cli/index.js service open
+```
+
+After the package is published and installed, the equivalent commands are:
+
+```bash
+worktree-switcher service install
+worktree-switcher service status
+worktree-switcher service open
+```
+
+Linux uses a systemd user unit. macOS uses a LaunchAgent. The generated
+definition contains absolute executable, state, data, and dashboard paths, so
+it does not depend on an interactive shell or nvm initialization. It restarts
+after failures with bounded backoff. A clean service stop also stops the
+development-server process trees owned by the controller.
+
+The browser pairing URL is never written to the system journal or LaunchAgent
+logs. `service open` reads it from an owner-only runtime file and opens the
+browser; `service url` prints it explicitly when you need to copy it.
+
+Available lifecycle commands:
+
+```bash
+worktree-switcher service start
+worktree-switcher service stop
+worktree-switcher service restart
+worktree-switcher service uninstall
+```
+
+Installation is idempotent. If an upgrade changes the Node.js or controller
+executable path, review it and refresh the definition explicitly:
+
+```bash
+worktree-switcher service install --refresh
+```
+
+`service uninstall` removes only the user-service definition. It preserves the
+database, credentials, configuration, and logs. Foreground
+`worktree-switcher start` remains available, and a singleton lock rejects a
+second controller before it opens SQLite or network listeners.
+
+`service status` includes the controller PID, uptime, restart/exit data when
+the platform provides it, and lightweight controller CPU and RSS usage. This
+is intentionally not a sampler for the complete Next.js process tree; managed
+server resource monitoring is a separate feature so the control plane stays
+negligible during development.
+
+On Linux, the service starts with the user's systemd session. Starting it
+before login requires the administrator-controlled `loginctl enable-linger`
+setting; Worktree Switcher explains this but never enables it. Inspect manager
+logs with:
+
+```bash
+journalctl --user -u worktree-switcher.service
+```
+
+On macOS, manager stdout and stderr go to
+`~/.local/state/worktree-switcher/logs/service.stdout.log` and
+`service.stderr.log` by default.
+
 ## How it works
 
 ```mermaid
@@ -258,6 +329,8 @@ Other commands:
 ```bash
 worktree-switcher config path
 worktree-switcher config mcp
+worktree-switcher service status
+worktree-switcher service url
 ```
 
 ## Data and logs
