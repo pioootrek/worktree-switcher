@@ -19,6 +19,7 @@ async function fixture() {
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "index.html"), "<!doctype html><title>Switcher</title>");
   const dashboard = vi.fn(async () => ({ projects: [] }));
+  const addProject = vi.fn(async () => undefined);
   const setProjectTls = vi.fn(async () => undefined);
   const listDirectories = vi.fn(async () => ({
     root: "/home/test",
@@ -27,7 +28,7 @@ async function fixture() {
     directories: [{ name: "code", path: "/home/test/code" }],
     files: [],
   }));
-  const service = { dashboard, setProjectTls } as unknown as ControlService;
+  const service = { addProject, dashboard, setProjectTls } as unknown as ControlService;
   const controller = createControllerServer({
     service,
     directoryBrowser: { list: listDirectories } as unknown as DirectoryBrowser,
@@ -43,7 +44,7 @@ async function fixture() {
     controller.server.listen(0, "127.0.0.1", resolve);
   });
   const address = controller.server.address() as AddressInfo;
-  return { base: `http://127.0.0.1:${address.port}`, dashboard, listDirectories, setProjectTls };
+  return { addProject, base: `http://127.0.0.1:${address.port}`, dashboard, listDirectories, setProjectTls };
 }
 
 afterEach(async () => {
@@ -69,6 +70,29 @@ describe("controller access boundary", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ projects: [] });
     expect(dashboard).toHaveBeenCalledOnce();
+  });
+
+  it("localizes API errors from Accept-Language", async () => {
+    const { base } = await fixture();
+    const response = await fetch(`${base}/api/dashboard`, { headers: { "Accept-Language": "en-US" } });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "A valid access token is required." });
+  });
+
+  it("keeps conflict status codes when localizing an error", async () => {
+    const { addProject, base } = await fixture();
+    addProject.mockRejectedValueOnce(new Error("Projekt jest zablokowany przez agent:test."));
+    const response = await fetch(`${base}/api/projects`, {
+      method: "POST",
+      headers: {
+        "Accept-Language": "en-US",
+        "Content-Type": "application/json",
+        "X-Worktree-Switcher-Token": "test-access-token",
+      },
+      body: JSON.stringify({ name: "App", repositoryPath: "/tmp/app", port: 3000 }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "The project is locked by agent:test." });
   });
 
   it("serves authenticated directory listings through the browser service", async () => {

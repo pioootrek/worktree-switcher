@@ -5,6 +5,7 @@ import { homedir, networkInterfaces } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { systemLocale, translate } from "../i18n/messages";
 import { openBrowser } from "./browser";
 import { writeCliLine } from "./output";
 import { pairingUrl } from "./pairing-url";
@@ -24,6 +25,7 @@ function option(name: string): string | undefined {
 }
 
 async function main(): Promise<void> {
+  const locale = systemLocale(process.env);
   const command = process.argv[2] && !process.argv[2].startsWith("-") ? process.argv[2] : "start";
   const paths = resolveAppPaths(option("--data-dir"), option("--state-dir"));
   if (command === "config" && process.argv[3] === "path") {
@@ -31,17 +33,17 @@ async function main(): Promise<void> {
     return;
   }
   if (command !== "start") {
-    console.error("Dostępne polecenia: start, config path");
+    console.error(translate(locale, "cli.commands"));
     process.exitCode = 1;
     return;
   }
 
   const host = option("--host") ?? "0.0.0.0";
   const port = Number(option("--port") ?? 47831);
-  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Nieprawidłowy port kontrolera.");
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error(translate(locale, "cli.invalidPort"));
   const defaultWebRoot = resolve(fileURLToPath(new URL("../../out", import.meta.url)));
   const webRoot = resolve(option("--web-root") ?? defaultWebRoot);
-  if (!existsSync(webRoot)) throw new Error(`Brak statycznego panelu w ${webRoot}. Najpierw uruchom pnpm build.`);
+  if (!existsSync(webRoot)) throw new Error(translate(locale, "cli.missingPanel", { path: webRoot }));
 
   const events = new EventStream();
   const logs = new FileLogWriter(paths.logDirectory);
@@ -68,17 +70,17 @@ async function main(): Promise<void> {
   const lanHost = host === "0.0.0.0" ? findLanAddress() ?? browserHost : host;
   const localAddress = pairingUrl(browserHost, port, accessToken, sessionId);
   const lanAddress = pairingUrl(lanHost, port, accessToken, sessionId);
-  writeCliLine(`Worktree Switcher nasłuchuje na ${host}:${port}`);
-  writeCliLine(`Link dostępu: ${lanAddress}`);
-  writeCliLine(`Logi: ${paths.logDirectory}`);
-  writeCliLine("Traktuj link jak hasło — umożliwia sterowanie lokalnymi procesami.");
+  writeCliLine(translate(locale, "cli.listening", { host, port }));
+  writeCliLine(translate(locale, "cli.accessLink", { url: lanAddress }));
+  writeCliLine(translate(locale, "cli.logs", { path: paths.logDirectory }));
+  writeCliLine(translate(locale, "cli.secret"));
 
   if (!process.argv.includes("--no-open")) openBrowser(localAddress);
   let closing = false;
   const shutdown = async () => {
     if (closing) return;
     closing = true;
-    writeCliLine("Zatrzymywanie zarządzanych procesów…");
+    writeCliLine(translate(locale, "cli.stopping"));
     await controller.close();
     await service.shutdown();
   };

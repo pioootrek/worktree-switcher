@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 
+import { systemLocale, translate } from "../i18n/messages";
+
 export interface BrowserCommand {
   command: string;
   args: string[];
@@ -17,15 +19,16 @@ export function browserCommand(
 }
 
 export function openBrowser(url: string): void {
+  const locale = systemLocale(process.env);
   const launch = browserCommand(url);
   if (!launch) {
-    console.warn("Nie wykryto sesji graficznej; otwórz wyświetlony link ręcznie.");
+    console.warn(translate(locale, "cli.noGui"));
     return;
   }
   const child = spawn(launch.command, launch.args, { detached: true, stdio: "ignore" });
   child.once("error", (error) => {
-    console.warn(`Nie udało się automatycznie otworzyć przeglądarki: ${error.message}`);
-    console.warn("Kontroler nadal działa; otwórz wyświetlony link ręcznie.");
+    console.warn(translate(locale, "cli.openFailed", { error: error.message }));
+    console.warn(translate(locale, "cli.controllerContinues"));
   });
   child.unref();
 }

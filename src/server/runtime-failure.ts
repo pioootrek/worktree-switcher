@@ -1,8 +1,8 @@
 import type { Project, RuntimeFailure } from "@/shared/contracts";
 
 function exitDetails(code: number | null, signal: NodeJS.Signals | null): string {
-  if (signal) return `Sygnał procesu: ${signal}.`;
-  return `Kod wyjścia procesu: ${code ?? "nieznany"}.`;
+  if (signal) return `signal=${signal}`;
+  return `exit_code=${code ?? "unknown"}`;
 }
 
 export function portInUseFailure(project: Project): RuntimeFailure {
@@ -11,7 +11,7 @@ export function portInUseFailure(project: Project): RuntimeFailure {
     title: `Port ${project.port} jest już używany`,
     message: "Na tym porcie działa inny serwer. Worktree Switcher pozostawił go bez zmian.",
     suggestion: "Zatrzymaj tamten serwer albo ustaw dla projektu inny port. Serwer zarządzany przez systemd trzeba podłączyć do Switchera zamiast uruchamiać drugi proces.",
-    technicalDetails: `Wykryto aktywne połączenie TCP na porcie ${project.port}. Proces nie został uruchomiony.`,
+    technicalDetails: `tcp_port=${project.port} status=occupied launch=skipped`,
   };
 }
 
@@ -40,7 +40,7 @@ export function timeoutFailure(project: Project): RuntimeFailure {
     title: "Serwer nie zgłosił gotowości",
     message: `Proces działał, ale nie odpowiedział na porcie ${project.port} w ciągu ${project.startupTimeoutMs / 1000} sekund.`,
     suggestion: "Sprawdź Logi. Aplikacja mogła wystartować na innym porcie, używać HTTPS albo potrzebować więcej czasu.",
-    technicalDetails: `Przekroczono limit startu ${project.startupTimeoutMs} ms dla ${project.healthcheckPath}.`,
+    technicalDetails: `startup_timeout_ms=${project.startupTimeoutMs} healthcheck_path=${project.healthcheckPath}`,
   };
 }
 
@@ -54,7 +54,7 @@ export function processExitFailure(
   const technicalDetails = exitDetails(code, signal);
 
   if (/EADDRINUSE|address already in use|port .*already in use/i.test(text)) {
-    return { ...portInUseFailure(project), technicalDetails: `${technicalDetails} Proces zgłosił zajęty adres.` };
+    return { ...portInUseFailure(project), technicalDetails: `${technicalDetails} reason=address_in_use` };
   }
   if (/ERR_PNPM_NO_SCRIPT|missing script[^\n]*dev|command ["']?dev["']? not found/i.test(text)) {
     return {

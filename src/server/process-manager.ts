@@ -158,7 +158,7 @@ export class ProcessManager {
     runtime.phase = "stopped";
     runtime.error = null;
     runtime.failure = null;
-    this.append(runtime, "Proces zatrzymany przez Worktree Switcher.");
+    this.append(runtime, "process_stopped_by=worktree-switcher");
     this.onChange();
   }
 
@@ -202,6 +202,6 @@ export class ProcessManager {
     runtime.phase = "failed";
     runtime.error = failure.message;
     runtime.failure = failure;
-    this.append(runtime, `BŁĄD: ${failure.title}. ${failure.technicalDetails}`);
+    this.append(runtime, `ERROR: ${failure.code} ${failure.technicalDetails}`);
   }
 }

@@ -121,6 +121,12 @@ The dashboard uses shadcn/ui source components with the `new-york` style,
 Radix primitives, Tailwind CSS, and CSS-variable design tokens. It is dark-first
 for a developer-tool context while retaining a light/system theme option.
 
+The interface supports Polish and English through an owned, typed translation
+layer with no hosted localization dependency. English is the default and
+fallback language. A visible control persists manual preference locally, and API
+requests carry the selected language so controller errors match the dashboard.
+CLI output follows the operating-system locale.
+
 Only components used by an implemented flow are added to the repository. The
 initial set covers buttons, cards, badges, tables, dialogs, destructive
 confirmations, tabs, selects, tooltips, scroll areas, skeletons, alerts, and a

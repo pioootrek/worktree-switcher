@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { I18nProvider } from "@/i18n/provider";
 
 import "./globals.css";
 
@@ -23,9 +24,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="pl" className={`${geistSans.variable} ${geistMono.variable} dark`} suppressHydrationWarning>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} dark`} suppressHydrationWarning>
       <body>
-        <TooltipProvider>{children}</TooltipProvider>
+        <I18nProvider><TooltipProvider>{children}</TooltipProvider></I18nProvider>
       </body>
     </html>
   );

@@ -24,6 +24,13 @@ przeglądarki i pozostaje aktywny, czekając na ręczne otwarcie linku. Dane tra
 `$XDG_DATA_HOME/worktree-switcher/state.sqlite3` albo do
 `~/.local/share/worktree-switcher/state.sqlite3`.
 
+Panel jest dostępny po angielsku i polsku. Angielski jest językiem domyślnym,
+niezależnie od ustawień przeglądarki. Przycisk `PL`/`EN` w nagłówku pozwala
+zmienić język ręcznie.
+Wybór jest zapisywany lokalnie w przeglądarce. Obejmuje interfejs, komunikaty
+błędów zwracane przez kontroler i browser plików. Komunikaty CLI używają języka
+ustawionego w `LC_ALL`, `LC_MESSAGES` lub `LANG` systemu operacyjnego.
+
 Trwałe logi trafiają do katalogu stanu użytkownika, domyślnie
 `~/.local/state/worktree-switcher/logs/`. `controller.log` zawiera operacje
 kontrolera, a `projects/<id>.log` pełny zapis procesu projektu. Pliki obracają

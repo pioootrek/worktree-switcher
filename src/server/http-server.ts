@@ -3,7 +3,10 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
 
+import type { DashboardResponse } from "@/shared/contracts";
 import { ControlService } from "./control-service";
+import { localeFrom } from "../i18n/messages";
+import { localizeServerMessage } from "../i18n/server-errors";
 import { DirectoryBrowser } from "./directory-browser";
 import { EventStream } from "./events";
 
@@ -123,6 +126,22 @@ function messageFrom(error: unknown): string {
   return String(error);
 }
 
+function localizedDashboard(dashboard: DashboardResponse, locale: "pl" | "en"): DashboardResponse {
+  if (locale === "pl") return dashboard;
+  return {
+    projects: dashboard.projects.map((snapshot) => ({
+      ...snapshot,
+      discoveryError: snapshot.discoveryError
+        ? localizeServerMessage(snapshot.discoveryError, locale)
+        : undefined,
+      runtime: {
+        ...snapshot.runtime,
+        error: snapshot.runtime.error ? localizeServerMessage(snapshot.runtime.error, locale) : null,
+      },
+    })),
+  };
+}
+
 export interface ControllerServer {
   server: Server;
   close(): Promise<void>;
@@ -164,19 +183,20 @@ export function createControllerServer(options: {
   const fallbackOrigin = `http://${options.host}:${options.port}`;
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", request.headers.host ? `http://${request.headers.host}` : fallbackOrigin);
+    const locale = localeFrom(request.headers["accept-language"]);
     try {
       if (url.pathname.startsWith("/api/")) {
         response.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
         if (!hasValidToken(request, url, options.accessToken)) {
-          json(response, 401, { error: "Brak prawidłowego klucza dostępu." });
+          json(response, 401, { error: localizeServerMessage("Brak prawidłowego klucza dostępu.", locale) });
           return;
         }
         if (request.method !== "GET" && !hasValidOrigin(request)) {
-          json(response, 403, { error: "Odrzucono żądanie z obcego originu." });
+          json(response, 403, { error: localizeServerMessage("Odrzucono żądanie z obcego originu.", locale) });
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/dashboard") {
-          json(response, 200, await options.service.dashboard());
+          json(response, 200, localizedDashboard(await options.service.dashboard(), locale));
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/directories") {
@@ -239,7 +259,7 @@ export function createControllerServer(options: {
           json(response, 200, { ok: true });
           return;
         }
-        json(response, 404, { error: "Nie znaleziono endpointu." });
+        json(response, 404, { error: localizeServerMessage("Nie znaleziono endpointu.", locale) });
         return;
       }
 
@@ -249,8 +269,9 @@ export function createControllerServer(options: {
       }
       serveStatic(options.webRoot, url.pathname, response, request.method === "HEAD");
     } catch (error) {
-      const message = messageFrom(error);
-      const conflict = /zajęty|zablokowany|UNIQUE constraint/i.test(message);
+      const rawMessage = messageFrom(error);
+      const conflict = /zajęty|zablokowany|UNIQUE constraint/i.test(rawMessage);
+      const message = localizeServerMessage(rawMessage, locale);
       json(response, conflict ? 409 : 400, { error: message });
     }
   });

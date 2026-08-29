@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useI18n } from "@/i18n/provider";
 import type { DirectoryListing } from "@/shared/contracts";
 
 interface CertificateFilePickerProps {
@@ -30,13 +31,14 @@ export function CertificateFilePicker({
   placeholder,
   required = false,
 }: CertificateFilePickerProps) {
+  const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = async (path?: string) => {
-    if (!token) return setError("Sesja kontrolera nie jest jeszcze gotowa.");
+    if (!token) return setError(t("dashboard.sessionPending"));
     setLoading(true);
     setError(null);
     try {
@@ -44,10 +46,13 @@ export function CertificateFilePicker({
       if (path) query.set("path", path);
       const response = await fetch(`/api/directories?${query}`, {
         cache: "no-store",
-        headers: { "X-Worktree-Switcher-Token": token },
+        headers: {
+          "Accept-Language": locale,
+          "X-Worktree-Switcher-Token": token,
+        },
       });
       const body = await response.json() as DirectoryListing & { error?: string };
-      if (!response.ok) throw new Error(body.error ?? `Błąd HTTP ${response.status}`);
+      if (!response.ok) throw new Error(body.error ?? t("http.error", { status: response.status }));
       setListing(body);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -72,7 +77,7 @@ export function CertificateFilePicker({
           onClick={() => { setOpen(true); void load(containingDirectory(value)); }}
           disabled={!token}
         >
-          <FolderOpen aria-hidden />Przeglądaj
+          <FolderOpen aria-hidden />{t("common.browse")}
         </Button>
       </div>
 
@@ -83,17 +88,17 @@ export function CertificateFilePicker({
               type="button"
               size="icon-sm"
               variant="ghost"
-              aria-label="Przejdź do katalogu nadrzędnego"
+              aria-label={t("picker.parent")}
               disabled={!listing?.parent || loading}
               onClick={() => void load(listing?.parent ?? undefined)}
             >
               <ArrowUp aria-hidden />
             </Button>
             <p className="min-w-0 flex-1 truncate font-mono text-xs" title={listing?.current}>
-              {listing?.current ?? "Wczytywanie katalogu…"}
+              {listing?.current ?? t("picker.loadingDirectory")}
             </p>
             <Button type="button" size="sm" variant="ghost" onClick={() => void load()} disabled={loading}>
-              <Home aria-hidden />Dom
+              <Home aria-hidden />{t("common.home")}
             </Button>
           </div>
 
@@ -101,10 +106,10 @@ export function CertificateFilePicker({
             {loading ? (
               <div className="flex h-40 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
                 <LoaderCircle className="size-5 animate-spin motion-reduce:animate-none" aria-hidden />
-                Odczytywanie plików…
+                {t("picker.readingFiles")}
               </div>
             ) : (
-              <div className="p-1" aria-label="Katalogi i pliki certyfikatów">
+              <div className="p-1" aria-label={t("picker.certificateFiles")}>
                 {listing?.directories.map((directory) => (
                   <Button
                     key={directory.path}
@@ -130,14 +135,14 @@ export function CertificateFilePicker({
                   </Button>
                 ))}
                 {!loading && !listing?.directories.length && !listing?.files.length && (
-                  <p className="p-6 text-center text-sm text-muted-foreground">Brak plików PEM, CRT, CER lub KEY.</p>
+                  <p className="p-6 text-center text-sm text-muted-foreground">{t("picker.noCertificateFiles")}</p>
                 )}
               </div>
             )}
           </ScrollArea>
           {error && <p className="mt-2 text-sm text-destructive" role="alert">{error}</p>}
           <div className="mt-3 flex justify-end">
-            <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>Zamknij</Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>{t("common.close")}</Button>
           </div>
         </div>
       )}

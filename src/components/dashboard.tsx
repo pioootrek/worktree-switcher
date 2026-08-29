@@ -7,6 +7,7 @@ import {
   GitCommitHorizontal,
   LoaderCircle,
   LockKeyhole,
+  Languages,
   Moon,
   Play,
   Plus,
@@ -34,23 +35,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DirectoryPicker } from "@/components/directory-picker";
 import { CertificateFilePicker } from "@/components/certificate-file-picker";
-import type { DashboardResponse, DevServerTlsMode, Project, ProjectSnapshot, RuntimePhase } from "@/shared/contracts";
+import { useI18n } from "@/i18n/provider";
+import { dashboardSummary, type Translate } from "@/i18n/messages";
+import type { DashboardResponse, DevServerTlsMode, Project, ProjectSnapshot, RuntimeFailure, RuntimePhase } from "@/shared/contracts";
 
-const phaseLabels: Record<RuntimePhase, string> = {
-  stopped: "Zatrzymany",
-  starting: "Uruchamianie",
-  running: "Gotowy",
-  stopping: "Zatrzymywanie",
-  failed: "Błąd",
-};
-
-async function parseResponse<T>(response: Response): Promise<T> {
+async function parseResponse<T>(response: Response, fallback: string): Promise<T> {
   const body = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(body.error ?? `Błąd HTTP ${response.status}`);
+  if (!response.ok) throw new Error(body.error ?? fallback);
   return body;
 }
 
 export function Dashboard() {
+  const { locale, setLocale, t } = useI18n();
   const [data, setData] = useState<DashboardResponse>({ projects: [] });
   const [token, setToken] = useState("");
   const [loading, setLoading] = useState(true);
@@ -62,16 +58,16 @@ export function Dashboard() {
     try {
       const response = await fetch("/api/dashboard", {
         cache: "no-store",
-        headers: { "X-Worktree-Switcher-Token": accessToken },
+        headers: { "Accept-Language": locale, "X-Worktree-Switcher-Token": accessToken },
       });
-      setData(await parseResponse<DashboardResponse>(response));
+      setData(await parseResponse<DashboardResponse>(response, t("http.error", { status: response.status })));
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [locale, t]);
 
   useEffect(() => {
     let events: EventSource | null = null;
@@ -80,7 +76,7 @@ export function Dashboard() {
       const accessToken = fragment.get("token") ?? window.sessionStorage.getItem("worktree-switcher-token");
       if (!accessToken) {
         setLoading(false);
-        setError("Brak klucza dostępu. Otwórz pełny link wyświetlony przez kontroler.");
+        setError(t("dashboard.missingToken"));
         return;
       }
       window.sessionStorage.setItem("worktree-switcher-token", accessToken);
@@ -89,26 +85,26 @@ export function Dashboard() {
       void refresh(accessToken);
       events = new EventSource(`/api/events?token=${encodeURIComponent(accessToken)}`);
       events.addEventListener("changed", () => void refresh(accessToken));
-      events.onerror = () => setError("Utracono połączenie z kontrolerem. Trwa ponawianie…");
+      events.onerror = () => setError(t("dashboard.connectionLost"));
     }, 0);
     return () => {
       window.clearTimeout(initialRefresh);
       events?.close();
     };
-  }, [refresh]);
+  }, [refresh, t]);
 
   const mutate = useCallback(async (path: string, body: unknown, success: string) => {
-    if (!token) throw new Error("Sesja kontrolera nie jest jeszcze gotowa.");
+    if (!token) throw new Error(t("dashboard.sessionPending"));
     const response = await fetch(path, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Worktree-Switcher-Token": token },
+      headers: { "Accept-Language": locale, "Content-Type": "application/json", "X-Worktree-Switcher-Token": token },
       body: JSON.stringify(body),
     });
-    await parseResponse(response);
+    await parseResponse(response, t("http.error", { status: response.status }));
     setNotice(success);
     setError(null);
     await refresh(token);
-  }, [refresh, token]);
+  }, [locale, refresh, t, token]);
 
   const runningCount = useMemo(
     () => data.projects.filter(({ runtime }) => runtime.phase === "running").length,
@@ -124,7 +120,7 @@ export function Dashboard() {
               <GitBranch className="size-5 text-indigo-300" aria-hidden />
             </div>
             <div>
-              <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Local control plane</p>
+              <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">{t("dashboard.tagline")}</p>
               <h1 className="text-2xl font-semibold tracking-tight">Worktree Switcher</h1>
             </div>
           </div>
@@ -134,8 +130,17 @@ export function Dashboard() {
                 <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-50 motion-reduce:animate-none" />
                 <span className="relative inline-flex size-2 rounded-full bg-emerald-400" />
               </span>
-              {runningCount} aktywne · {data.projects.length} projektów
+              {dashboardSummary(locale, runningCount, data.projects.length)}
             </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLocale(locale === "pl" ? "en" : "pl")}
+              aria-label={t("language.label")}
+              title={t("language.label")}
+            >
+              <Languages aria-hidden />{locale === "pl" ? "EN" : "PL"}
+            </Button>
             <ThemeToggle />
             <AddProjectDialog open={dialogOpen} onOpenChange={setDialogOpen} mutate={mutate} token={token} />
           </div>
@@ -145,7 +150,7 @@ export function Dashboard() {
         {error && (
           <Alert variant="destructive" className="mb-5">
             <AlertTriangle aria-hidden />
-            <AlertTitle>Nie udało się wykonać operacji</AlertTitle>
+            <AlertTitle>{t("dashboard.operationError")}</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
@@ -153,12 +158,12 @@ export function Dashboard() {
         {loading ? (
           <div className="grid place-items-center py-28 text-muted-foreground">
             <LoaderCircle className="mb-3 size-6 animate-spin motion-reduce:animate-none" aria-hidden />
-            Łączenie z kontrolerem…
+            {t("dashboard.connecting")}
           </div>
         ) : data.projects.length === 0 ? (
           <EmptyState onAdd={() => setDialogOpen(true)} />
         ) : (
-          <section className="grid gap-5 xl:grid-cols-2" aria-label="Zarejestrowane projekty">
+          <section className="grid gap-5 xl:grid-cols-2" aria-label={t("dashboard.projects")}>
             {data.projects.map((snapshot) => (
               <ProjectCard key={snapshot.project.id} snapshot={snapshot} mutate={mutate} setError={setError} token={token} />
             ))}
@@ -167,6 +172,54 @@ export function Dashboard() {
       </div>
     </main>
   );
+}
+
+function localizedFailure(project: Project, failure: RuntimeFailure, t: Translate) {
+  const values = { port: project.port, executable: project.executable };
+  switch (failure.code) {
+    case "port_in_use":
+      return {
+        title: t("failure.port_in_use.title", values),
+        message: t("failure.port_in_use.message"),
+        suggestion: t("failure.port_in_use.suggestion"),
+      };
+    case "missing_dev_script":
+      return {
+        title: t("failure.missing_dev_script.title"),
+        message: t("failure.missing_dev_script.message"),
+        suggestion: t("failure.missing_dev_script.suggestion"),
+      };
+    case "invalid_arguments":
+      return {
+        title: t("failure.invalid_arguments.title"),
+        message: t("failure.invalid_arguments.message"),
+        suggestion: t("failure.invalid_arguments.suggestion"),
+      };
+    case "missing_executable":
+      return {
+        title: t("failure.missing_executable.title", values),
+        message: t("failure.missing_executable.message"),
+        suggestion: t("failure.missing_executable.suggestion"),
+      };
+    case "resource_limit":
+      return {
+        title: t("failure.resource_limit.title"),
+        message: t("failure.resource_limit.message"),
+        suggestion: t("failure.resource_limit.suggestion"),
+      };
+    case "startup_timeout":
+      return {
+        title: t("failure.startup_timeout.title", values),
+        message: t("failure.startup_timeout.message", values),
+        suggestion: t("failure.startup_timeout.suggestion"),
+      };
+    case "process_exit":
+      return {
+        title: t("failure.process_exit.title"),
+        message: t("failure.process_exit.message"),
+        suggestion: t("failure.process_exit.suggestion"),
+      };
+  }
 }
 
 function ProjectCard({
@@ -180,12 +233,14 @@ function ProjectCard({
   setError: (message: string | null) => void;
   token: string;
 }) {
+  const { locale, t } = useI18n();
   const { project, runtime, reservation, worktrees } = snapshot;
   const initial = project.selectedWorktreePath ?? worktrees[0]?.path ?? "";
   const [selected, setSelected] = useState(initial);
   const [pending, setPending] = useState<string | null>(null);
   const selectedWorktree = worktrees.find((worktree) => worktree.path === selected);
   const isBusy = runtime.phase === "starting" || runtime.phase === "stopping" || pending !== null;
+  const failureCopy = runtime.failure ? localizedFailure(project, runtime.failure, t) : null;
 
   const act = async (operation: "start" | "stop" | "restart" | "switch") => {
     setPending(operation);
@@ -193,7 +248,7 @@ function ProjectCard({
       await mutate(
         `/api/projects/${project.id}/operation`,
         { operation, worktreePath: selected || undefined },
-        `${project.name}: operacja ${operation} zakończona.`,
+        t("project.operationDone", { name: project.name, operation: t(`operation.${operation}`) }),
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -208,7 +263,9 @@ function ProjectCard({
       await mutate(
         `/api/projects/${project.id}/reservation`,
         { action, worktreePath: selected || undefined },
-        action === "acquire" ? `${project.name}: blokada założona.` : `${project.name}: blokada zdjęta.`,
+        action === "acquire"
+          ? t("project.reserved", { name: project.name })
+          : t("project.released", { name: project.name }),
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -249,23 +306,23 @@ function ProjectCard({
         {reservation && (
           <Alert className="mb-4 border-amber-400/25 bg-amber-400/7 text-amber-100">
             <LockKeyhole aria-hidden />
-            <AlertTitle>Zablokowany przez {reservation.owner}</AlertTitle>
-            <AlertDescription className="truncate">Przypięty do {reservation.worktreePath}</AlertDescription>
+            <AlertTitle>{t("project.lockedBy", { owner: reservation.owner })}</AlertTitle>
+            <AlertDescription className="truncate">{t("project.pinnedTo", { path: reservation.worktreePath })}</AlertDescription>
           </Alert>
         )}
         {selectedWorktree?.dirty && (
           <Alert className="mb-4 border-amber-400/20 bg-amber-400/5 text-amber-100">
             <AlertTriangle aria-hidden />
-            <AlertDescription>Ten worktree zawiera niezacommitowane zmiany. Uruchomienie jest dozwolone.</AlertDescription>
+            <AlertDescription>{t("project.dirtyWarning")}</AlertDescription>
           </Alert>
         )}
 
         <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
           <div className="space-y-2">
-            <Label htmlFor={`worktree-${project.id}`}>Aktywny worktree</Label>
+            <Label htmlFor={`worktree-${project.id}`}>{t("project.activeWorktree")}</Label>
             <Select value={selected} onValueChange={setSelected} disabled={isBusy || worktrees.length === 0}>
               <SelectTrigger id={`worktree-${project.id}`} className="w-full">
-                <SelectValue placeholder="Brak worktree" />
+                <SelectValue placeholder={t("project.noWorktree")} />
               </SelectTrigger>
               <SelectContent>
                 {worktrees.map((worktree) => (
@@ -292,10 +349,10 @@ function ProjectCard({
                   <RotateCcw aria-hidden />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Uruchom ponownie</TooltipContent>
+              <TooltipContent>{t("project.restart")}</TooltipContent>
             </Tooltip>
             <Button variant="secondary" onClick={() => void act("switch")} disabled={isBusy || !selected || runtime.worktreePath === selected}>
-              <RefreshCw aria-hidden />Przełącz
+              <RefreshCw aria-hidden />{t("project.switch")}
             </Button>
           </div>
         </div>
@@ -303,28 +360,28 @@ function ProjectCard({
         <Separator className="my-5" />
         <Tabs defaultValue="status">
           <TabsList>
-            <TabsTrigger value="status">Status</TabsTrigger>
-            <TabsTrigger value="logs">Logi <span className="text-muted-foreground">{runtime.logs.length}</span></TabsTrigger>
+            <TabsTrigger value="status">{t("project.status")}</TabsTrigger>
+            <TabsTrigger value="logs">{t("project.logs")} <span className="text-muted-foreground">{runtime.logs.length}</span></TabsTrigger>
           </TabsList>
           <TabsContent value="status" className="mt-4">
             <dl className="grid grid-cols-2 gap-x-5 gap-y-3 text-sm sm:grid-cols-3">
-              <Metric label="Port" value={String(project.port)} />
-              <Metric label="Protokół" value={project.tlsMode === "off" ? "HTTP" : "HTTPS"} />
+              <Metric label={t("project.port")} value={String(project.port)} />
+              <Metric label={t("project.protocol")} value={project.tlsMode === "off" ? "HTTP" : "HTTPS"} />
               <Metric label="PID" value={runtime.pid ? String(runtime.pid) : "—"} />
-              <Metric label="Proces" value={`${project.executable} ${project.args.join(" ")}`} mono />
-              <Metric label="Commit" value={selectedWorktree?.shortHead ?? "—"} mono />
-              <Metric label="Gałąź" value={selectedWorktree?.branch ?? "detached"} />
-              <Metric label="Uruchomiony" value={runtime.startedAt ? new Date(runtime.startedAt).toLocaleTimeString("pl-PL") : "—"} />
+              <Metric label={t("project.process")} value={`${project.executable} ${project.args.join(" ")}`} mono />
+              <Metric label={t("project.commit")} value={selectedWorktree?.shortHead ?? "—"} mono />
+              <Metric label={t("project.branch")} value={selectedWorktree?.branch ?? "detached"} />
+              <Metric label={t("project.started")} value={runtime.startedAt ? new Date(runtime.startedAt).toLocaleTimeString(locale === "pl" ? "pl-PL" : "en-US") : "—"} />
             </dl>
-            {runtime.failure ? (
+            {failureCopy && runtime.failure ? (
               <Alert variant="destructive" className="mt-4">
                 <AlertTriangle aria-hidden />
-                <AlertTitle>{runtime.failure.title}</AlertTitle>
+                <AlertTitle>{failureCopy.title}</AlertTitle>
                 <AlertDescription className="space-y-2">
-                  <p>{runtime.failure.message}</p>
-                  <p><span className="font-medium">Co możesz zrobić:</span> {runtime.failure.suggestion}</p>
+                  <p>{failureCopy.message}</p>
+                  <p><span className="font-medium">{t("project.actionHint")}</span> {failureCopy.suggestion}</p>
                   <details>
-                    <summary className="cursor-pointer select-none text-xs">Szczegóły techniczne</summary>
+                    <summary className="cursor-pointer select-none text-xs">{t("project.technicalDetails")}</summary>
                     <p className="mt-1 font-mono text-xs">{runtime.failure.technicalDetails}</p>
                   </details>
                 </AlertDescription>
@@ -336,21 +393,21 @@ function ProjectCard({
           <TabsContent value="logs" className="mt-4">
             <ScrollArea className="h-40 rounded-md border bg-black/35 p-3">
               <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-zinc-300">
-                {runtime.logs.length ? runtime.logs.join("\n") : "Brak logów dla bieżącej sesji."}
+                {runtime.logs.length ? runtime.logs.join("\n") : t("project.noLogs")}
               </pre>
             </ScrollArea>
           </TabsContent>
         </Tabs>
 
         <div className="mt-5 flex items-center justify-between gap-3 border-t border-white/7 pt-4">
-          <p className="truncate text-xs text-muted-foreground" title={selectedWorktree?.path}>{selectedWorktree?.path ?? "Brak wyboru"}</p>
+          <p className="truncate text-xs text-muted-foreground" title={selectedWorktree?.path}>{selectedWorktree?.path ?? t("project.noSelection")}</p>
           {reservation ? (
             <Button size="sm" variant="ghost" onClick={() => void reserve("release")} disabled={isBusy}>
-              <UnlockKeyhole aria-hidden />Zwolnij
+              <UnlockKeyhole aria-hidden />{t("project.release")}
             </Button>
           ) : (
             <Button size="sm" variant="ghost" onClick={() => void reserve("acquire")} disabled={isBusy || !selected}>
-              <LockKeyhole aria-hidden />Zablokuj
+              <LockKeyhole aria-hidden />{t("project.reserve")}
             </Button>
           )}
         </div>
@@ -372,6 +429,7 @@ function TlsSettingsDialog({
   mutate: (path: string, body: unknown, success: string) => Promise<void>;
   setError: (message: string | null) => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<DevServerTlsMode>(project.tlsMode);
   const [keyPath, setKeyPath] = useState(project.tlsKeyPath ?? "");
@@ -387,7 +445,7 @@ function TlsSettingsDialog({
       await mutate(
         `/api/projects/${project.id}/tls`,
         { mode, keyPath: keyPath || null, certPath: certPath || null, caPath: caPath || null },
-        `${project.name}: ustawienia HTTPS zapisane.`,
+        t("tls.saved", { name: project.name }),
       );
       setOpen(false);
     } catch (cause) {
@@ -400,26 +458,26 @@ function TlsSettingsDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="icon-sm" aria-label="Ustawienia HTTPS" title="Ustawienia HTTPS">
+        <Button variant="outline" size="icon-sm" aria-label={t("tls.settings")} title={t("tls.settings")}>
           <ShieldCheck aria-hidden />
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>HTTPS serwera deweloperskiego</DialogTitle>
+          <DialogTitle>{t("tls.title")}</DialogTitle>
           <DialogDescription>
-            Ustawienie dotyczy procesu Next.js projektu {project.name}, nie panelu Worktree Switcher.
+            {t("tls.description", { name: project.name })}
           </DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={(event) => void save(event)}>
           <div className="space-y-2">
-            <Label htmlFor={`tls-mode-${project.id}`}>Tryb</Label>
+            <Label htmlFor={`tls-mode-${project.id}`}>{t("tls.mode")}</Label>
             <Select value={mode} onValueChange={(value) => setMode(value as DevServerTlsMode)}>
               <SelectTrigger id={`tls-mode-${project.id}`} className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="off">HTTP</SelectItem>
-                <SelectItem value="generated">HTTPS, certyfikat generowany przez Next.js</SelectItem>
-                <SelectItem value="custom">HTTPS, własny klucz i certyfikat</SelectItem>
+                <SelectItem value="off">{t("tls.off")}</SelectItem>
+                <SelectItem value="generated">{t("tls.generated")}</SelectItem>
+                <SelectItem value="custom">{t("tls.custom")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -427,32 +485,32 @@ function TlsSettingsDialog({
           {mode === "generated" && (
             <Alert>
               <ShieldCheck aria-hidden />
-              <AlertDescription>Next.js użyje <code>--experimental-https</code> i wygeneruje lokalny certyfikat. Przeglądarka może wymagać zaakceptowania lokalnego CA.</AlertDescription>
+              <AlertDescription>{t("tls.generatedHint")}</AlertDescription>
             </Alert>
           )}
 
           {mode === "custom" && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor={`tls-key-${project.id}`}>Klucz prywatny</Label>
+                <Label htmlFor={`tls-key-${project.id}`}>{t("tls.privateKey")}</Label>
                 <CertificateFilePicker id={`tls-key-${project.id}`} token={token} value={keyPath} onChange={setKeyPath} placeholder="/home/me/certs/dev-key.pem" required />
               </div>
               <div className="space-y-2">
-                <Label htmlFor={`tls-cert-${project.id}`}>Certyfikat</Label>
+                <Label htmlFor={`tls-cert-${project.id}`}>{t("tls.certificate")}</Label>
                 <CertificateFilePicker id={`tls-cert-${project.id}`} token={token} value={certPath} onChange={setCertPath} placeholder="/home/me/certs/dev-cert.pem" required />
               </div>
               <div className="space-y-2">
-                <Label htmlFor={`tls-ca-${project.id}`}>CA, opcjonalnie</Label>
+                <Label htmlFor={`tls-ca-${project.id}`}>{t("tls.optionalCa")}</Label>
                 <CertificateFilePicker id={`tls-ca-${project.id}`} token={token} value={caPath} onChange={setCaPath} placeholder="/home/me/certs/root-ca.pem" />
               </div>
-              <p className="text-xs text-muted-foreground">Pliki pozostają na hoście kontrolera. Panel zapisuje ich ścieżki i nie przesyła zawartości klucza.</p>
+              <p className="text-xs text-muted-foreground">{t("tls.filesHint")}</p>
             </div>
           )}
 
-          {active && <p className="text-sm text-amber-300">Zatrzymaj serwer przed zapisaniem zmiany protokołu.</p>}
+          {active && <p className="text-sm text-amber-300">{t("tls.stopBeforeSave")}</p>}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Anuluj</Button>
-            <Button type="submit" disabled={active || pending}>{pending && <LoaderCircle className="animate-spin" aria-hidden />}Zapisz</Button>
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>{t("common.cancel")}</Button>
+            <Button type="submit" disabled={active || pending}>{pending && <LoaderCircle className="animate-spin" aria-hidden />}{t("common.save")}</Button>
           </div>
         </form>
       </DialogContent>
@@ -461,12 +519,13 @@ function TlsSettingsDialog({
 }
 
 function RuntimeBadge({ phase }: { phase: RuntimePhase }) {
+  const { t } = useI18n();
   const active = phase === "running";
   const busy = phase === "starting" || phase === "stopping";
   return (
     <Badge variant="outline" className={active ? "border-emerald-400/25 text-emerald-300" : phase === "failed" ? "border-red-400/25 text-red-300" : "text-muted-foreground"}>
       {busy ? <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden /> : <Activity aria-hidden />}
-      {phaseLabels[phase]}
+      {t(`phase.${phase}`)}
     </Badge>
   );
 }
@@ -481,6 +540,7 @@ function AddProjectDialog({ open, onOpenChange, mutate, token }: {
   mutate: (path: string, body: unknown, success: string) => Promise<void>;
   token: string;
 }) {
+  const { t } = useI18n();
   const [pending, setPending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [repositoryPath, setRepositoryPath] = useState("");
@@ -494,7 +554,7 @@ function AddProjectDialog({ open, onOpenChange, mutate, token }: {
         name: String(form.get("name") ?? ""),
         repositoryPath: String(form.get("repositoryPath") ?? ""),
         port: Number(form.get("port")),
-      }, "Projekt został dodany.");
+      }, t("add.success"));
       setRepositoryPath("");
       onOpenChange(false);
     } catch (cause) {
@@ -506,22 +566,22 @@ function AddProjectDialog({ open, onOpenChange, mutate, token }: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger asChild><Button><Plus aria-hidden />Dodaj projekt</Button></DialogTrigger>
+      <DialogTrigger asChild><Button><Plus aria-hidden />{t("add.trigger")}</Button></DialogTrigger>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Dodaj repozytorium</DialogTitle>
-          <DialogDescription>Switcher wykryje wszystkie worktree i przypisze projektowi stały port.</DialogDescription>
+          <DialogTitle>{t("add.title")}</DialogTitle>
+          <DialogDescription>{t("add.description")}</DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={(event) => void submit(event)}>
-          <div className="space-y-2"><Label htmlFor="name">Nazwa</Label><Input id="name" name="name" placeholder="Frontend" required maxLength={80} /></div>
+          <div className="space-y-2"><Label htmlFor="name">{t("add.name")}</Label><Input id="name" name="name" placeholder="Frontend" required maxLength={80} /></div>
           <div className="space-y-2">
-            <Label htmlFor="repositoryPath">Ścieżka repozytorium</Label>
+            <Label htmlFor="repositoryPath">{t("add.repositoryPath")}</Label>
             <DirectoryPicker token={token} value={repositoryPath} onChange={setRepositoryPath} />
           </div>
-          <div className="space-y-2"><Label htmlFor="port">Port aplikacji</Label><Input id="port" name="port" type="number" defaultValue="3000" min="1024" max="65535" required /></div>
-          <p className="text-xs text-muted-foreground">Komenda startowa i sposób przekazania portu zostaną wykryte z <code>package.json</code> oraz pliku blokady zależności.</p>
+          <div className="space-y-2"><Label htmlFor="port">{t("add.port")}</Label><Input id="port" name="port" type="number" defaultValue="3000" min="1024" max="65535" required /></div>
+          <p className="text-xs text-muted-foreground">{t("add.commandHint")}</p>
           {formError && <p className="text-sm text-destructive" role="alert">{formError}</p>}
-          <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Anuluj</Button><Button type="submit" disabled={pending}>{pending && <LoaderCircle className="animate-spin" aria-hidden />}Dodaj</Button></div>
+          <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button><Button type="submit" disabled={pending}>{pending && <LoaderCircle className="animate-spin" aria-hidden />}{t("add.submit")}</Button></div>
         </form>
       </DialogContent>
     </Dialog>
@@ -529,19 +589,21 @@ function AddProjectDialog({ open, onOpenChange, mutate, token }: {
 }
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
+  const { t } = useI18n();
   return (
     <Card className="mx-auto max-w-2xl border-dashed bg-card/45 py-10 text-center">
       <CardContent className="grid justify-items-center">
         <div className="mb-5 grid size-14 place-items-center rounded-2xl bg-muted"><GitCommitHorizontal className="size-6 text-muted-foreground" aria-hidden /></div>
-        <h2 className="text-xl font-semibold">Dodaj pierwszy projekt</h2>
-        <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Wskaż lokalne repozytorium Git. Switcher znajdzie jego worktree i pozwoli przełączać serwer bez zmiany portu.</p>
-        <Button className="mt-6" onClick={onAdd}><Plus aria-hidden />Dodaj repozytorium</Button>
+        <h2 className="text-xl font-semibold">{t("empty.title")}</h2>
+        <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">{t("empty.description")}</p>
+        <Button className="mt-6" onClick={onAdd}><Plus aria-hidden />{t("empty.action")}</Button>
       </CardContent>
     </Card>
   );
 }
 
 function ThemeToggle() {
+  const { t } = useI18n();
   const [dark, setDark] = useState(true);
   const toggle = () => {
     const next = !dark;
@@ -558,5 +620,5 @@ function ThemeToggle() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, []);
-  return <Button variant="outline" size="icon" onClick={toggle} aria-label={dark ? "Włącz jasny motyw" : "Włącz ciemny motyw"}>{dark ? <Sun aria-hidden /> : <Moon aria-hidden />}</Button>;
+  return <Button variant="outline" size="icon" onClick={toggle} aria-label={dark ? t("theme.light") : t("theme.dark")}>{dark ? <Sun aria-hidden /> : <Moon aria-hidden />}</Button>;
 }
