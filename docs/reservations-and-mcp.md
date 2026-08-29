@@ -64,6 +64,10 @@ Acquisition is an atomic compare-and-set operation. A conflict returns the
 current owner, reason, pinned worktree, and expiry without switching anything.
 The existing holder is never silently displaced.
 
+The controller implements acquisition as one SQLite write transaction that
+expires stale leases, checks the current claim, records the new claim, and
+appends its audit event. UI, CLI, and MCP never open the database directly.
+
 The preferred agent operation atomically reserves and switches the server. A
 separate `acquire` followed by `switch` would leave a race between the calls.
 If switching fails, the result reports both the failed runtime transition and
@@ -122,6 +126,8 @@ exposed as MCP tools.
   or environment, never from command-line arguments.
 - Every mutation records actor, MCP client identity, project, worktree, reason,
   timestamp, outcome, and lease ID without recording the raw token.
+- SQLite persists reservations and append-only audit events; the controller is
+  the only database owner and all adapters use the same transactional service.
 - Tool inputs use strict schemas and project/worktree identifiers are resolved
   against controller-owned discovery results.
 - UI and CLI clearly show owner, reason, age, expiry, and whether the process

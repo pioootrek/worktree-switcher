@@ -1,7 +1,7 @@
 {
   "author": "agent:codex",
   "body": {
-    "summary": "The persistent control plane lives outside managed worktrees. One lightweight Node process serves a statically exported Next.js UI and manages independent runtime slots. JSON persistence sits behind a replaceable ProjectStore. Keep Git as the worktree source of truth and defer workspace profiles, reverse proxying, and background service installation until the core switch flow is reliable."
+    "summary": "The persistent control plane lives outside managed worktrees. One lightweight Node process serves a statically exported Next.js UI and manages independent runtime slots. SQLite persistence sits behind a transactional StateStore owned only by the controller. Keep Git as the worktree source of truth and defer workspace profiles, reverse proxying, and background service installation until the core switch flow is reliable."
   },
   "created": "2026-08-29",
   "id": "NOTE-20260829-initial-architecture",

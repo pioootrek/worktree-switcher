@@ -25,15 +25,16 @@
 
 ## Persistence direction
 
-Git is authoritative for worktrees. Local persistence stores registered
-projects, commands, ports, health checks, and the last selection. A plain
-configuration file is sufficient for a narrow MVP; SQLite becomes useful for
-larger multi-project configuration, history, and workspace profiles.
+Git is authoritative for worktrees. SQLite stores registered projects,
+commands, ports, health checks, last selections, reservations, and audit events
+from the MVP. The requirement changed after introducing atomic leases and MCP
+coordination; the earlier JSON-adapter direction is superseded.
 
-Persistence is accessed through a `ProjectStore` application boundary. JSON is
-the first adapter and uses platform configuration/state directories plus
-atomic writes. Accounts later require authentication, authorization, ownership,
-and audit semantics in addition to a different persistence adapter.
+Persistence is accessed through a transactional `StateStore` application
+boundary. The controller is the only database owner; UI, CLI, and MCP call its
+services. The first adapter uses `better-sqlite3`, migrations, foreign keys,
+prepared statements, and WAL. Accounts later still require authentication,
+authorization, ownership, and audit semantics beyond the storage choice.
 
 ## Distribution
 

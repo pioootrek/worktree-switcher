@@ -59,15 +59,16 @@ idle RSS, negligible idle CPU, and a bounded log buffer.
 
 ## Persistence and service boundary
 
-The MVP stores versioned, human-readable JSON in the user's platform config
-directory. Runtime history and logs use the platform state directory. Writes
-are atomic and only one controller instance may own the files at a time.
+The MVP stores projects, settings, runtime recovery hints, reservations, and
+audit events in a local SQLite database. Logs use the platform state directory
+and remain outside the database. Only one controller instance owns the database
+and managed processes at a time.
 
 HTTP handlers and UI code do not access files directly. Application services
-depend on interfaces such as `ProjectStore`, `GitWorktreeReader`, and
-`ProcessRunner`; the first `ProjectStore` implementation is JSON-backed. A
-future SQLite or remote implementation can replace that adapter without
-changing use cases or API contracts.
+depend on interfaces such as `StateStore`, `GitWorktreeReader`, and
+`ProcessRunner`; the first `StateStore` implementation is SQLite-backed. A
+future remote implementation can replace that adapter without changing use
+cases or API contracts.
 
 User accounts are not part of the local MVP. Adding them later requires an
 authentication and authorization boundary plus ownership and concurrency
@@ -75,7 +76,7 @@ rules; changing the persistence adapter alone would not be sufficient.
 
 ## Configuration contract
 
-The configuration has a required `schemaVersion` and explicit project records.
+The database has explicit schema migrations and versioned project records.
 Commands are stored as an executable plus an argument array and always spawned
 without a shell. Each project declares its repository path, stable port,
 optional environment overrides, health check, startup timeout, and whether it
@@ -130,8 +131,8 @@ These are proposals, not yet committed MVP scope. Their working design is in
 
 - Use one lightweight Node.js controller and a statically exported Next.js UI;
   do not run a persistent Next.js server.
-- Start with a versioned JSON adapter behind application-service interfaces;
-  keep SQLite as a replaceable future adapter.
+- Use a local SQLite adapter behind application-service interfaces; keep all
+  database access inside the single controller process.
 - Use explicit, shell-free executable and argument arrays with per-project
   ports, environment overrides, health checks, and timeouts.
 - Publish the npm package and executable as `worktree-switcher`; default to a

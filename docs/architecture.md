@@ -22,7 +22,7 @@ The process contains four replaceable layers:
    configuration.
 3. Domain interfaces for persistence, Git inspection, process execution,
    clocks, and event publication.
-4. Local adapters backed by JSON, the Git CLI, Node child processes, and the
+4. Local adapters backed by SQLite, the Git CLI, Node child processes, and the
    filesystem.
 
 The layers are module boundaries inside one process, not separate services.
@@ -48,36 +48,57 @@ assumptions about Node.js behavior.
 
 ## Persistence
 
-Application code depends on a `ProjectStore` contract rather than JSON APIs:
+Application code depends on a transactional `StateStore` rather than SQL APIs.
+The unit of work groups project configuration, reservations, and audit events
+so one use case can commit them atomically:
 
 ```ts
-interface ProjectStore {
-  list(): Promise<ProjectConfig[]>
-  get(id: ProjectId): Promise<ProjectConfig | null>
-  save(project: ProjectConfig): Promise<void>
-  remove(id: ProjectId): Promise<void>
+interface StateStore {
+  transaction<T>(work: (tx: StateTransaction) => T): T
+}
+
+interface StateTransaction {
+  projects: ProjectStore
+  reservations: ReservationStore
+  audit: AuditStore
 }
 ```
 
-The MVP adapter uses `config.json` with a required `schemaVersion`. On Linux it
-lives below `$XDG_CONFIG_HOME/worktree-switcher/`, falling back to
-`~/.config/worktree-switcher/`. Logs and recoverable runtime state live below
+The MVP uses `better-sqlite3`: it is stable, provides prebuilt binaries for
+major supported platforms, and avoids depending on the current release-candidate
+status of Node's built-in `node:sqlite` module. The driver remains private to
+the adapter so it can be replaced without changing application services.
+
+On Linux the database lives below
+`$XDG_DATA_HOME/worktree-switcher/worktree-switcher.db`, falling back to
+`~/.local/share/worktree-switcher/worktree-switcher.db`. Logs live below
 `$XDG_STATE_HOME/worktree-switcher/`, falling back to
-`~/.local/state/worktree-switcher/`. Other platforms use their native user
-config and state locations.
+`~/.local/state/worktree-switcher/`. Other platforms use their native user data
+and state locations.
 
-Writes use a temporary sibling file followed by an atomic rename. A process
-lock prevents two controller instances from mutating the same state. Stored
-PIDs are hints only; restart reconciliation verifies process identity before
-acting on it.
+The controller opens one database connection, enables foreign keys and WAL,
+uses prepared statements, and runs numbered migrations before accepting
+requests. A process lock prevents two controller instances from owning the
+same database and process set. Stored PIDs are hints only; restart
+reconciliation verifies process identity before acting on them.
 
-SQLite is not used in the MVP. It becomes appropriate when transactional
-history, coordinated workspace profiles, concurrent writers, or indexed
-queries appear. The service and adapter boundary makes that migration local.
+Reservation acquisition uses a short `BEGIN IMMEDIATE` transaction: expire old
+leases, check the active reservation, insert the new reservation, and append
+the audit event before commit. A partial unique index enforces at most one
+unreleased reservation per project. Raw lease tokens are never stored.
+
+The initial schema contains `schema_migrations`, `settings`, `projects`,
+`reservations`, and append-only `audit_events`. Logs and Git-derived worktree
+metadata are not stored as relational history in the MVP. Database backup uses
+the SQLite backup API rather than copying live database/WAL files.
+
 Accounts would additionally require authentication, authorization, ownership,
-and audit semantics; they are not treated as a database-only change.
+and audit semantics; SQLite alone does not make the application multi-user.
 
-## Configuration version 1
+## Project configuration model
+
+The following is the application/API representation, not a JSON file persisted
+on disk:
 
 ```json
 {
@@ -110,15 +131,14 @@ and audit semantics; they are not treated as a database-only change.
 }
 ```
 
-Unknown schema versions fail with an actionable error. Project IDs are stable,
-URL-safe keys. Ports must be unique among simultaneously running projects.
+Unknown database schema versions fail with an actionable error. Project IDs are
+stable, URL-safe keys. Ports must be unique among simultaneously running projects.
 Repository paths are canonicalized during registration. The browser sends a
 discovered worktree identifier, not a command or arbitrary filesystem path.
 
 Environment values are explicit overrides merged onto a deliberately filtered
 controller environment. Secrets should remain in the managed project's normal
-environment mechanism and must not be copied into this configuration by
-default.
+environment mechanism and must not be copied into the database by default.
 
 ## CLI and package
 
