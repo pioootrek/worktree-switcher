@@ -1,0 +1,18 @@
+{
+  "author": "agent:codex",
+  "body": {
+    "summary": "The persistent control plane must live outside managed worktrees. Model each registered repository as an independent runtime slot with a stable port and a serialized lifecycle state machine. Keep Git as the worktree source of truth and defer coordinated workspace profiles and reverse proxying until the core switch flow is reliable."
+  },
+  "created": "2026-08-29",
+  "id": "NOTE-20260829-initial-architecture",
+  "last_reviewed": "2026-08-29",
+  "schema_version": 1,
+  "status": "active",
+  "tags": [
+    "architecture",
+    "git-worktree",
+    "multi-project",
+    "process-management"
+  ],
+  "title": "Initial multi-project architecture"
+}

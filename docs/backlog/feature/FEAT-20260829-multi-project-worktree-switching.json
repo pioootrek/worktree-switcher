@@ -1,0 +1,40 @@
+{
+  "area": "core",
+  "created": "2026-08-29",
+  "id": "FEAT-20260829-multi-project-worktree-switching",
+  "notes": [
+    {
+      "author": "human:project-owner",
+      "date": "2026-08-29",
+      "text": "One Switch instance must operate several projects concurrently; switching one project must not stop the others."
+    }
+  ],
+  "priority": "now",
+  "problem": [
+    "Developers manually stop and restart development servers when moving between Git worktrees, and the workflow becomes error-prone when several related repositories run at the same time."
+  ],
+  "risk": {
+    "dimensions": [
+      "availability",
+      "process"
+    ],
+    "level": "medium",
+    "rollback": "Disable process mutation and retain read-only worktree discovery if lifecycle management cannot reliably isolate projects and terminate complete child process trees."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Create a local control plane that registers multiple Git repositories, discovers their worktrees, and maintains one independently switchable server slot with a stable port for each project.",
+    "Include serialized lifecycle operations per project, readiness checks, isolated logs, loopback-only control endpoints, and reconciliation after control-plane restart."
+  ],
+  "source": "Product planning conversation on 2026-08-29",
+  "status": "open",
+  "title": "Run and switch multiple worktree-backed projects",
+  "type": "feature",
+  "validation": [
+    "Run at least three fixture projects concurrently, switch each to another worktree, and verify that only the selected project's process restarts while every project keeps its configured port.",
+    "Verify concurrent requests for one project are serialized, failures are isolated, stale paths and arbitrary commands are rejected, and the dashboard reports readiness and logs accurately."
+  ],
+  "value": [
+    "A developer can move an entire local stack between branches from one dashboard without repeatedly navigating directories or disturbing unrelated services."
+  ]
+}
