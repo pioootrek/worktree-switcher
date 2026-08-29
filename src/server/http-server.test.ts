@@ -1,0 +1,96 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { ControlService } from "./control-service";
+import { DirectoryBrowser } from "./directory-browser";
+import { EventStream } from "./events";
+import { createControllerServer, type ControllerServer } from "./http-server";
+
+const controllers: ControllerServer[] = [];
+const directories: string[] = [];
+
+async function fixture() {
+  const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-http-"));
+  directories.push(directory);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "index.html"), "<!doctype html><title>Switcher</title>");
+  const dashboard = vi.fn(async () => ({ projects: [] }));
+  const listDirectories = vi.fn(async () => ({
+    root: "/home/test",
+    current: "/home/test",
+    parent: null,
+    directories: [{ name: "code", path: "/home/test/code" }],
+  }));
+  const service = { dashboard } as unknown as ControlService;
+  const controller = createControllerServer({
+    service,
+    directoryBrowser: { list: listDirectories } as unknown as DirectoryBrowser,
+    events: new EventStream(),
+    webRoot: directory,
+    host: "0.0.0.0",
+    port: 0,
+    accessToken: "test-access-token",
+  });
+  controllers.push(controller);
+  await new Promise<void>((resolve, reject) => {
+    controller.server.once("error", reject);
+    controller.server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = controller.server.address() as AddressInfo;
+  return { base: `http://127.0.0.1:${address.port}`, dashboard, listDirectories };
+}
+
+afterEach(async () => {
+  await Promise.all(controllers.splice(0).map((controller) => controller.close()));
+  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
+
+describe("controller access boundary", () => {
+  it("allows the inline bootstrap scripts required by a static Next.js export", async () => {
+    const { base } = await fixture();
+    const response = await fetch(base);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-security-policy")).toContain("script-src 'self' 'unsafe-inline'");
+  });
+
+  it("protects dashboard data with the pairing token", async () => {
+    const { base, dashboard } = await fixture();
+    expect((await fetch(`${base}/api/dashboard`)).status).toBe(401);
+
+    const response = await fetch(`${base}/api/dashboard`, {
+      headers: { "X-Worktree-Switcher-Token": "test-access-token" },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ projects: [] });
+    expect(dashboard).toHaveBeenCalledOnce();
+  });
+
+  it("serves authenticated directory listings through the browser service", async () => {
+    const { base, listDirectories } = await fixture();
+    const response = await fetch(`${base}/api/directories?path=${encodeURIComponent("/home/test/code")}`, {
+      headers: { "X-Worktree-Switcher-Token": "test-access-token" },
+    });
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).directories).toEqual([{ name: "code", path: "/home/test/code" }]);
+    expect(listDirectories).toHaveBeenCalledWith("/home/test/code");
+  });
+
+  it("rejects authenticated mutations from a different browser origin", async () => {
+    const { base } = await fixture();
+    const response = await fetch(`${base}/api/projects`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "http://attacker.invalid",
+        "X-Worktree-Switcher-Token": "test-access-token",
+      },
+      body: JSON.stringify({ name: "App", repositoryPath: "/tmp/app", port: 3000 }),
+    });
+    expect(response.status).toBe(403);
+  });
+});

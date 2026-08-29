@@ -1,0 +1,138 @@
+"use client";
+
+import { ArrowUp, Folder, FolderOpen, Home, LoaderCircle } from "lucide-react";
+import { useState } from "react";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import type { DirectoryListing } from "@/shared/contracts";
+
+interface DirectoryPickerProps {
+  token: string;
+  value: string;
+  onChange: (path: string) => void;
+}
+
+async function parseListing(response: Response): Promise<DirectoryListing> {
+  const body = await response.json() as DirectoryListing & { error?: string };
+  if (!response.ok) throw new Error(body.error ?? `Błąd HTTP ${response.status}`);
+  return body;
+}
+
+export function DirectoryPicker({ token, value, onChange }: DirectoryPickerProps) {
+  const [open, setOpen] = useState(false);
+  const [listing, setListing] = useState<DirectoryListing | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async (path?: string) => {
+    if (!token) {
+      setError("Sesja kontrolera nie jest jeszcze gotowa.");
+      return;
+    }
+    setLoading(true);
+    setListing(null);
+    setError(null);
+    try {
+      const query = path ? `?path=${encodeURIComponent(path)}` : "";
+      const response = await fetch(`/api/directories${query}`, {
+        cache: "no-store",
+        headers: { "X-Worktree-Switcher-Token": token },
+      });
+      setListing(await parseListing(response));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const showBrowser = () => {
+    setOpen(true);
+    void load(value || undefined);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <Input
+          id="repositoryPath"
+          name="repositoryPath"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="/home/me/code/app"
+          required
+        />
+        <Button type="button" variant="outline" onClick={showBrowser} disabled={!token}>
+          <FolderOpen aria-hidden />Przeglądaj
+        </Button>
+      </div>
+
+      {open && (
+        <div className="rounded-lg border bg-muted/20 p-3">
+          <div className="mb-3 flex items-center gap-2">
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Przejdź do katalogu nadrzędnego"
+              disabled={!listing?.parent || loading}
+              onClick={() => void load(listing?.parent ?? undefined)}
+            >
+              <ArrowUp aria-hidden />
+            </Button>
+            <p className="min-w-0 flex-1 truncate font-mono text-xs" title={listing?.current}>
+              {listing?.current ?? "Wczytywanie katalogu…"}
+            </p>
+            <Button type="button" size="sm" variant="ghost" onClick={() => void load()} disabled={loading}>
+              <Home aria-hidden />Dom
+            </Button>
+          </div>
+
+          <ScrollArea className="h-52 rounded-md border bg-background/60">
+            {loading ? (
+              <div className="flex h-40 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+                <LoaderCircle className="size-5 animate-spin motion-reduce:animate-none" aria-hidden />
+                Odczytywanie katalogów…
+              </div>
+            ) : listing?.directories.length ? (
+              <div className="p-1" aria-label="Katalogi">
+                {listing.directories.map((directory) => (
+                  <Button
+                    key={directory.path}
+                    type="button"
+                    variant="ghost"
+                    className="h-9 w-full justify-start px-2 font-normal"
+                    onClick={() => void load(directory.path)}
+                  >
+                    <Folder className="text-indigo-300" aria-hidden />
+                    <span className="truncate">{directory.name}</span>
+                  </Button>
+                ))}
+              </div>
+            ) : (
+              <p className="p-6 text-center text-sm text-muted-foreground">Brak podkatalogów.</p>
+            )}
+          </ScrollArea>
+
+          {error && <p className="mt-2 text-sm text-destructive" role="alert">{error}</p>}
+          <div className="mt-3 flex justify-end gap-2">
+            <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>Zamknij</Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!listing || loading}
+              onClick={() => {
+                if (listing) onChange(listing.current);
+                setOpen(false);
+              }}
+            >
+              Wybierz ten katalog
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

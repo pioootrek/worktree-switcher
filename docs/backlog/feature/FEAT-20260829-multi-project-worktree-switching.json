@@ -37,6 +37,26 @@
       "author": "human:project-owner",
       "date": "2026-08-29",
       "text": "Approved: reservations are MVP scope; controller shutdown stops its owned managed processes; dirty worktrees remain runnable with a visible warning."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-08-29",
+      "text": "Functional prototype implemented: static Next.js/shadcn dashboard, loopback Node controller, SQLite StateStore with transactional audit records and exclusive human reservations, Git porcelain discovery, per-project lifecycle serialization, readiness checks, bounded logs, SSE updates, strict mutation token/origin checks, and owned process-tree shutdown. Automated checks cover Git parsing, reservation exclusion/ownership, owned start-stop, and refusal to kill an unrelated port owner. The backlog remains open: configurable command presets, agent leases/MCP, full CLI, three-project switching validation, browser visual QA, and release resource acceptance are not complete. Measured controller RSS was about 67 MiB before and 68 MiB after a dashboard refresh on Node 24; a bare Node HTTP process on this host measured about 60 MiB, so the 50 MiB RSS target requires revisiting the runtime or metric."
+    },
+    {
+      "author": "human:project-owner",
+      "date": "2026-08-29",
+      "text": "Make the controller reachable from the LAN and add a local firewall exception if required."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-08-29",
+      "text": "LAN access implemented with a secure boundary: default bind is 0.0.0.0, --host 127.0.0.1 remains available, startup prints a high-entropy pairing URL for the detected LAN address, all API reads/mutations and SSE require the token, and browser mutations require same-host Origin. UFW is active on the reference host, but its rules and changes require interactive sudo unavailable to the agent; the documented rule is restricted to 192.168.1.0/24 and TCP port 47831."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-08-29",
+      "text": "Node launch-command resolution now detects pnpm, npm, yarn, or bun and selects port passing by framework instead of appending a fixed pnpm argument sequence. Next.js and unknown Node servers receive PORT; Vite, Astro, Nuxt, and Angular receive --port through package-manager-specific forwarding. A schema migration replaces the prototype's invalid pnpm dev -- --port command, and registration rejects a missing dev script early. Custom presets for non-Node and unusual frameworks remain open scope."
     }
   ],
   "priority": "now",

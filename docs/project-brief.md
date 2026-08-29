@@ -83,6 +83,14 @@ optional environment overrides, health check, startup timeout, and whether it
 should start automatically. The selected worktree is runtime state and is
 never accepted as an arbitrary browser-provided working directory.
 
+For Node.js projects, registration detects `pnpm`, `npm`, `yarn`, or `bun` from
+`packageManager` and lockfiles. It requires a `dev` script. The launch resolver
+chooses how to pass the stable port instead of appending one universal argument
+sequence: Next.js and unknown Node servers receive `PORT`, while Vite, Astro,
+Nuxt, and Angular receive their supported `--port` argument through the package
+manager's forwarding syntax. Persisted commands remain explicit arrays so a
+future settings flow can add custom presets without changing process spawning.
+
 ## Distribution and operation
 
 The npm package and executable are both named `worktree-switcher`. A global
@@ -123,7 +131,9 @@ text and an icon so meaning does not depend on color perception.
 - Preserve a stable configured port per project.
 - Show readiness, failure details, and recent logs.
 - Allow a dirty worktree to run while showing a persistent warning.
-- Bind the control API to loopback and reject arbitrary commands or paths.
+- Listen on configured local interfaces (LAN by default), require an ephemeral
+  pairing token for all control data and mutations, and reject arbitrary
+  commands or paths.
 - Persist project configuration and the last selection; reconcile live process
   state after a control-plane restart.
 
@@ -160,3 +170,6 @@ design is in `docs/reservations-and-mcp.md`.
   controller exits, and never kill an unknown process occupying a port.
 - Publish the npm package and executable as `worktree-switcher`; default to a
   foreground process and make background operation opt-in later.
+- Listen on LAN interfaces by default and print an ephemeral secret pairing
+  link. Keep loopback-only operation available through `--host 127.0.0.1`;
+  restrict any host firewall rule to the trusted LAN subnet.

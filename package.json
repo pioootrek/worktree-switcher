@@ -1,0 +1,58 @@
+{
+  "name": "worktree-switcher",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Local control plane for worktree-backed development servers",
+  "type": "module",
+  "bin": {
+    "worktree-switcher": "dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "out",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "next build && tsup src/cli/index.ts --format esm --platform node --target node22 --clean --out-dir dist/cli",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "dev": "tsx src/cli/index.ts start --web-root out",
+    "dev:web": "next dev",
+    "lint": "eslint .",
+    "start": "node dist/cli/index.js start",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "13.0.3",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.35.0",
+    "next": "16.3.3",
+    "next-themes": "0.4.6",
+    "radix-ui": "^1.6.7",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "shadcn": "^4.19.0",
+    "tailwind-merge": "^3.6.0",
+    "tw-animate-css": "^1.4.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "26.4.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "eslint": "9.39.2",
+    "eslint-config-next": "16.3.3",
+    "tailwindcss": "4.3.3",
+    "tsup": "8.5.1",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  },
+  "packageManager": "pnpm@11.22.0"
+}

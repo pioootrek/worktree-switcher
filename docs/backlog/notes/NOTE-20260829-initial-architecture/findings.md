@@ -56,9 +56,15 @@ keyboard, focus, reduced-motion, and screen-reader behavior in verification.
 
 ## Security boundary
 
-Bind the control surface to loopback, validate browser origin/session state,
-resolve selections only from registered repositories and discovered worktrees,
-and never accept an arbitrary command or working directory from the browser.
+The controller listens on LAN interfaces by default so the dashboard can be
+used from another trusted device. Every API read, mutation, and SSE stream
+requires a high-entropy ephemeral pairing token printed in the startup URL;
+the browser keeps it in session storage and removes it from the visible URL.
+Mutations additionally require a same-host browser origin. A host firewall rule
+must be limited to the trusted LAN subnet, and `--host 127.0.0.1` restores
+loopback-only operation. Resolve selections only from registered repositories
+and discovered worktrees, and never accept an arbitrary command or working
+directory from the browser.
 
 ## Reservation and MCP extension
 
