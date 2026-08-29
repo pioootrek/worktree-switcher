@@ -29,6 +29,38 @@ The layers are module boundaries inside one process, not separate services.
 This keeps idle memory and startup overhead low while preserving extraction
 points if a future multi-user edition needs a remote control plane.
 
+## GUI foundation
+
+The statically exported Next.js dashboard uses shadcn/ui with the `new-york`
+style and Radix base. Components are copied into `src/components/ui` and owned
+by this repository; application-specific composition remains outside that
+directory. Tailwind CSS and CSS variables provide the design tokens.
+
+The UI is dark-first with a system/light option. Geist Sans is used for
+interface text and Geist Mono for branches, commits, paths, ports, commands,
+timestamps, and lease identifiers. Foundational surfaces use semantic tokens
+such as `background`, `card`, `foreground`, `muted`, `border`, and `ring`
+instead of ad-hoc palette values.
+
+Initial primitives are installed only when their owning flow is implemented:
+
+- `Button`, `Card`, `Badge`, and `Table` for project/runtime overview;
+- `Tabs`, `Select`, `Tooltip`, and `ScrollArea` for worktree selection and logs;
+- `Dialog` for editing and `AlertDialog` for stop, force-release, and other
+  destructive confirmations;
+- `Skeleton`, `Alert`, and empty states for loading, failures, and no-project
+  onboarding;
+- `Sheet` for responsive project navigation.
+
+Runtime and reservation status never relies on color alone. Each state has a
+label, icon, and accessible description. Keyboard navigation, visible focus,
+reduced motion, and screen-reader announcements for process transitions are
+part of acceptance criteria.
+
+The shadcn CLI is initialized non-interactively with defaults and an explicit
+Radix base. Components are added selectively, reviewed as application source,
+and never bulk-installed with `--all`.
+
 ## Resource policy
 
 Managed development applications have priority over Worktree Switcher. The

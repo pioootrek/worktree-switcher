@@ -43,6 +43,17 @@ operation is the default; global user-level installation is the daily-use path
 and `npx worktree-switcher@1` is the evaluation path. Background service
 installation remains opt-in and deferred.
 
+## GUI foundation
+
+Use shadcn/ui source components with the `new-york` style, Radix base, Tailwind
+CSS, and token-based theming. The developer dashboard is dark-first with a
+system/light option. Add only components required by implemented flows; keep
+application compositions outside `src/components/ui`.
+
+Runtime and reservation indicators always combine color with labels and icons.
+Use `AlertDialog` for destructive actions such as force release, and include
+keyboard, focus, reduced-motion, and screen-reader behavior in verification.
+
 ## Security boundary
 
 Bind the control surface to loopback, validate browser origin/session state,

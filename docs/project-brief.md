@@ -95,6 +95,18 @@ Initial supporting commands are `project add <path>`, `project list`,
 `config path`, and `doctor`. Background service installation and standalone
 platform binaries are deferred until real usage justifies their maintenance.
 
+## Interface system
+
+The dashboard uses shadcn/ui source components with the `new-york` style,
+Radix primitives, Tailwind CSS, and CSS-variable design tokens. It is dark-first
+for a developer-tool context while retaining a light/system theme option.
+
+Only components used by an implemented flow are added to the repository. The
+initial set covers buttons, cards, badges, tables, dialogs, destructive
+confirmations, tabs, selects, tooltips, scroll areas, skeletons, alerts, and a
+responsive sheet. Reservation and runtime states always combine color with
+text and an icon so meaning does not depend on color perception.
+
 ## MVP
 
 - Register multiple local Git repositories.
@@ -135,5 +147,7 @@ These are proposals, not yet committed MVP scope. Their working design is in
   database access inside the single controller process.
 - Use explicit, shell-free executable and argument arrays with per-project
   ports, environment overrides, health checks, and timeouts.
+- Build the dashboard from owned shadcn/ui source components using the
+  `new-york` Radix variant, Tailwind CSS, and token-based theming.
 - Publish the npm package and executable as `worktree-switcher`; default to a
   foreground process and make background operation opt-in later.
