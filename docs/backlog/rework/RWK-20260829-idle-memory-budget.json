@@ -1,0 +1,48 @@
+{
+  "area": "core",
+  "created": "2026-08-29",
+  "id": "RWK-20260829-idle-memory-budget",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-multi-project-worktree-switching",
+      "NOTE-20260829-readiness-assessment"
+    ]
+  },
+  "notes": [
+    {
+      "author": "agent:claude",
+      "date": "2026-08-29",
+      "text": "Recorded measurements are about 67 to 68 MiB for the controller against roughly 60 MiB for a bare Node HTTP process on the reference host. The 50 MiB target is below the runtime floor, so the release validation of the main feature item cannot pass as written regardless of how efficient the controller becomes."
+    }
+  ],
+  "priority": "next",
+  "problem": [
+    "The release validation of FEAT-20260829-multi-project-worktree-switching requires at most 50 MiB idle RSS, but a bare Node HTTP process on the reference host already measures about 60 MiB. The acceptance criterion is unreachable on the chosen runtime, so it cannot distinguish an efficient controller from a wasteful one and blocks release verification for the wrong reason."
+  ],
+  "risk": {
+    "dimensions": [
+      "perf",
+      "process"
+    ],
+    "level": "low"
+  },
+  "schema_version": 1,
+  "scope": [
+    "Replace the absolute idle RSS target with controller overhead measured above a bare Node baseline process on the same host and runtime version, or raise the absolute budget to a value the runtime can meet, and state which was chosen and why.",
+    "Define the measurement procedure explicitly: runtime version, build, number of registered projects, idle duration before sampling, and which memory metric is sampled.",
+    "Update the validation entries of the main feature item and the memory statements in docs/project-brief.md and the initial architecture note so no document keeps the superseded target.",
+    "Keep the intent intact: the controller must remain unnoticeable next to the development servers it supervises, so idle CPU and bounded log memory stay in the acceptance set."
+  ],
+  "source": "Readiness assessment on 2026-08-29",
+  "status": "open",
+  "title": "Revise the unreachable idle memory acceptance target",
+  "type": "rework",
+  "validation": [
+    "Measure a bare Node HTTP baseline and the release controller on the same host and runtime, and verify the revised criterion is met with margin and is reproducible across runs.",
+    "Verify the revised criterion still fails a deliberately regressed build, for example one that retains unbounded log buffers or polls Git continuously.",
+    "Verify no remaining document states the superseded 50 MiB target."
+  ],
+  "value": [
+    "Release verification measures what the project actually cares about, the controller's own overhead, instead of failing on a floor imposed by the Node runtime."
+  ]
+}

@@ -2,6 +2,14 @@
   "area": "core",
   "created": "2026-08-29",
   "id": "FEAT-20260829-multi-project-worktree-switching",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-cli-project-management",
+      "FEAT-20260829-license-and-package-release",
+      "RWK-20260829-idle-memory-budget",
+      "NOTE-20260829-readiness-assessment"
+    ]
+  },
   "notes": [
     {
       "author": "human:project-owner",
@@ -72,6 +80,21 @@
       "author": "human:project-owner",
       "date": "2026-08-29",
       "text": "The dashboard defaults to English regardless of browser locale. Only a saved manual preference selects Polish automatically."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-08-29",
+      "text": "Local MCP integration is implemented as a lazily loaded Streamable HTTP endpoint on a dedicated 127.0.0.1 listener. It uses a persistent owner-only bearer token, exposes project/status/worktree resources and narrow list/status/claim/renew/release tools, and keeps raw lease secrets inside the MCP session. Agent claims are idempotent, owner-authorized, automatically renewed, capped at eight hours, audited, and retained with an explicit error if the claimed server fails to start. Arbitrary commands, arbitrary paths, remote access, and force release are not exposed to MCP. The authenticated dashboard shows listener availability, active session count, endpoint, transport, and access controls without exposing tokens or session identifiers."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-08-29",
+      "text": "The distribution includes a validated worktree-switcher Agent Skill and packages it under skills/worktree-switcher. The skill teaches agents to inspect placement before acting, acquire an idempotent claim for server work, avoid duplicate dev processes, honor competing reservations, verify startup, and release the claim without exposing credentials. README installation keeps MCP credentials in the client's private configuration and reduces per-repository AGENTS.md or CLAUDE.md guidance to a short skill invocation."
+    },
+    {
+      "author": "agent:claude",
+      "date": "2026-08-29",
+      "text": "Independent readiness review recorded in NOTE-20260829-readiness-assessment. Tests and typecheck pass, the implementation matches the brief, and the reservation and MCP layer is the capability with no cheap substitute; server switching alone is replaceable by a terminal per worktree. Three gaps were spun off so this item stays focused on the switch flow: CLI project management (FEAT-20260829-cli-project-management), license and first release (FEAT-20260829-license-and-package-release), and the unreachable idle memory target in this item's release validation (RWK-20260829-idle-memory-budget). Until that rework lands, treat the 50 MiB entry in validation as superseded."
     }
   ],
   "priority": "now",

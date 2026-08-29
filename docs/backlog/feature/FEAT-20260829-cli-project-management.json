@@ -1,0 +1,48 @@
+{
+  "area": "distribution",
+  "created": "2026-08-29",
+  "id": "FEAT-20260829-cli-project-management",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-multi-project-worktree-switching",
+      "NOTE-20260829-readiness-assessment"
+    ]
+  },
+  "notes": [
+    {
+      "author": "agent:claude",
+      "date": "2026-08-29",
+      "text": "Registration exists only in the dashboard, so an agent, a provisioning script, or a headless host cannot add a project. The product brief already commits to project add, project list, config path, and doctor; only the config commands exist today."
+    }
+  ],
+  "priority": "now",
+  "problem": [
+    "Registering, listing, and removing projects is possible only through the web dashboard. A coding agent, a setup script, or a headless machine therefore cannot bring a project under control-plane management without a human opening a browser, which contradicts the agent-oriented direction of the reservation and MCP work."
+  ],
+  "risk": {
+    "dimensions": [
+      "process"
+    ],
+    "level": "low"
+  },
+  "schema_version": 1,
+  "scope": [
+    "Add project add <path>, project list, and project remove <id> commands that call the existing control services rather than reimplementing registration, detection, or persistence.",
+    "Support assigning or auto-selecting a stable port, reusing the existing package-manager and framework detection, and rejecting a repository without a dev script with the same error semantics the dashboard uses.",
+    "Add the doctor command promised by the brief so a fresh installation can be verified without the dashboard.",
+    "Keep the commands operable while a controller instance is running by routing through the running controller or by refusing clearly when the database is owned by another process."
+  ],
+  "source": "Readiness assessment on 2026-08-29",
+  "status": "open",
+  "title": "Manage projects from the CLI",
+  "type": "feature",
+  "validation": [
+    "Register a repository with project add on a machine with no browser, then confirm the dashboard and list_projects report the same project, port, and detected command.",
+    "Verify project add rejects a path that is not a Git repository and a repository without a dev script, in the operating-system locale, without leaving a partial record.",
+    "Verify project remove releases the port, stops an owned process tree if one is running, and records an audit event.",
+    "Run the commands while a controller owns the database and confirm either correct delegation or an explicit refusal, never a corrupted or concurrently written database."
+  ],
+  "value": [
+    "An agent or a provisioning script can bring a project under management end to end, which is a precondition for the unattended workflows the MCP interface is built for."
+  ]
+}

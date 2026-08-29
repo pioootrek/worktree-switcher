@@ -1,0 +1,49 @@
+{
+  "area": "distribution",
+  "created": "2026-08-29",
+  "id": "FEAT-20260829-license-and-package-release",
+  "links": {
+    "related_ids": [
+      "NOTE-20260829-readiness-assessment"
+    ]
+  },
+  "notes": [
+    {
+      "author": "agent:claude",
+      "date": "2026-08-29",
+      "text": "The README and the brief describe the project as open source while the repository carries no license and package.json is marked private. Choosing the license is a human decision and should be made before any public sharing, because code published without one is not usable by anyone else."
+    }
+  ],
+  "priority": "now",
+  "problem": [
+    "The repository describes itself as open source but contains no license file, and the package is marked private and unpublished. Without a license, nobody may legally use, fork, or contribute to the code, so the contribution invitation in the README cannot be acted on."
+  ],
+  "risk": {
+    "dimensions": [
+      "legal-compliance",
+      "ci-release"
+    ],
+    "level": "medium",
+    "rollback": "Keep the repository unpublished. A license grant cannot be reliably withdrawn from copies already distributed, so publication must not precede an explicit human decision."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Have the project owner choose a license, add the license file, and reference it from README.md and package.json.",
+    "Confirm that the license of every bundled dependency and every copied shadcn/ui source component is compatible with the chosen license and attributed where required.",
+    "Prepare the npm package for a first release: remove the private flag, verify the files list ships dist, out, skills, and the license, and verify a global install exposes a working worktree-switcher executable.",
+    "Decide and document whether the first release is published under a pre-1.0 version while the data model may still change."
+  ],
+  "source": "Readiness assessment on 2026-08-29",
+  "status": "open",
+  "title": "Add a license and prepare the first package release",
+  "type": "feature",
+  "validation": [
+    "Verify the license file exists, names the copyright holder, and is referenced consistently by README.md and package.json.",
+    "Pack the release with npm pack, install the tarball globally in a clean environment, and verify worktree-switcher start serves the dashboard and worktree-switcher config mcp prints a client configuration.",
+    "Verify the packed archive contains the license and the skill directory and excludes the SQLite database, logs, and any token file.",
+    "Verify a dependency license review is recorded before the first publish."
+  ],
+  "value": [
+    "The project becomes legally usable by other people, which is a precondition for the contributions, bug reports, and real worktree-heavy setups the README asks for."
+  ]
+}

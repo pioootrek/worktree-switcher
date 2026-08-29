@@ -2,6 +2,26 @@
   "generated_by": "hub.py fmt",
   "items": [
     {
+      "area": "distribution",
+      "id": "FEAT-20260829-cli-project-management",
+      "path": "feature/FEAT-20260829-cli-project-management.json",
+      "priority": "now",
+      "risk_level": "low",
+      "status": "open",
+      "title": "Manage projects from the CLI",
+      "type": "feature"
+    },
+    {
+      "area": "distribution",
+      "id": "FEAT-20260829-license-and-package-release",
+      "path": "feature/FEAT-20260829-license-and-package-release.json",
+      "priority": "now",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Add a license and prepare the first package release",
+      "type": "feature"
+    },
+    {
       "area": "core",
       "id": "FEAT-20260829-multi-project-worktree-switching",
       "path": "feature/FEAT-20260829-multi-project-worktree-switching.json",
@@ -10,9 +30,37 @@
       "status": "open",
       "title": "Run and switch multiple worktree-backed projects",
       "type": "feature"
+    },
+    {
+      "area": "core",
+      "id": "RWK-20260829-idle-memory-budget",
+      "path": "rework/RWK-20260829-idle-memory-budget.json",
+      "priority": "next",
+      "risk_level": "low",
+      "status": "open",
+      "title": "Revise the unreachable idle memory acceptance target",
+      "type": "rework"
     }
   ],
   "notes": [
+    {
+      "author": "agent:claude",
+      "created": "2026-08-29",
+      "files": [
+        "findings.md"
+      ],
+      "id": "NOTE-20260829-readiness-assessment",
+      "path": "notes/NOTE-20260829-readiness-assessment",
+      "status": "active",
+      "tags": [
+        "assessment",
+        "distribution",
+        "mcp",
+        "positioning",
+        "release-readiness"
+      ],
+      "title": "Prototype readiness and positioning assessment"
+    },
     {
       "author": "agent:codex",
       "created": "2026-08-29",
