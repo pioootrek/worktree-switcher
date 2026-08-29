@@ -10,12 +10,13 @@ export interface DirectoryListing {
   current: string;
   parent: string | null;
   directories: DirectoryEntry[];
+  files: DirectoryEntry[];
 }
 
 export class DirectoryBrowser {
   constructor(private readonly configuredRoot: string) {}
 
-  async list(requestedPath?: string): Promise<DirectoryListing> {
+  async list(requestedPath?: string, includeCertificateFiles = false): Promise<DirectoryListing> {
     const root = await realpath(this.configuredRoot);
     const candidate = await realpath(resolve(requestedPath ?? root));
     const relativePath = relative(root, candidate);
@@ -39,6 +40,12 @@ export class DirectoryBrowser {
         .filter((entry) => entry.isDirectory())
         .map((entry) => ({ name: entry.name, path: resolve(candidate, entry.name) }))
         .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" })),
+      files: includeCertificateFiles
+        ? entries
+            .filter((entry) => entry.isFile() && /\.(?:pem|crt|cer|key)$/i.test(entry.name))
+            .map((entry) => ({ name: entry.name, path: resolve(candidate, entry.name) }))
+            .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }))
+        : [],
     };
   }
 }

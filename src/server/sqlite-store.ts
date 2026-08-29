@@ -12,6 +12,10 @@ type ProjectRow = {
   name: string;
   repository_path: string;
   port: number;
+  tls_mode: "off" | "generated" | "custom";
+  tls_key_path: string | null;
+  tls_cert_path: string | null;
+  tls_ca_path: string | null;
   executable: string;
   args_json: string;
   healthcheck_path: string;
@@ -43,6 +47,10 @@ const schema = `
     name TEXT NOT NULL,
     repository_path TEXT NOT NULL UNIQUE,
     port INTEGER NOT NULL UNIQUE CHECK(port BETWEEN 1 AND 65535),
+    tls_mode TEXT NOT NULL DEFAULT 'off' CHECK(tls_mode IN ('off', 'generated', 'custom')),
+    tls_key_path TEXT,
+    tls_cert_path TEXT,
+    tls_ca_path TEXT,
     executable TEXT NOT NULL,
     args_json TEXT NOT NULL,
     healthcheck_path TEXT NOT NULL,
@@ -88,6 +96,10 @@ function mapProject(row: ProjectRow): Project {
     name: row.name,
     repositoryPath: row.repository_path,
     port: row.port,
+    tlsMode: row.tls_mode,
+    tlsKeyPath: row.tls_key_path,
+    tlsCertPath: row.tls_cert_path,
+    tlsCaPath: row.tls_ca_path,
     executable: row.executable,
     args: JSON.parse(row.args_json) as string[],
     healthcheckPath: row.healthcheck_path,
@@ -152,6 +164,36 @@ export class SqliteStateStore implements StateStore {
       });
     })();
     return this.getProject(id)!;
+  }
+
+  updateProjectLaunch(projectId: string, input: {
+    tlsMode: "off" | "generated" | "custom";
+    tlsKeyPath: string | null;
+    tlsCertPath: string | null;
+    tlsCaPath: string | null;
+    executable: string;
+    args: string[];
+  }): void {
+    const now = new Date().toISOString();
+    this.database.transaction(() => {
+      const result = this.database.prepare(`
+        UPDATE projects SET
+          tls_mode = ?, tls_key_path = ?, tls_cert_path = ?, tls_ca_path = ?,
+          executable = ?, args_json = ?, updated_at = ?
+        WHERE id = ?
+      `).run(
+        input.tlsMode,
+        input.tlsKeyPath,
+        input.tlsCertPath,
+        input.tlsCaPath,
+        input.executable,
+        JSON.stringify(input.args),
+        now,
+        projectId,
+      );
+      if (result.changes === 0) throw new Error("Nie znaleziono projektu.");
+      this.audit(projectId, "project.launch_updated", "local-user", input);
+    })();
   }
 
   setSelectedWorktree(projectId: string, path: string): void {
@@ -232,17 +274,35 @@ export class SqliteStateStore implements StateStore {
   }
 
   private applyMigrations(): void {
-    const version = 2;
-    const applied = this.database.prepare("SELECT 1 FROM schema_migrations WHERE version = ?").get(version);
-    if (applied) return;
-    this.database.transaction(() => {
-      this.database.prepare(`
-        UPDATE projects SET args_json = '["run","dev"]', updated_at = ?
-        WHERE executable = 'pnpm' AND args_json LIKE '["dev","--","--port",%'
-      `).run(new Date().toISOString());
-      this.database.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)")
-        .run(version, new Date().toISOString());
-    })();
+    if (!this.hasMigration(2)) {
+      this.database.transaction(() => {
+        this.database.prepare(`
+          UPDATE projects SET args_json = '["run","dev"]', updated_at = ?
+          WHERE executable = 'pnpm' AND args_json LIKE '["dev","--","--port",%'
+        `).run(new Date().toISOString());
+        this.recordMigration(2);
+      })();
+    }
+    if (!this.hasMigration(3)) {
+      this.database.transaction(() => {
+        const columns = this.database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
+        const names = new Set(columns.map(({ name }) => name));
+        if (!names.has("tls_mode")) this.database.exec("ALTER TABLE projects ADD COLUMN tls_mode TEXT NOT NULL DEFAULT 'off' CHECK(tls_mode IN ('off', 'generated', 'custom'))");
+        if (!names.has("tls_key_path")) this.database.exec("ALTER TABLE projects ADD COLUMN tls_key_path TEXT");
+        if (!names.has("tls_cert_path")) this.database.exec("ALTER TABLE projects ADD COLUMN tls_cert_path TEXT");
+        if (!names.has("tls_ca_path")) this.database.exec("ALTER TABLE projects ADD COLUMN tls_ca_path TEXT");
+        this.recordMigration(3);
+      })();
+    }
+  }
+
+  private hasMigration(version: number): boolean {
+    return Boolean(this.database.prepare("SELECT 1 FROM schema_migrations WHERE version = ?").get(version));
+  }
+
+  private recordMigration(version: number): void {
+    this.database.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)")
+      .run(version, new Date().toISOString());
   }
 
   private expireReservations(projectId: string): void {

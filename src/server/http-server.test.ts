@@ -19,13 +19,15 @@ async function fixture() {
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "index.html"), "<!doctype html><title>Switcher</title>");
   const dashboard = vi.fn(async () => ({ projects: [] }));
+  const setProjectTls = vi.fn(async () => undefined);
   const listDirectories = vi.fn(async () => ({
     root: "/home/test",
     current: "/home/test",
     parent: null,
     directories: [{ name: "code", path: "/home/test/code" }],
+    files: [],
   }));
-  const service = { dashboard } as unknown as ControlService;
+  const service = { dashboard, setProjectTls } as unknown as ControlService;
   const controller = createControllerServer({
     service,
     directoryBrowser: { list: listDirectories } as unknown as DirectoryBrowser,
@@ -41,7 +43,7 @@ async function fixture() {
     controller.server.listen(0, "127.0.0.1", resolve);
   });
   const address = controller.server.address() as AddressInfo;
-  return { base: `http://127.0.0.1:${address.port}`, dashboard, listDirectories };
+  return { base: `http://127.0.0.1:${address.port}`, dashboard, listDirectories, setProjectTls };
 }
 
 afterEach(async () => {
@@ -77,7 +79,7 @@ describe("controller access boundary", () => {
 
     expect(response.status).toBe(200);
     expect((await response.json()).directories).toEqual([{ name: "code", path: "/home/test/code" }]);
-    expect(listDirectories).toHaveBeenCalledWith("/home/test/code");
+    expect(listDirectories).toHaveBeenCalledWith("/home/test/code", false);
   });
 
   it("rejects authenticated mutations from a different browser origin", async () => {
@@ -92,5 +94,21 @@ describe("controller access boundary", () => {
       body: JSON.stringify({ name: "App", repositoryPath: "/tmp/app", port: 3000 }),
     });
     expect(response.status).toBe(403);
+  });
+
+  it("accepts explicit Next.js TLS settings", async () => {
+    const { base, setProjectTls } = await fixture();
+    const response = await fetch(`${base}/api/projects/project-1/tls`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Worktree-Switcher-Token": "test-access-token" },
+      body: JSON.stringify({ mode: "custom", keyPath: "/certs/key.pem", certPath: "/certs/cert.pem", caPath: null }),
+    });
+    expect(response.status).toBe(200);
+    expect(setProjectTls).toHaveBeenCalledWith("project-1", {
+      mode: "custom",
+      keyPath: "/certs/key.pem",
+      certPath: "/certs/cert.pem",
+      caPath: null,
+    });
   });
 });

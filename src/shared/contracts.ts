@@ -1,10 +1,15 @@
 export type RuntimePhase = "stopped" | "starting" | "running" | "stopping" | "failed";
+export type DevServerTlsMode = "off" | "generated" | "custom";
 
 export interface Project {
   id: string;
   name: string;
   repositoryPath: string;
   port: number;
+  tlsMode: DevServerTlsMode;
+  tlsKeyPath: string | null;
+  tlsCertPath: string | null;
+  tlsCaPath: string | null;
   executable: string;
   args: string[];
   healthcheckPath: string;
@@ -71,4 +76,5 @@ export interface DirectoryListing {
   current: string;
   parent: string | null;
   directories: Array<{ name: string; path: string }>;
+  files: Array<{ name: string; path: string }>;
 }

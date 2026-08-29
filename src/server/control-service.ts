@@ -2,7 +2,7 @@ import { basename, resolve } from "node:path";
 
 import type { DashboardResponse, Project, ProjectSnapshot, Worktree } from "@/shared/contracts";
 import type { GitWorktreeReader } from "./git-worktrees";
-import { type LaunchCommandResolver, NodeLaunchCommandResolver } from "./launch-command";
+import { type LaunchCommandResolver, type NextTlsConfiguration, NodeLaunchCommandResolver } from "./launch-command";
 import { type LogWriter, nullLogWriter } from "./log-writer";
 import { ProcessManager } from "./process-manager";
 import type { NewProject, ReservationRequest, StateStore } from "./state-store";
@@ -77,6 +77,34 @@ export class ControlService {
       });
       throw error;
     }
+  }
+
+  async setProjectTls(projectId: string, input: NextTlsConfiguration): Promise<void> {
+    await this.serialized(projectId, async () => {
+      const project = this.requireProject(projectId);
+      const phase = this.processes.snapshot(projectId).phase;
+      if (phase === "running" || phase === "starting" || phase === "stopping") {
+        throw new Error("Zatrzymaj serwer przed zmianą ustawień HTTPS.");
+      }
+      const worktrees = await this.git.list(project.repositoryPath);
+      const selected = this.resolveWorktree(project, worktrees);
+      const command = this.commands.resolve(selected.path, project.port, input);
+      this.store.updateProjectLaunch(projectId, {
+        tlsMode: command.tls.mode,
+        tlsKeyPath: command.tls.keyPath,
+        tlsCertPath: command.tls.certPath,
+        tlsCaPath: command.tls.caPath,
+        executable: command.executable,
+        args: command.args,
+      });
+      this.logs.controller("project.tls_changed", {
+        projectId,
+        mode: command.tls.mode,
+        keyPath: command.tls.keyPath,
+        certPath: command.tls.certPath,
+        caPath: command.tls.caPath,
+      });
+    });
   }
 
   async reserve(input: ReservationRequest): Promise<void> {

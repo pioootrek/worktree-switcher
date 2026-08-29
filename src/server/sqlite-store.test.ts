@@ -79,4 +79,48 @@ describe("SqliteStateStore", () => {
     expect(migrated.getProject(project.id)?.args).toEqual(["run", "dev"]);
     migrated.close();
   });
+
+  it("persists generated Next.js TLS settings with the launch command", () => {
+    const store = createStore();
+    const project = store.addProject(projectInput("Secure", "/code/secure", 3213));
+    store.updateProjectLaunch(project.id, {
+      tlsMode: "generated",
+      tlsKeyPath: null,
+      tlsCertPath: null,
+      tlsCaPath: null,
+      executable: "pnpm",
+      args: ["run", "dev", "--experimental-https"],
+    });
+    expect(store.getProject(project.id)).toMatchObject({
+      tlsMode: "generated",
+      args: ["run", "dev", "--experimental-https"],
+    });
+    store.close();
+  });
+
+  it("adds TLS columns to a version 2 database", () => {
+    const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-store-v2-"));
+    directories.push(directory);
+    const databasePath = join(directory, "state.sqlite3");
+    const database = new Database(databasePath);
+    database.exec(`
+      CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      INSERT INTO schema_migrations VALUES (1, 'now'), (2, 'now');
+      CREATE TABLE projects (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, repository_path TEXT NOT NULL UNIQUE,
+        port INTEGER NOT NULL UNIQUE, executable TEXT NOT NULL, args_json TEXT NOT NULL,
+        healthcheck_path TEXT NOT NULL, startup_timeout_ms INTEGER NOT NULL,
+        selected_worktree_path TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      INSERT INTO projects VALUES (
+        'legacy', 'Legacy', '/code/legacy', 3214, 'pnpm', '["run","dev"]',
+        '/', 45000, NULL, 'now', 'now'
+      );
+    `);
+    database.close();
+
+    const migrated = new SqliteStateStore(databasePath);
+    expect(migrated.getProject("legacy")).toMatchObject({ tlsMode: "off", tlsKeyPath: null });
+    migrated.close();
+  });
 });

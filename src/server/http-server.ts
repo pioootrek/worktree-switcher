@@ -59,6 +59,24 @@ function parseOperation(value: unknown): {
   return { operation, worktreePath: optionalString(record, "worktreePath", 4096) };
 }
 
+function parseTlsSettings(value: unknown): {
+  mode: "off" | "generated" | "custom";
+  keyPath: string | null;
+  certPath: string | null;
+  caPath: string | null;
+} {
+  const record = strictRecord(value, ["mode", "keyPath", "certPath", "caPath"]);
+  const mode = record.mode;
+  if (mode !== "off" && mode !== "generated" && mode !== "custom") throw new Error("Nieprawidłowy tryb HTTPS.");
+  const nullablePath = (key: string): string | null => {
+    const value = record[key];
+    if (value === undefined || value === null || value === "") return null;
+    if (typeof value !== "string" || value.length > 4096) throw new Error(`Nieprawidłowe pole ${key}.`);
+    return value;
+  };
+  return { mode, keyPath: nullablePath("keyPath"), certPath: nullablePath("certPath"), caPath: nullablePath("caPath") };
+}
+
 function parseReservation(value: unknown): {
   action: "acquire" | "release" | "force-release";
   worktreePath?: string;
@@ -162,7 +180,10 @@ export function createControllerServer(options: {
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/directories") {
-          json(response, 200, await options.directoryBrowser.list(url.searchParams.get("path") ?? undefined));
+          json(response, 200, await options.directoryBrowser.list(
+            url.searchParams.get("path") ?? undefined,
+            url.searchParams.get("files") === "certificates",
+          ));
           return;
         }
         if (request.method === "GET" && url.pathname === "/api/events") {
@@ -184,6 +205,16 @@ export function createControllerServer(options: {
         if (request.method === "POST" && operationMatch) {
           const input = parseOperation(await readJson(request));
           await options.service.operate(decodeURIComponent(operationMatch[1]), input.operation, input.worktreePath);
+          options.events.publish();
+          json(response, 200, { ok: true });
+          return;
+        }
+        const tlsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/tls$/);
+        if (request.method === "POST" && tlsMatch) {
+          await options.service.setProjectTls(
+            decodeURIComponent(tlsMatch[1]),
+            parseTlsSettings(await readJson(request)),
+          );
           options.events.publish();
           json(response, 200, { ok: true });
           return;

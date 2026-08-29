@@ -32,6 +32,7 @@ describe("NodeLaunchCommandResolver", () => {
       executable: "pnpm",
       args: ["run", "dev"],
       portMethod: "environment",
+      tls: { mode: "off", keyPath: null, certPath: null, caPath: null },
     });
   });
 
@@ -42,6 +43,7 @@ describe("NodeLaunchCommandResolver", () => {
       executable: "npm",
       args: ["run", "dev", "--", "--port", "4173"],
       portMethod: "argument",
+      tls: { mode: "off", keyPath: null, certPath: null, caPath: null },
     });
   });
 
@@ -53,5 +55,41 @@ describe("NodeLaunchCommandResolver", () => {
   it("rejects projects without a dev script during registration", () => {
     const directory = fixture({ scripts: { build: "tsc" } });
     expect(() => new NodeLaunchCommandResolver().resolve(directory, 4000)).toThrow("skryptu dev");
+  });
+
+  it("enables a generated Next.js certificate", () => {
+    const directory = fixture({
+      packageManager: "pnpm@11.5.2",
+      scripts: { dev: "next dev" },
+      dependencies: { next: "16.2.11" },
+    });
+    const command = new NodeLaunchCommandResolver().resolve(directory, 3000, {
+      mode: "generated", keyPath: null, certPath: null, caPath: null,
+    });
+    expect(command.args).toEqual(["run", "dev", "--experimental-https"]);
+    expect(command.tls.mode).toBe("generated");
+  });
+
+  it("passes canonical custom certificate paths to Next.js", () => {
+    const directory = fixture({ scripts: { dev: "next dev" }, dependencies: { next: "16.2.11" } }, "package-lock.json");
+    const keyPath = join(directory, "dev-key.pem");
+    const certPath = join(directory, "dev-cert.pem");
+    writeFileSync(keyPath, "key");
+    writeFileSync(certPath, "cert");
+    const command = new NodeLaunchCommandResolver().resolve(directory, 3000, {
+      mode: "custom", keyPath, certPath, caPath: null,
+    });
+    expect(command.args).toEqual([
+      "run", "dev", "--", "--experimental-https",
+      "--experimental-https-key", keyPath,
+      "--experimental-https-cert", certPath,
+    ]);
+  });
+
+  it("does not guess HTTPS flags for a non-Next project", () => {
+    const directory = fixture({ scripts: { dev: "vite" }, devDependencies: { vite: "8.0.0" } });
+    expect(() => new NodeLaunchCommandResolver().resolve(directory, 4173, {
+      mode: "generated", keyPath: null, certPath: null, caPath: null,
+    })).toThrow("tylko dla Next.js");
   });
 });

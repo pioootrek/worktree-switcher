@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -27,6 +27,7 @@ describe("DirectoryBrowser", () => {
     const listing = await browser.list();
     expect(listing.parent).toBeNull();
     expect(listing.directories.map((entry) => entry.name)).toEqual(["Alpha", "beta"]);
+    expect(listing.files).toEqual([]);
 
     const child = await browser.list(join(root, "Alpha"));
     expect(child.parent).toBe(root);
@@ -40,5 +41,15 @@ describe("DirectoryBrowser", () => {
 
     await expect(browser.list(outside)).rejects.toThrow("poza dozwolonym");
     await expect(browser.list(join(root, "escape"))).rejects.toThrow("poza dozwolonym");
+  });
+
+  it("lists only certificate-related files when explicitly requested", async () => {
+    const root = temporaryDirectory("worktree-switcher-browser-certs-");
+    writeFileSync(join(root, "dev-key.pem"), "key");
+    writeFileSync(join(root, "dev.crt"), "cert");
+    writeFileSync(join(root, "notes.txt"), "ignore");
+
+    const listing = await new DirectoryBrowser(root).list(undefined, true);
+    expect(listing.files.map((entry) => entry.name)).toEqual(["dev-key.pem", "dev.crt"]);
   });
 });

@@ -87,6 +87,28 @@ uruchamia ją bez powłoki. Nie przyjmuje dowolnej komendy z panelu. W przyszły
 wydaniu konfiguracja projektu pozwoli jawnie wybrać strategię portu dla
 niestandardowych frameworków i projektów innych niż Node.js.
 
+## HTTPS serwera Next.js
+
+Przycisk z tarczą na karcie projektu otwiera ustawienia HTTPS zarządzanego
+serwera Next.js. Serwer musi być zatrzymany podczas zapisu. Dostępne są trzy
+tryby:
+
+- HTTP;
+- HTTPS z lokalnym certyfikatem generowanym przez Next.js;
+- HTTPS z własnym kluczem, certyfikatem i opcjonalnym plikiem CA.
+
+Switcher używa odpowiednio `--experimental-https` oraz flag
+`--experimental-https-key`, `--experimental-https-cert` i
+`--experimental-https-ca`. Własne pliki wybiera się z systemu plików hosta
+kontrolera. Panel zapisuje tylko ich kanoniczne ścieżki. Nie wysyła zawartości
+prywatnego klucza przez HTTP.
+
+To ustawienie szyfruje połączenie z serwerem projektu, na przykład z WinPath na
+porcie `3000`. Nie włącza TLS dla panelu Worktree Switcher na porcie `47831`.
+Panel nadal powinien działać wyłącznie w zaufanej sieci LAN lub przez tunel.
+
+Flagi pochodzą z [dokumentacji CLI Next.js](https://nextjs.org/docs/app/api-reference/cli/next#using-https-during-development).
+
 ## Sprawdzenie
 
 ```bash

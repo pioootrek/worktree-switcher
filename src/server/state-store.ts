@@ -1,4 +1,4 @@
-import type { Project, Reservation } from "@/shared/contracts";
+import type { DevServerTlsMode, Project, Reservation } from "@/shared/contracts";
 
 export interface NewProject {
   name: string;
@@ -7,6 +7,15 @@ export interface NewProject {
 }
 
 export interface ProjectRegistration extends NewProject {
+  executable: string;
+  args: string[];
+}
+
+export interface ProjectLaunchUpdate {
+  tlsMode: DevServerTlsMode;
+  tlsKeyPath: string | null;
+  tlsCertPath: string | null;
+  tlsCaPath: string | null;
   executable: string;
   args: string[];
 }
@@ -24,6 +33,7 @@ export interface StateStore {
   listProjects(): Project[];
   getProject(id: string): Project | null;
   addProject(input: ProjectRegistration): Project;
+  updateProjectLaunch(projectId: string, input: ProjectLaunchUpdate): void;
   setSelectedWorktree(projectId: string, path: string): void;
   getActiveReservation(projectId: string): Reservation | null;
   acquireReservation(input: ReservationRequest): Reservation;

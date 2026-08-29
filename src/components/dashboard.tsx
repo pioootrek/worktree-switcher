@@ -13,6 +13,7 @@ import {
   RefreshCw,
   RotateCcw,
   Server,
+  ShieldCheck,
   Square,
   Sun,
   UnlockKeyhole,
@@ -32,7 +33,8 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DirectoryPicker } from "@/components/directory-picker";
-import type { DashboardResponse, ProjectSnapshot, RuntimePhase } from "@/shared/contracts";
+import { CertificateFilePicker } from "@/components/certificate-file-picker";
+import type { DashboardResponse, DevServerTlsMode, Project, ProjectSnapshot, RuntimePhase } from "@/shared/contracts";
 
 const phaseLabels: Record<RuntimePhase, string> = {
   stopped: "Zatrzymany",
@@ -158,7 +160,7 @@ export function Dashboard() {
         ) : (
           <section className="grid gap-5 xl:grid-cols-2" aria-label="Zarejestrowane projekty">
             {data.projects.map((snapshot) => (
-              <ProjectCard key={snapshot.project.id} snapshot={snapshot} mutate={mutate} setError={setError} />
+              <ProjectCard key={snapshot.project.id} snapshot={snapshot} mutate={mutate} setError={setError} token={token} />
             ))}
           </section>
         )}
@@ -171,10 +173,12 @@ function ProjectCard({
   snapshot,
   mutate,
   setError,
+  token,
 }: {
   snapshot: ProjectSnapshot;
   mutate: (path: string, body: unknown, success: string) => Promise<void>;
   setError: (message: string | null) => void;
+  token: string;
 }) {
   const { project, runtime, reservation, worktrees } = snapshot;
   const initial = project.selectedWorktreePath ?? worktrees[0]?.path ?? "";
@@ -226,7 +230,16 @@ function ProjectCard({
               {project.repositoryPath}
             </CardDescription>
           </div>
-          <RuntimeBadge phase={runtime.phase} />
+          <div className="flex items-center gap-2">
+            <TlsSettingsDialog
+              project={project}
+              phase={runtime.phase}
+              token={token}
+              mutate={mutate}
+              setError={setError}
+            />
+            <RuntimeBadge phase={runtime.phase} />
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -296,6 +309,7 @@ function ProjectCard({
           <TabsContent value="status" className="mt-4">
             <dl className="grid grid-cols-2 gap-x-5 gap-y-3 text-sm sm:grid-cols-3">
               <Metric label="Port" value={String(project.port)} />
+              <Metric label="Protokół" value={project.tlsMode === "off" ? "HTTP" : "HTTPS"} />
               <Metric label="PID" value={runtime.pid ? String(runtime.pid) : "—"} />
               <Metric label="Proces" value={`${project.executable} ${project.args.join(" ")}`} mono />
               <Metric label="Commit" value={selectedWorktree?.shortHead ?? "—"} mono />
@@ -342,6 +356,107 @@ function ProjectCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function TlsSettingsDialog({
+  project,
+  phase,
+  token,
+  mutate,
+  setError,
+}: {
+  project: Project;
+  phase: RuntimePhase;
+  token: string;
+  mutate: (path: string, body: unknown, success: string) => Promise<void>;
+  setError: (message: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<DevServerTlsMode>(project.tlsMode);
+  const [keyPath, setKeyPath] = useState(project.tlsKeyPath ?? "");
+  const [certPath, setCertPath] = useState(project.tlsCertPath ?? "");
+  const [caPath, setCaPath] = useState(project.tlsCaPath ?? "");
+  const [pending, setPending] = useState(false);
+  const active = phase === "running" || phase === "starting" || phase === "stopping";
+
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setPending(true);
+    try {
+      await mutate(
+        `/api/projects/${project.id}/tls`,
+        { mode, keyPath: keyPath || null, certPath: certPath || null, caPath: caPath || null },
+        `${project.name}: ustawienia HTTPS zapisane.`,
+      );
+      setOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="icon-sm" aria-label="Ustawienia HTTPS" title="Ustawienia HTTPS">
+          <ShieldCheck aria-hidden />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>HTTPS serwera deweloperskiego</DialogTitle>
+          <DialogDescription>
+            Ustawienie dotyczy procesu Next.js projektu {project.name}, nie panelu Worktree Switcher.
+          </DialogDescription>
+        </DialogHeader>
+        <form className="space-y-4" onSubmit={(event) => void save(event)}>
+          <div className="space-y-2">
+            <Label htmlFor={`tls-mode-${project.id}`}>Tryb</Label>
+            <Select value={mode} onValueChange={(value) => setMode(value as DevServerTlsMode)}>
+              <SelectTrigger id={`tls-mode-${project.id}`} className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="off">HTTP</SelectItem>
+                <SelectItem value="generated">HTTPS, certyfikat generowany przez Next.js</SelectItem>
+                <SelectItem value="custom">HTTPS, własny klucz i certyfikat</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {mode === "generated" && (
+            <Alert>
+              <ShieldCheck aria-hidden />
+              <AlertDescription>Next.js użyje <code>--experimental-https</code> i wygeneruje lokalny certyfikat. Przeglądarka może wymagać zaakceptowania lokalnego CA.</AlertDescription>
+            </Alert>
+          )}
+
+          {mode === "custom" && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor={`tls-key-${project.id}`}>Klucz prywatny</Label>
+                <CertificateFilePicker id={`tls-key-${project.id}`} token={token} value={keyPath} onChange={setKeyPath} placeholder="/home/me/certs/dev-key.pem" required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor={`tls-cert-${project.id}`}>Certyfikat</Label>
+                <CertificateFilePicker id={`tls-cert-${project.id}`} token={token} value={certPath} onChange={setCertPath} placeholder="/home/me/certs/dev-cert.pem" required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor={`tls-ca-${project.id}`}>CA, opcjonalnie</Label>
+                <CertificateFilePicker id={`tls-ca-${project.id}`} token={token} value={caPath} onChange={setCaPath} placeholder="/home/me/certs/root-ca.pem" />
+              </div>
+              <p className="text-xs text-muted-foreground">Pliki pozostają na hoście kontrolera. Panel zapisuje ich ścieżki i nie przesyła zawartości klucza.</p>
+            </div>
+          )}
+
+          {active && <p className="text-sm text-amber-300">Zatrzymaj serwer przed zapisaniem zmiany protokołu.</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Anuluj</Button>
+            <Button type="submit" disabled={active || pending}>{pending && <LoaderCircle className="animate-spin" aria-hidden />}Zapisz</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
