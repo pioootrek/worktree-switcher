@@ -7,6 +7,21 @@
       "author": "human:project-owner",
       "date": "2026-08-29",
       "text": "One Switch instance must operate several projects concurrently; switching one project must not stop the others."
+    },
+    {
+      "author": "human:project-owner",
+      "date": "2026-08-29",
+      "text": "Managed development servers have resource priority. Worktree Switcher must be optimized and effectively unnoticeable in idle use; persistence may begin with a file behind a replaceable service layer."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-08-29",
+      "text": "Architecture selected: one lightweight Node controller serves a statically exported Next.js UI and manages processes; versioned JSON is accessed through a ProjectStore adapter; distribution uses the worktree-switcher npm package and foreground CLI."
+    },
+    {
+      "author": "human:project-owner",
+      "date": "2026-08-29",
+      "text": "Decision state: proposed. Discuss visible reservations that pin a server to a worktree and an MCP interface through which an LLM can inspect runtime placement, acquire a reservation, and release it."
     }
   ],
   "priority": "now",
@@ -24,7 +39,8 @@
   "schema_version": 1,
   "scope": [
     "Create a local control plane that registers multiple Git repositories, discovers their worktrees, and maintains one independently switchable server slot with a stable port for each project.",
-    "Include serialized lifecycle operations per project, readiness checks, isolated logs, loopback-only control endpoints, and reconciliation after control-plane restart."
+    "Include serialized lifecycle operations per project, readiness checks, isolated logs, loopback-only control endpoints, and reconciliation after control-plane restart.",
+    "Ship a static Next.js dashboard inside one lightweight Node controller and isolate persistence behind a replaceable ProjectStore service contract."
   ],
   "source": "Product planning conversation on 2026-08-29",
   "status": "open",
@@ -32,7 +48,8 @@
   "type": "feature",
   "validation": [
     "Run at least three fixture projects concurrently, switch each to another worktree, and verify that only the selected project's process restarts while every project keeps its configured port.",
-    "Verify concurrent requests for one project are serialized, failures are isolated, stale paths and arbitrary commands are rejected, and the dashboard reports readiness and logs accurately."
+    "Verify concurrent requests for one project are serialized, failures are isolated, stale paths and arbitrary commands are rejected, and the dashboard reports readiness and logs accurately.",
+    "Measure the release build on the supported Linux reference environment and verify at most 50 MiB idle RSS, negligible idle CPU, bounded log memory, and no repository-wide watcher or continuous Git polling."
   ],
   "value": [
     "A developer can move an entire local stack between branches from one dashboard without repeatedly navigating directories or disturbing unrelated services."

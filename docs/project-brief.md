@@ -35,11 +35,13 @@ servers.
 
 ## Initial architecture
 
-The control plane lives outside the repositories it manages. The dashboard is
-built with Next.js and communicates with a local process manager. Git remains
-the source of truth for worktree discovery. The manager starts commands with
-the selected worktree as their working directory, observes readiness, streams
-logs, and terminates the complete previous process tree before reuse of a port.
+The control plane lives outside the repositories it manages. Next.js builds the
+dashboard as a static export; it is not a persistent application server. One
+lightweight Node.js process serves the exported files, exposes the loopback API,
+and manages child processes. Git remains the source of truth for worktree
+discovery. The manager starts commands with the selected worktree as their
+working directory, observes readiness, streams logs, and terminates the
+complete previous process tree before reuse of a port.
 
 Each project has its own serialized state machine: `stopped`, `starting`,
 `running`, `stopping`, or `failed`. Operations for different projects may run
@@ -48,6 +50,49 @@ concurrently; switch operations for one project are serialized.
 The first version uses a stable direct port for each managed application. A
 reverse proxy and coordinated multi-project workspace profiles are deferred
 until the independent-project flow is reliable.
+
+The controller is event-driven: it does not continuously scan repositories or
+watch complete worktree trees. Expensive Git status checks are lazy and
+refreshes are bounded. Release verification measures controller overhead
+separately from the projects it manages, with initial targets of at most 50 MiB
+idle RSS, negligible idle CPU, and a bounded log buffer.
+
+## Persistence and service boundary
+
+The MVP stores versioned, human-readable JSON in the user's platform config
+directory. Runtime history and logs use the platform state directory. Writes
+are atomic and only one controller instance may own the files at a time.
+
+HTTP handlers and UI code do not access files directly. Application services
+depend on interfaces such as `ProjectStore`, `GitWorktreeReader`, and
+`ProcessRunner`; the first `ProjectStore` implementation is JSON-backed. A
+future SQLite or remote implementation can replace that adapter without
+changing use cases or API contracts.
+
+User accounts are not part of the local MVP. Adding them later requires an
+authentication and authorization boundary plus ownership and concurrency
+rules; changing the persistence adapter alone would not be sufficient.
+
+## Configuration contract
+
+The configuration has a required `schemaVersion` and explicit project records.
+Commands are stored as an executable plus an argument array and always spawned
+without a shell. Each project declares its repository path, stable port,
+optional environment overrides, health check, startup timeout, and whether it
+should start automatically. The selected worktree is runtime state and is
+never accepted as an arbitrary browser-provided working directory.
+
+## Distribution and operation
+
+The npm package and executable are both named `worktree-switcher`. A global
+user-level installation is the recommended daily-use path; `npx` remains the
+zero-install evaluation path. Running `worktree-switcher` or
+`worktree-switcher start` starts one foreground controller, opens the browser,
+and owns its managed child processes. `--no-open` supports headless use.
+
+Initial supporting commands are `project add <path>`, `project list`,
+`config path`, and `doctor`. Background service installation and standalone
+platform binaries are deferred until real usage justifies their maintenance.
 
 ## MVP
 
@@ -70,11 +115,24 @@ until the independent-project flow is reliable.
 - Reverse proxying with transparent HMR WebSocket support.
 - Windows process-tree support; the initial target is Linux and macOS.
 
-## Open decisions
+## Topics under discussion
 
-- Whether the runtime manager should share the built Next.js process or run as
-  a dedicated daemon with a static/web client.
-- Whether persistence begins with a small configuration file or SQLite.
-- The repository-level configuration contract for commands, arguments,
-  environment variables, ports, and health checks.
-- Packaging and command name for the eventual one-command CLI distribution.
+- A visible project reservation model: humans may pin a server slot to a
+  worktree until explicit release, while agents use expiring renewable leases.
+- A local MCP integration that exposes project/runtime status as resources and
+  lets an agent atomically reserve, switch, renew, and release its own lease.
+- Forced release of somebody else's reservation remains a human UI/CLI action.
+
+These are proposals, not yet committed MVP scope. Their working design is in
+`docs/reservations-and-mcp.md`.
+
+## Current decisions
+
+- Use one lightweight Node.js controller and a statically exported Next.js UI;
+  do not run a persistent Next.js server.
+- Start with a versioned JSON adapter behind application-service interfaces;
+  keep SQLite as a replaceable future adapter.
+- Use explicit, shell-free executable and argument arrays with per-project
+  ports, environment overrides, health checks, and timeouts.
+- Publish the npm package and executable as `worktree-switcher`; default to a
+  foreground process and make background operation opt-in later.

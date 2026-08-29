@@ -18,6 +18,10 @@
   PIDs blindly.
 - A reverse proxy is not required for the first version. Reusing each
   project's stable direct port avoids early HMR and WebSocket complexity.
+- Next.js produces a static export only. One Node controller serves those
+  assets, the loopback API, and SSE while managing child processes.
+- The controller is event-driven, performs Git status checks lazily, and keeps
+  bounded log buffers. The initial verified idle-memory budget is 50 MiB.
 
 ## Persistence direction
 
@@ -26,8 +30,33 @@ projects, commands, ports, health checks, and the last selection. A plain
 configuration file is sufficient for a narrow MVP; SQLite becomes useful for
 larger multi-project configuration, history, and workspace profiles.
 
+Persistence is accessed through a `ProjectStore` application boundary. JSON is
+the first adapter and uses platform configuration/state directories plus
+atomic writes. Accounts later require authentication, authorization, ownership,
+and audit semantics in addition to a different persistence adapter.
+
+## Distribution
+
+Publish one npm package and executable named `worktree-switcher`. Foreground
+operation is the default; global user-level installation is the daily-use path
+and `npx worktree-switcher@1` is the evaluation path. Background service
+installation remains opt-in and deferred.
+
 ## Security boundary
 
 Bind the control surface to loopback, validate browser origin/session state,
 resolve selections only from registered repositories and discovered worktrees,
 and never accept an arbitrary command or working directory from the browser.
+
+## Proposed reservation and MCP extension
+
+Decision state: proposed. Treat a visible project claim as an exclusive
+reservation rather than a counting semaphore. Human hard locks may remain until
+explicit release; agent claims should be expiring renewable leases so an
+interrupted agent cannot deadlock a project indefinitely.
+
+MCP should be an adapter over the same application services as UI and CLI. A
+local `worktree-switcher mcp` stdio bridge can expose read-only project status
+and narrowly scoped claim, renew, and release tools while the main controller
+remains the sole process/state owner. Force release and indefinite agent locks
+should not be available to LLM tools.
