@@ -3,7 +3,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
 
-import type { DashboardResponse, McpStatus } from "@/shared/contracts";
+import type { DashboardResponse, LaunchPreset, McpStatus } from "@/shared/contracts";
 import { ControlService } from "./control-service";
 import { localeFrom } from "../i18n/messages";
 import { localizeServerMessage } from "../i18n/server-errors";
@@ -46,10 +46,17 @@ function optionalString(record: JsonRecord, key: string, max: number): string | 
 }
 
 function parseAddProject(value: unknown) {
-  const record = strictRecord(value, ["name", "repositoryPath", "port"]);
+  const record = strictRecord(value, ["name", "repositoryPath", "port", "launchPreset"]);
   const port = record.port;
   if (typeof port !== "number" || !Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Nieprawidłowe pole port.");
-  return { name: requiredString(record, "name", 80), repositoryPath: requiredString(record, "repositoryPath", 4096), port };
+  const launchPreset = record.launchPreset ?? "auto";
+  if (launchPreset !== "auto" && launchPreset !== "node" && launchPreset !== "django") throw new Error("Nieprawidłowy preset uruchomienia.");
+  return {
+    name: requiredString(record, "name", 80),
+    repositoryPath: requiredString(record, "repositoryPath", 4096),
+    port,
+    launchPreset: launchPreset as LaunchPreset,
+  };
 }
 
 function parseOperation(value: unknown): {

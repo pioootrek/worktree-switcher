@@ -13,5 +13,7 @@ describe("server error localization", () => {
       .toBe("The project is locked by agent:test.");
     expect(localizeServerMessage("Wskaż plik: klucz prywatny.", "en"))
       .toBe("Select the private key file.");
+    expect(localizeServerMessage("Nie znaleziono manage.py w katalogu głównym worktree.", "en"))
+      .toBe("manage.py was not found at the worktree root.");
   });
 });

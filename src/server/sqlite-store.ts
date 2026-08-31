@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 
 import Database from "better-sqlite3";
 
-import type { Project, Reservation } from "@/shared/contracts";
+import type { LaunchPreset, Project, Reservation } from "@/shared/contracts";
 import type { ProjectRegistration, ReservationRequest, StateStore } from "./state-store";
 
 type ProjectRow = {
@@ -12,6 +12,7 @@ type ProjectRow = {
   name: string;
   repository_path: string;
   port: number;
+  launch_preset: LaunchPreset;
   tls_mode: "off" | "generated" | "custom";
   tls_key_path: string | null;
   tls_cert_path: string | null;
@@ -51,6 +52,7 @@ const schema = `
     name TEXT NOT NULL,
     repository_path TEXT NOT NULL UNIQUE,
     port INTEGER NOT NULL UNIQUE CHECK(port BETWEEN 1 AND 65535),
+    launch_preset TEXT NOT NULL DEFAULT 'node' CHECK(launch_preset IN ('auto', 'node', 'django')),
     tls_mode TEXT NOT NULL DEFAULT 'off' CHECK(tls_mode IN ('off', 'generated', 'custom')),
     tls_key_path TEXT,
     tls_cert_path TEXT,
@@ -107,6 +109,7 @@ function mapProject(row: ProjectRow): Project {
     name: row.name,
     repositoryPath: row.repository_path,
     port: row.port,
+    launchPreset: row.launch_preset,
     tlsMode: row.tls_mode,
     tlsKeyPath: row.tls_key_path,
     tlsCertPath: row.tls_cert_path,
@@ -171,13 +174,14 @@ export class SqliteStateStore implements StateStore {
     this.database.transaction(() => {
       this.database.prepare(`
         INSERT INTO projects (
-          id, name, repository_path, port, executable, args_json,
+          id, name, repository_path, port, launch_preset, executable, args_json,
           healthcheck_path, startup_timeout_ms, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, '/', 45000, ?, ?)
-      `).run(id, input.name, input.repositoryPath, input.port, input.executable, JSON.stringify(input.args), now, now);
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, '/', 45000, ?, ?)
+      `).run(id, input.name, input.repositoryPath, input.port, input.launchPreset ?? "auto", input.executable, JSON.stringify(input.args), now, now);
       this.audit(id, "project.created", "local-user", {
         repositoryPath: input.repositoryPath,
         port: input.port,
+        launchPreset: input.launchPreset ?? "auto",
         executable: input.executable,
         args: input.args,
       });
@@ -406,6 +410,15 @@ export class SqliteStateStore implements StateStore {
           WHERE kind = 'agent' AND released_at IS NULL AND idempotency_key IS NOT NULL
         `);
         this.recordMigration(4);
+      })();
+    }
+    if (!this.hasMigration(5)) {
+      this.database.transaction(() => {
+        const columns = this.database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
+        if (!columns.some(({ name }) => name === "launch_preset")) {
+          this.database.exec("ALTER TABLE projects ADD COLUMN launch_preset TEXT NOT NULL DEFAULT 'node' CHECK(launch_preset IN ('auto', 'node', 'django'))");
+        }
+        this.recordMigration(5);
       })();
     }
   }

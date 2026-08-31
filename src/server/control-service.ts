@@ -3,7 +3,7 @@ import { basename, resolve } from "node:path";
 
 import type { DashboardResponse, Project, ProjectSnapshot, Reservation, Worktree } from "@/shared/contracts";
 import type { GitWorktreeReader } from "./git-worktrees";
-import { type LaunchCommandResolver, type NextTlsConfiguration, NodeLaunchCommandResolver } from "./launch-command";
+import { type LaunchCommandResolver, type NextTlsConfiguration, ProjectLaunchCommandResolver } from "./launch-command";
 import { type LogWriter, nullLogWriter } from "./log-writer";
 import { ProcessManager } from "./process-manager";
 import type { NewProject, ReservationRequest, StateStore } from "./state-store";
@@ -44,7 +44,7 @@ export class ControlService {
     private readonly git: GitWorktreeReader,
     private readonly processes: ProcessManager,
     private readonly logs: LogWriter = nullLogWriter,
-    private readonly commands: LaunchCommandResolver = new NodeLaunchCommandResolver(),
+    private readonly commands: LaunchCommandResolver = new ProjectLaunchCommandResolver(),
   ) {}
 
   async dashboard(): Promise<DashboardResponse> {
@@ -61,11 +61,13 @@ export class ControlService {
     const worktrees = await this.git.list(repositoryPath);
     const selected = worktrees[0];
     if (!selected) throw new Error("Repozytorium nie ma dostępnego worktree.");
-    const command = this.commands.resolve(selected.path, input.port);
+    const launchPreset = input.launchPreset ?? "auto";
+    const command = this.commands.resolve(selected.path, input.port, launchPreset);
     const project = this.store.addProject({
       ...input,
       name: input.name.trim(),
       repositoryPath,
+      launchPreset: command.preset,
       executable: command.executable,
       args: command.args,
     });
@@ -105,6 +107,22 @@ export class ControlService {
         this.assertReservationAllows(projectId, selected.path, actor);
         if (operation === "restart" || operation === "switch") await this.processes.stop(projectId);
         if (operation === "switch") this.store.setSelectedWorktree(projectId, selected.path);
+        const launch = this.commands.resolve(selected.path, project.port, project.launchPreset, {
+          mode: project.tlsMode,
+          keyPath: project.tlsKeyPath,
+          certPath: project.tlsCertPath,
+          caPath: project.tlsCaPath,
+        });
+        if (project.executable !== launch.executable || JSON.stringify(project.args) !== JSON.stringify(launch.args)) {
+          this.store.updateProjectLaunch(projectId, {
+            tlsMode: launch.tls.mode,
+            tlsKeyPath: launch.tls.keyPath,
+            tlsCertPath: launch.tls.certPath,
+            tlsCaPath: launch.tls.caPath,
+            executable: launch.executable,
+            args: launch.args,
+          });
+        }
         await this.processes.start(this.requireProject(projectId), selected.path);
         this.logs.controller(`project.${operation}`, { projectId, worktreePath: selected.path });
       });
@@ -128,7 +146,8 @@ export class ControlService {
       const worktrees = await this.git.list(project.repositoryPath);
       const selected = this.resolveWorktree(project, worktrees);
       this.assertReservationAllows(projectId, selected.path, { owner: "local-user" });
-      const command = this.commands.resolve(selected.path, project.port, input);
+      if (project.launchPreset === "django") throw new Error("HTTPS zarządzany przez Switcher jest obecnie obsługiwany tylko dla Next.js.");
+      const command = this.commands.resolve(selected.path, project.port, project.launchPreset, input);
       this.store.updateProjectLaunch(projectId, {
         tlsMode: command.tls.mode,
         tlsKeyPath: command.tls.keyPath,

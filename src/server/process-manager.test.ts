@@ -15,6 +15,7 @@ function project(port: number): Project {
     name: "Fixture",
     repositoryPath: process.cwd(),
     port,
+    launchPreset: "node",
     tlsMode: "off",
     tlsKeyPath: null,
     tlsCertPath: null,

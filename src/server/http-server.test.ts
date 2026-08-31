@@ -113,6 +113,17 @@ describe("controller access boundary", () => {
     expect(await response.json()).toEqual({ error: "The project is locked by agent:test." });
   });
 
+  it("accepts an explicit Django launch preset", async () => {
+    const { addProject, base } = await fixture();
+    const response = await fetch(`${base}/api/projects`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Worktree-Switcher-Token": "test-access-token" },
+      body: JSON.stringify({ name: "API", repositoryPath: "/tmp/api", port: 8000, launchPreset: "django" }),
+    });
+    expect(response.status).toBe(201);
+    expect(addProject).toHaveBeenCalledWith({ name: "API", repositoryPath: "/tmp/api", port: 8000, launchPreset: "django" });
+  });
+
   it("serves authenticated directory listings through the browser service", async () => {
     const { base, listDirectories } = await fixture();
     const response = await fetch(`${base}/api/directories?path=${encodeURIComponent("/home/test/code")}`, {

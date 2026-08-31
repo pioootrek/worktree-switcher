@@ -18,6 +18,7 @@ const snapshot: ProjectSnapshot = {
     name: "Web",
     repositoryPath: "/code/web",
     port: 3000,
+    launchPreset: "node",
     tlsMode: "off",
     tlsKeyPath: null,
     tlsCertPath: null,

@@ -1,0 +1,26 @@
+{
+  "changed": [
+    "Auto, Node.js, and Django registration presets",
+    "worktree-local Django interpreter resolution",
+    "SQLite launch preset migration",
+    "localized dashboard and runtime diagnostics"
+  ],
+  "date": "2026-08-31",
+  "followup_ids": [
+    "FEAT-20260829-launch-environment-profiles"
+  ],
+  "id": "DONE-20260831-django-development-servers",
+  "schema_version": 1,
+  "source": "FEAT-20260831-django-development-servers",
+  "summary": [
+    "Worktree Switcher detects root-level manage.py projects and launches Django's development server on the stable project port through .venv, venv, or python3.",
+    "The concrete command is resolved again for every selected worktree while existing projects migrate safely to the Node.js preset."
+  ],
+  "title": "Added Django development server compatibility",
+  "validation": [
+    "All 60 Vitest tests passed, including Django detection, interpreter fallback, ambiguous repository handling, runtime diagnostics, API parsing, migration, and per-worktree launch resolution.",
+    "TypeScript type checking and ESLint completed successfully.",
+    "The production Next.js and CLI build completed successfully.",
+    "Backlog formatting and validation completed successfully."
+  ]
+}

@@ -1,9 +1,10 @@
-import type { DevServerTlsMode, Project, Reservation } from "@/shared/contracts";
+import type { DevServerTlsMode, LaunchPreset, Project, Reservation } from "@/shared/contracts";
 
 export interface NewProject {
   name: string;
   repositoryPath: string;
   port: number;
+  launchPreset?: LaunchPreset;
 }
 
 export interface ProjectRegistration extends NewProject {

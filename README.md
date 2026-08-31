@@ -23,7 +23,7 @@ second copy behind your back.
 
 - Manage several repositories at once, each on its own port.
 - Discover worktrees through Git's porcelain output.
-- Start, stop, restart, and switch Node.js development servers.
+- Start, stop, restart, and switch Node.js and Django development servers.
 - Detect `pnpm`, `npm`, `yarn`, and `bun` projects with a `dev` script.
 - Show the active branch, commit, dirty state, PID, failures, and recent logs.
 - Keep human locks and expiring agent claims in SQLite.
@@ -118,14 +118,16 @@ command.
 
 ## Project commands and ports
 
-When you add a repository, Worktree Switcher reads `package.json`, its
-`packageManager` field, and lockfiles. The project must have a `dev` script.
+When you add a repository, Worktree Switcher detects Node.js from `package.json`
+or Django from a root-level `manage.py`. You can also select the preset
+explicitly. Node.js projects must have a `dev` script.
 
 | Project type | How the port is passed |
 | --- | --- |
 | Next.js | `PORT` environment variable |
 | Vite, Astro, Nuxt, Angular | Framework-specific `--port` argument |
 | Other Node.js servers | `PORT` environment variable |
+| Django | `manage.py runserver 127.0.0.1:{port}` |
 
 A custom Node.js server can read the same environment variable:
 
@@ -134,7 +136,10 @@ const port = Number(process.env.PORT ?? 3000);
 server.listen(port);
 ```
 
-Custom command presets and non-Node.js projects are not supported yet.
+For every Django worktree, the resolver prefers `.venv/bin/python`, then
+`venv/bin/python`, then `python3`. It does not install dependencies, run
+migrations, or manage `collectstatic`. Custom commands, external virtual
+environments, ASGI servers, and Django LAN binding are not supported yet.
 
 ## MCP for coding agents
 
@@ -329,7 +334,8 @@ rule that unrelated processes are never killed.
 
 ## Current limitations
 
-- Only Node.js projects with a `dev` script are detected automatically.
+- Node.js projects need a `dev` script; Django support currently targets the
+  built-in development server and a root-level `manage.py`.
 - The dashboard uses HTTP and is intended for loopback or a trusted network.
 - Project registration is available only in the dashboard. Project removal is
   not implemented yet.

@@ -19,6 +19,12 @@ describe("runtime failures", () => {
     expect(failure.message).toContain("package.json");
   });
 
+  it("recognizes Django missing from the selected interpreter", () => {
+    const failure = processExitFailure(project, ["ModuleNotFoundError: No module named 'django'"], 1, null);
+    expect(failure.code).toBe("missing_dependency");
+    expect(failure.suggestion).toContain(".venv");
+  });
+
   it("explains a missing executable without exposing ENOENT as the headline", () => {
     const failure = spawnFailure(project, Object.assign(new Error("spawn pnpm ENOENT"), { code: "ENOENT" }));
     expect(failure.code).toBe("missing_executable");

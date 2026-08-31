@@ -151,7 +151,7 @@ describe("SqliteStateStore", () => {
     database.close();
 
     const migrated = new SqliteStateStore(databasePath);
-    expect(migrated.getProject("legacy")).toMatchObject({ tlsMode: "off", tlsKeyPath: null });
+    expect(migrated.getProject("legacy")).toMatchObject({ tlsMode: "off", tlsKeyPath: null, launchPreset: "node" });
     migrated.close();
   });
 

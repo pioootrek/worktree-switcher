@@ -130,4 +130,54 @@ describe("ControlService agent claims", () => {
     expect(store.getActiveReservation(project.id)?.id).toBe(claim.reservation.id);
     store.close();
   });
+
+  it("resolves the launch command for the selected worktree before every start", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-launch-resolution-"));
+    directories.push(directory);
+    const store = new SqliteStateStore(join(directory, "state.sqlite3"));
+    const project = store.addProject({
+      name: "Django",
+      repositoryPath: "/code/api",
+      port: 8000,
+      launchPreset: "django",
+      executable: "python3",
+      args: ["manage.py", "runserver", "127.0.0.1:8000"],
+    });
+    const worktrees = ["/code/api-main", "/code/api-feature"].map((path): Worktree => ({
+      path,
+      head: path,
+      shortHead: path,
+      branch: path.endsWith("main") ? "main" : "feature",
+      detached: false,
+      locked: false,
+      prunable: false,
+      dirty: false,
+    }));
+    const runtime: RuntimeSnapshot = {
+      phase: "stopped", pid: null, worktreePath: null, startedAt: null, error: null, failure: null, logs: [],
+    };
+    const start = vi.fn(async (_project, path: string) => { runtime.phase = "running"; runtime.worktreePath = path; });
+    const stop = vi.fn(async () => { runtime.phase = "stopped"; runtime.worktreePath = null; });
+    const resolve = vi.fn((path: string) => ({
+      preset: "django" as const,
+      executable: path.endsWith("feature") ? "./.venv/bin/python" : "python3",
+      args: ["manage.py", "runserver", "127.0.0.1:8000"],
+      portMethod: "argument" as const,
+      tls: { mode: "off" as const, keyPath: null, certPath: null, caPath: null },
+    }));
+    const service = new ControlService(
+      store,
+      { list: vi.fn(async () => worktrees) } as unknown as GitWorktreeReader,
+      { snapshot: () => ({ ...runtime }), start, stop } as unknown as ProcessManager,
+      undefined,
+      { resolve },
+    );
+
+    await service.operate(project.id, "start", worktrees[0].path);
+    await service.operate(project.id, "switch", worktrees[1].path);
+
+    expect(resolve.mock.calls.map(([path]) => path)).toEqual(worktrees.map(({ path }) => path));
+    expect(start.mock.calls[1][0].executable).toBe("./.venv/bin/python");
+    store.close();
+  });
 });

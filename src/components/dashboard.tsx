@@ -38,7 +38,7 @@ import { DirectoryPicker } from "@/components/directory-picker";
 import { CertificateFilePicker } from "@/components/certificate-file-picker";
 import { useI18n } from "@/i18n/provider";
 import { dashboardSummary, type Translate } from "@/i18n/messages";
-import type { ControllerDashboardResponse, DevServerTlsMode, McpStatus, Project, ProjectSnapshot, RuntimeFailure, RuntimePhase } from "@/shared/contracts";
+import type { ControllerDashboardResponse, DevServerTlsMode, LaunchPreset, McpStatus, Project, ProjectSnapshot, RuntimeFailure, RuntimePhase } from "@/shared/contracts";
 
 const EMPTY_MCP_STATUS: McpStatus = {
   phase: "unknown",
@@ -366,13 +366,15 @@ function ProjectCard({
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <TlsSettingsDialog
-              project={project}
-              phase={runtime.phase}
-              token={token}
-              mutate={mutate}
-              setError={setError}
-            />
+            {project.launchPreset !== "django" && (
+              <TlsSettingsDialog
+                project={project}
+                phase={runtime.phase}
+                token={token}
+                mutate={mutate}
+                setError={setError}
+              />
+            )}
             <RuntimeBadge phase={runtime.phase} />
           </div>
         </div>
@@ -453,6 +455,7 @@ function ProjectCard({
           <TabsContent value="status" className="mt-4">
             <dl className="grid grid-cols-2 gap-x-5 gap-y-3 text-sm sm:grid-cols-3">
               <Metric label={t("project.port")} value={String(project.port)} />
+              <Metric label={t("project.preset")} value={t(`preset.${project.launchPreset}`)} />
               <Metric label={t("project.protocol")} value={project.tlsMode === "off" ? "HTTP" : "HTTPS"} />
               <Metric label="PID" value={runtime.pid ? String(runtime.pid) : "—"} />
               <Metric label={t("project.process")} value={`${project.executable} ${project.args.join(" ")}`} mono />
@@ -640,6 +643,7 @@ function AddProjectDialog({ open, onOpenChange, mutate, token }: {
   const [pending, setPending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [repositoryPath, setRepositoryPath] = useState("");
+  const [launchPreset, setLaunchPreset] = useState<LaunchPreset>("auto");
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -650,8 +654,10 @@ function AddProjectDialog({ open, onOpenChange, mutate, token }: {
         name: String(form.get("name") ?? ""),
         repositoryPath: String(form.get("repositoryPath") ?? ""),
         port: Number(form.get("port")),
+        launchPreset,
       }, t("add.success"));
       setRepositoryPath("");
+      setLaunchPreset("auto");
       onOpenChange(false);
     } catch (cause) {
       setFormError(cause instanceof Error ? cause.message : String(cause));
@@ -675,6 +681,17 @@ function AddProjectDialog({ open, onOpenChange, mutate, token }: {
             <DirectoryPicker token={token} value={repositoryPath} onChange={setRepositoryPath} />
           </div>
           <div className="space-y-2"><Label htmlFor="port">{t("add.port")}</Label><Input id="port" name="port" type="number" defaultValue="3000" min="1024" max="65535" required /></div>
+          <div className="space-y-2">
+            <Label htmlFor="launch-preset">{t("add.preset")}</Label>
+            <Select value={launchPreset} onValueChange={(value) => setLaunchPreset(value as LaunchPreset)}>
+              <SelectTrigger id="launch-preset" className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">{t("preset.auto")}</SelectItem>
+                <SelectItem value="node">{t("preset.node")}</SelectItem>
+                <SelectItem value="django">{t("preset.django")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <p className="text-xs text-muted-foreground">{t("add.commandHint")}</p>
           {formError && <p className="text-sm text-destructive" role="alert">{formError}</p>}
           <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button><Button type="submit" disabled={pending}>{pending && <LoaderCircle className="animate-spin" aria-hidden />}{t("add.submit")}</Button></div>

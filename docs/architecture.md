@@ -1,6 +1,6 @@
 ---
 audience: "contributors implementing the controller and user interface"
-last_reviewed: "2026-08-29"
+last_reviewed: "2026-08-31"
 source_of_truth: "runtime, persistence, configuration, and distribution decisions"
 status: "active"
 ---
@@ -191,6 +191,13 @@ discovered worktree identifier, not a command or arbitrary filesystem path.
 Environment values are explicit overrides merged onto a deliberately filtered
 controller environment. Secrets should remain in the managed project's normal
 environment mechanism and must not be copied into the database by default.
+
+Each project stores a validated launch preset. Existing records migrate to the
+Node.js preset. New registrations may select automatic detection, Node.js, or
+Django; automatic detection is resolved to a concrete preset before storage.
+The concrete executable and arguments are resolved against the selected
+worktree before every start. Django therefore uses a worktree-local `.venv` or
+`venv` when present and otherwise invokes `python3`, always through `shell:false`.
 
 ## CLI and package
 

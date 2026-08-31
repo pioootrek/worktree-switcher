@@ -1,8 +1,11 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import type { LaunchPreset } from "@/shared/contracts";
+
 export interface LaunchCommand {
-  executable: "pnpm" | "npm" | "yarn" | "bun";
+  preset: Exclude<LaunchPreset, "auto">;
+  executable: string;
   args: string[];
   portMethod: "environment" | "argument";
   tls: NextTlsConfiguration;
@@ -16,7 +19,7 @@ export interface NextTlsConfiguration {
 }
 
 export interface LaunchCommandResolver {
-  resolve(worktreePath: string, port: number, tls?: NextTlsConfiguration): LaunchCommand;
+  resolve(worktreePath: string, port: number, preset?: LaunchPreset, tls?: NextTlsConfiguration): LaunchCommand;
 }
 
 type PackageJson = {
@@ -97,16 +100,50 @@ function tlsArgs(tls: NextTlsConfiguration): string[] {
   ];
 }
 
-export class NodeLaunchCommandResolver implements LaunchCommandResolver {
+function djangoPython(worktreePath: string): string {
+  for (const candidate of [".venv/bin/python", "venv/bin/python"]) {
+    const absolute = join(worktreePath, candidate);
+    if (!existsSync(absolute) || !statSync(absolute).isFile()) continue;
+    try {
+      accessSync(absolute, constants.X_OK);
+      return `./${candidate}`;
+    } catch {
+      // Ignore incomplete virtual environments and continue to the next interpreter.
+    }
+  }
+  return "python3";
+}
+
+export class ProjectLaunchCommandResolver implements LaunchCommandResolver {
   resolve(
     worktreePath: string,
     port: number,
+    preset: LaunchPreset = "auto",
     tlsInput: NextTlsConfiguration = { mode: "off", keyPath: null, certPath: null, caPath: null },
   ): LaunchCommand {
     const packageJsonPath = join(worktreePath, "package.json");
-    if (!existsSync(packageJsonPath)) {
-      throw new Error("Nie znaleziono package.json. Automatyczna konfiguracja obsługuje obecnie projekty Node.js.");
+    const managePyPath = join(worktreePath, "manage.py");
+    const hasNode = existsSync(packageJsonPath);
+    const hasDjango = existsSync(managePyPath) && statSync(managePyPath).isFile();
+    if (preset === "auto" && hasNode && hasDjango) {
+      throw new Error("Repozytorium zawiera package.json i manage.py. Wybierz preset Node.js albo Django.");
     }
+    const resolvedPreset = preset === "auto" ? (hasNode ? "node" : hasDjango ? "django" : null) : preset;
+    if (!resolvedPreset) throw new Error("Nie wykryto obsługiwanego projektu. Oczekiwano package.json albo manage.py.");
+
+    if (resolvedPreset === "django") {
+      if (!hasDjango) throw new Error("Nie znaleziono manage.py w katalogu głównym worktree.");
+      if (tlsInput.mode !== "off") throw new Error("HTTPS zarządzany przez Switcher jest obecnie obsługiwany tylko dla Next.js.");
+      return {
+        preset: "django",
+        executable: djangoPython(worktreePath),
+        args: ["manage.py", "runserver", `127.0.0.1:${port}`],
+        portMethod: "argument",
+        tls: { mode: "off", keyPath: null, certPath: null, caPath: null },
+      };
+    }
+
+    if (!hasNode) throw new Error("Nie znaleziono package.json w katalogu głównym worktree.");
 
     let packageJson: PackageJson;
     try {
@@ -126,6 +163,7 @@ export class NodeLaunchCommandResolver implements LaunchCommandResolver {
       ...tlsArgs(tls),
     ];
     return {
+      preset: "node",
       executable,
       args: ["run", "dev", ...forwardedArgs(executable, devArgs)],
       portMethod: passPortAsArgument ? "argument" : "environment",
@@ -133,3 +171,6 @@ export class NodeLaunchCommandResolver implements LaunchCommandResolver {
     };
   }
 }
+
+/** @deprecated Use ProjectLaunchCommandResolver. */
+export class NodeLaunchCommandResolver extends ProjectLaunchCommandResolver {}
