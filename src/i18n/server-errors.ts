@@ -5,6 +5,14 @@ const exactEnglish = new Map<string, string>([
   ["Port musi być liczbą od 1024 do 65535.", "Port must be an integer between 1024 and 65535."],
   ["Repozytorium nie ma dostępnego worktree.", "The repository has no available worktree."],
   ["Zatrzymaj serwer przed zmianą ustawień HTTPS.", "Stop the server before changing HTTPS settings."],
+  ["Zatrzymaj serwer przed zmianą zmiennych środowiskowych.", "Stop the server before changing environment variables."],
+  ["Zatrzymaj serwer lub wybierz zapis z restartem.", "Stop the server or save with restart."],
+  ["Zatrzymaj serwer lub wybierz profil z restartem.", "Stop the server or select the profile with restart."],
+  ["Nie znaleziono profilu środowiska.", "Environment profile not found."],
+  ["Profilu default nie można usunąć.", "The default profile cannot be deleted."],
+  ["Nie można usunąć aktywnego profilu środowiska.", "The active environment profile cannot be deleted."],
+  ["Można ustawić maksymalnie 100 zmiennych środowiskowych.", "At most 100 environment variables can be configured."],
+  ["Nieprawidłowa nazwa profilu środowiska.", "Invalid environment profile name."],
   ["Worktree nie należy do zarejestrowanego repozytorium lub już nie istnieje.", "The worktree does not belong to this repository or no longer exists."],
   ["Nie można uruchomić uszkodzonego worktree oznaczonego jako prunable.", "A damaged worktree marked as prunable cannot be started."],
   ["Nie znaleziono projektu.", "Project not found."],
@@ -84,6 +92,12 @@ export function localizeServerMessage(message: string, locale: Locale): string {
   if (match) return `The project is locked to ${match[1]} by ${match[2]}.`;
   match = message.match(/^Osiągnięto limit (\d+) uruchomionych serwerów\. Aktywne: (.+)\.$/);
   if (match) return `The limit of ${match[1]} running servers has been reached. Active: ${match[2]}.`;
+  match = message.match(/^Nieprawidłowa nazwa zmiennej środowiskowej: (.+)\.$/);
+  if (match) return `Invalid environment variable name: ${match[1]}.`;
+  match = message.match(/^Zmienna (.+) jest zarządzana przez kontroler\.$/);
+  if (match) return `The ${match[1]} variable is managed by the controller.`;
+  match = message.match(/^Nieprawidłowa wartość zmiennej (.+)\.$/);
+  if (match) return `Invalid value for environment variable ${match[1]}.`;
   match = message.match(/^Proces działał, ale nie odpowiedział na porcie (\d+) w ciągu (.+) sekund\.$/);
   if (match) return `The process did not respond on port ${match[1]} within ${match[2]} seconds.`;
   return message;

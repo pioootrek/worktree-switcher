@@ -193,12 +193,18 @@ describe("MCP loopback server", () => {
       name: "set_project_environment",
       arguments: { projectId, environment: { PLAYWRIGHT_E2E: "1" } },
     });
-    expect(setProjectEnvironment).toHaveBeenCalledWith(projectId, { PLAYWRIGHT_E2E: "1" }, expect.stringMatching(/^agent:mcp:/));
+    expect(setProjectEnvironment).toHaveBeenCalledWith(projectId, { PLAYWRIGHT_E2E: "1" }, {
+      owner: expect.stringMatching(/^agent:mcp:/),
+      leaseToken: undefined,
+    });
 
     const profiles = await client.callTool({ name: "list_environment_profiles", arguments: { projectId } });
     expect(JSON.stringify(profiles)).toContain("default");
     await client.callTool({ name: "save_environment_profile", arguments: { projectId, name: "e2e", environment: { PLAYWRIGHT_E2E: "1" } } });
-    expect(saveEnvironmentProfile).toHaveBeenCalledWith(projectId, "e2e", { PLAYWRIGHT_E2E: "1" }, expect.stringMatching(/^agent:mcp:/));
+    expect(saveEnvironmentProfile).toHaveBeenCalledWith(projectId, "e2e", { PLAYWRIGHT_E2E: "1" }, {
+      owner: expect.stringMatching(/^agent:mcp:/),
+      leaseToken: undefined,
+    });
     await client.callTool({ name: "select_environment_profile", arguments: { projectId, name: "e2e" } });
     expect(selectEnvironmentProfile).toHaveBeenCalled();
     await client.callTool({ name: "delete_environment_profile", arguments: { projectId, name: "e2e" } });
@@ -215,6 +221,11 @@ describe("MCP loopback server", () => {
     });
     expect(JSON.stringify(claim)).not.toContain("never-return-this-lease-secret");
     expect(JSON.stringify(claim)).toContain("leaseHeld");
+    await client.callTool({ name: "save_environment_profile", arguments: { projectId, name: "claimed", environment: { PLAYWRIGHT_E2E: "2" } } });
+    expect(saveEnvironmentProfile).toHaveBeenLastCalledWith(projectId, "claimed", { PLAYWRIGHT_E2E: "2" }, {
+      owner: expect.stringMatching(/^agent:mcp:/),
+      leaseToken: "never-return-this-lease-secret",
+    });
     await client.callTool({
       name: "release_project_claim",
       arguments: { projectId, reservationId },

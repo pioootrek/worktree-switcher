@@ -204,11 +204,11 @@ describe("controller access boundary", () => {
     expect((await fetch(`${base}/api/projects/project-1/environment-profiles`, {
       method: "POST", headers, body: JSON.stringify({ name: "e2e", environment: { PLAYWRIGHT_E2E: "1" }, restart: true }),
     })).status).toBe(200);
-    expect(saveEnvironmentProfile).toHaveBeenCalledWith("project-1", "e2e", { PLAYWRIGHT_E2E: "1" }, "local-user", true);
+    expect(saveEnvironmentProfile).toHaveBeenCalledWith("project-1", "e2e", { PLAYWRIGHT_E2E: "1" }, { owner: "local-user" }, true);
     expect((await fetch(`${base}/api/projects/project-1/environment-profile-selection`, {
       method: "POST", headers, body: JSON.stringify({ name: "e2e", restart: false }),
     })).status).toBe(200);
-    expect(selectEnvironmentProfile).toHaveBeenCalledWith("project-1", "e2e", "local-user", false);
+    expect(selectEnvironmentProfile).toHaveBeenCalledWith("project-1", "e2e", { owner: "local-user" }, false);
     expect((await fetch(`${base}/api/projects/project-1/environment-profiles`, {
       method: "DELETE", headers, body: JSON.stringify({ name: "e2e" }),
     })).status).toBe(200);

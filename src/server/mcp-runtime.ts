@@ -140,6 +140,10 @@ export class McpRuntime {
       if (!session.owner) throw new Error("MCP session is not initialized.");
       return session.owner;
     };
+    const actorFor = (projectId: string) => {
+      const claim = [...session.claims.values()].find((candidate) => candidate.projectId === projectId);
+      return { owner: owner(), leaseToken: claim?.token };
+    };
     const dashboard = () => english(() => this.service.dashboard());
     const projectList = async () => (await dashboard()).projects.map(({ project, runtime, reservation }) => ({
       id: project.id,
@@ -230,7 +234,7 @@ export class McpRuntime {
       },
       annotations: { destructiveHint: true, idempotentHint: true },
     }, async ({ projectId, environment }) => jsonContent({
-      project: await english(() => this.service.setProjectEnvironment(projectId, environment, owner())),
+      project: await english(() => this.service.setProjectEnvironment(projectId, environment, actorFor(projectId))),
       restartRequired: true,
     }));
 
@@ -248,7 +252,7 @@ export class McpRuntime {
       inputSchema: { projectId: z.string().uuid(), name: z.string().min(1).max(40), environment: z.record(z.string(), z.string()) },
       annotations: { destructiveHint: true, idempotentHint: true },
     }, async ({ projectId, name, environment }) => jsonContent({
-      project: await english(() => this.service.saveEnvironmentProfile(projectId, name, environment, owner())),
+      project: await english(() => this.service.saveEnvironmentProfile(projectId, name, environment, actorFor(projectId))),
     }));
 
     server.registerTool("select_environment_profile", {
@@ -256,7 +260,7 @@ export class McpRuntime {
       inputSchema: { projectId: z.string().uuid(), name: z.string().min(1).max(40) },
       annotations: { destructiveHint: true, idempotentHint: true },
     }, async ({ projectId, name }) => jsonContent({
-      project: await english(() => this.service.selectEnvironmentProfile(projectId, name, owner())),
+      project: await english(() => this.service.selectEnvironmentProfile(projectId, name, actorFor(projectId))),
       restartRequired: true,
     }));
 
@@ -265,7 +269,7 @@ export class McpRuntime {
       inputSchema: { projectId: z.string().uuid(), name: z.string().min(1).max(40) },
       annotations: { destructiveHint: true, idempotentHint: true },
     }, async ({ projectId, name }) => jsonContent({
-      project: await english(() => this.service.deleteEnvironmentProfile(projectId, name, owner())),
+      project: await english(() => this.service.deleteEnvironmentProfile(projectId, name, actorFor(projectId))),
     }));
 
     server.registerTool("claim_project", {

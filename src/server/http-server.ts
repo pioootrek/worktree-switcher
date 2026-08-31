@@ -304,7 +304,7 @@ export function createControllerServer(options: {
         }
         const environmentMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/environment$/);
         if (request.method === "POST" && environmentMatch) {
-          const project = options.service.setProjectEnvironment(
+          const project = await options.service.setProjectEnvironment(
             decodeURIComponent(environmentMatch[1]),
             parseEnvironment(await readJson(request)),
           );
@@ -316,7 +316,7 @@ export function createControllerServer(options: {
         if (request.method === "POST" && profilesMatch) {
           const input = parseEnvironmentProfile(await readJson(request));
           const project = await options.service.saveEnvironmentProfile(
-            decodeURIComponent(profilesMatch[1]), input.name, input.environment, "local-user", input.restart,
+            decodeURIComponent(profilesMatch[1]), input.name, input.environment, { owner: "local-user" }, input.restart,
           );
           options.events.publish();
           json(response, 200, { project });
@@ -324,7 +324,7 @@ export function createControllerServer(options: {
         }
         if (request.method === "DELETE" && profilesMatch) {
           const input = parseProfileSelection(await readJson(request));
-          const project = options.service.deleteEnvironmentProfile(decodeURIComponent(profilesMatch[1]), input.name);
+          const project = await options.service.deleteEnvironmentProfile(decodeURIComponent(profilesMatch[1]), input.name);
           options.events.publish();
           json(response, 200, { project });
           return;
@@ -333,7 +333,7 @@ export function createControllerServer(options: {
         if (request.method === "POST" && profileSelectionMatch) {
           const input = parseProfileSelection(await readJson(request));
           const project = await options.service.selectEnvironmentProfile(
-            decodeURIComponent(profileSelectionMatch[1]), input.name, "local-user", input.restart,
+            decodeURIComponent(profileSelectionMatch[1]), input.name, { owner: "local-user" }, input.restart,
           );
           options.events.publish();
           json(response, 200, { project });

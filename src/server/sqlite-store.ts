@@ -638,15 +638,18 @@ export class SqliteStateStore implements StateStore {
       this.database.transaction(() => {
         const columns = this.database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
         const names = new Set(columns.map(({ name }) => name));
-        if (!names.has("environment_profiles_json")) {
+        const addedProfilesColumn = !names.has("environment_profiles_json");
+        if (addedProfilesColumn) {
           this.database.exec(`ALTER TABLE projects ADD COLUMN environment_profiles_json TEXT NOT NULL DEFAULT '[{"name":"default","environment":{}}]'`);
         }
         if (!names.has("selected_environment_profile")) {
           this.database.exec("ALTER TABLE projects ADD COLUMN selected_environment_profile TEXT NOT NULL DEFAULT 'default'");
         }
-        this.database.prepare(`
-          UPDATE projects SET environment_profiles_json = json_array(json_object('name', 'default', 'environment', json(environment_json)))
-        `).run();
+        if (addedProfilesColumn) {
+          this.database.prepare(`
+            UPDATE projects SET environment_profiles_json = json_array(json_object('name', 'default', 'environment', json(environment_json)))
+          `).run();
+        }
         this.recordMigration(9);
       })();
     }

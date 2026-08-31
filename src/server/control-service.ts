@@ -119,47 +119,7 @@ export class ControlService {
     actor: OperationActor = { owner: "local-user" },
   ): Promise<void> {
     try {
-      await this.serialized(projectId, async () => {
-        const project = this.requireProject(projectId);
-        if (operation === "stop") {
-          this.assertReservationAllows(
-            projectId,
-            this.processes.snapshot(projectId).worktreePath ?? project.selectedWorktreePath,
-            actor,
-          );
-          await this.processes.stop(projectId);
-          this.logs.controller("project.stopped", { projectId });
-          return;
-        }
-        const worktrees = await this.git.list(project.repositoryPath);
-        const selected = this.resolveWorktree(project, worktrees, worktreePath);
-        this.assertReservationAllows(projectId, selected.path, actor);
-        this.acquireCapacity(project);
-        try {
-          if (operation === "restart" || operation === "switch") await this.processes.stop(projectId);
-          if (operation === "switch") this.store.setSelectedWorktree(projectId, selected.path);
-          const launch = this.commands.resolve(selected.path, project.port, project.launchPreset, {
-            mode: project.tlsMode,
-            keyPath: project.tlsKeyPath,
-            certPath: project.tlsCertPath,
-            caPath: project.tlsCaPath,
-          });
-          if (project.executable !== launch.executable || JSON.stringify(project.args) !== JSON.stringify(launch.args)) {
-            this.store.updateProjectLaunch(projectId, {
-              tlsMode: launch.tls.mode,
-              tlsKeyPath: launch.tls.keyPath,
-              tlsCertPath: launch.tls.certPath,
-              tlsCaPath: launch.tls.caPath,
-              executable: launch.executable,
-              args: launch.args,
-            });
-          }
-          await this.processes.start(this.requireProject(projectId), selected.path);
-        } finally {
-          this.pendingStarts.delete(projectId);
-        }
-        this.logs.controller(`project.${operation}`, { projectId, worktreePath: selected.path });
-      });
+      await this.serialized(projectId, () => this.operateLocked(projectId, operation, worktreePath, actor));
     } catch (error) {
       this.logs.controller("project.operation_failed", {
         projectId,
@@ -168,6 +128,53 @@ export class ControlService {
       });
       throw error;
     }
+  }
+
+  private async operateLocked(
+    projectId: string,
+    operation: "start" | "stop" | "restart" | "switch",
+    worktreePath: string | undefined,
+    actor: OperationActor,
+  ): Promise<void> {
+    const project = this.requireProject(projectId);
+    if (operation === "stop") {
+      this.assertReservationAllows(
+        projectId,
+        this.processes.snapshot(projectId).worktreePath ?? project.selectedWorktreePath,
+        actor,
+      );
+      await this.processes.stop(projectId);
+      this.logs.controller("project.stopped", { projectId });
+      return;
+    }
+    const worktrees = await this.git.list(project.repositoryPath);
+    const selected = this.resolveWorktree(project, worktrees, worktreePath);
+    this.assertReservationAllows(projectId, selected.path, actor);
+    this.acquireCapacity(project);
+    try {
+      if (operation === "restart" || operation === "switch") await this.processes.stop(projectId);
+      if (operation === "switch") this.store.setSelectedWorktree(projectId, selected.path);
+      const launch = this.commands.resolve(selected.path, project.port, project.launchPreset, {
+        mode: project.tlsMode,
+        keyPath: project.tlsKeyPath,
+        certPath: project.tlsCertPath,
+        caPath: project.tlsCaPath,
+      });
+      if (project.executable !== launch.executable || JSON.stringify(project.args) !== JSON.stringify(launch.args)) {
+        this.store.updateProjectLaunch(projectId, {
+          tlsMode: launch.tls.mode,
+          tlsKeyPath: launch.tls.keyPath,
+          tlsCertPath: launch.tls.certPath,
+          tlsCaPath: launch.tls.caPath,
+          executable: launch.executable,
+          args: launch.args,
+        });
+      }
+      await this.processes.start(this.requireProject(projectId), selected.path);
+    } finally {
+      this.pendingStarts.delete(projectId);
+    }
+    this.logs.controller(`project.${operation}`, { projectId, worktreePath: selected.path });
   }
 
   async setProjectTls(projectId: string, input: NextTlsConfiguration): Promise<void> {
@@ -200,55 +207,67 @@ export class ControlService {
     });
   }
 
-  setProjectEnvironment(projectId: string, environment: Record<string, string>, actor = "local-user"): Project {
-    const project = this.requireProject(projectId);
-    const phase = this.processes.snapshot(projectId).phase;
-    if (phase === "running" || phase === "starting" || phase === "stopping") {
-      throw new Error("Zatrzymaj serwer przed zmianą zmiennych środowiskowych.");
-    }
-    const normalized = this.validateEnvironment(environment);
-    this.store.updateProjectEnvironment(project.id, normalized, actor);
-    this.logs.controller("project.environment_updated", { projectId, variableNames: Object.keys(normalized), actor });
-    return this.requireProject(projectId);
+  async setProjectEnvironment(projectId: string, environment: Record<string, string>, actor: OperationActor = { owner: "local-user" }): Promise<Project> {
+    return this.serialized(projectId, async () => {
+      const project = this.requireProject(projectId);
+      this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
+      const phase = this.processes.snapshot(projectId).phase;
+      if (phase === "running" || phase === "starting" || phase === "stopping") {
+        throw new Error("Zatrzymaj serwer przed zmianą zmiennych środowiskowych.");
+      }
+      const normalized = this.validateEnvironment(environment);
+      this.store.updateProjectEnvironment(project.id, normalized, actor.owner);
+      this.logs.controller("project.environment_updated", { projectId, variableNames: Object.keys(normalized), actor: actor.owner });
+      return this.requireProject(projectId);
+    });
   }
 
-  async saveEnvironmentProfile(projectId: string, name: string, environment: Record<string, string>, actor = "local-user", restart = false): Promise<Project> {
-    const project = this.requireProject(projectId);
-    const profileName = this.validateProfileName(name);
-    const normalized = this.validateEnvironment(environment);
-    const active = this.isProjectActive(projectId);
-    const changesActiveProfile = project.selectedEnvironmentProfile === profileName;
-    if (active && changesActiveProfile && !restart) throw new Error("Zatrzymaj serwer lub wybierz zapis z restartem.");
-    if (active && changesActiveProfile) await this.operate(projectId, "stop");
-    this.store.saveProjectEnvironmentProfile(projectId, { name: profileName, environment: normalized }, actor);
-    this.logs.controller("project.environment_profile_saved", { projectId, profileName, variableNames: Object.keys(normalized), actor });
-    if (active && changesActiveProfile) await this.operate(projectId, "start");
-    return this.requireProject(projectId);
+  async saveEnvironmentProfile(projectId: string, name: string, environment: Record<string, string>, actor: OperationActor = { owner: "local-user" }, restart = false): Promise<Project> {
+    return this.serialized(projectId, async () => {
+      const project = this.requireProject(projectId);
+      this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
+      const profileName = this.validateProfileName(name);
+      const normalized = this.validateEnvironment(environment);
+      const active = this.isProjectActive(projectId);
+      const changesActiveProfile = project.selectedEnvironmentProfile === profileName;
+      if (active && changesActiveProfile && !restart) throw new Error("Zatrzymaj serwer lub wybierz zapis z restartem.");
+      if (active && changesActiveProfile) await this.operateLocked(projectId, "stop", undefined, actor);
+      this.store.saveProjectEnvironmentProfile(projectId, { name: profileName, environment: normalized }, actor.owner);
+      this.logs.controller("project.environment_profile_saved", { projectId, profileName, variableNames: Object.keys(normalized), actor: actor.owner });
+      if (active && changesActiveProfile) await this.operateLocked(projectId, "start", undefined, actor);
+      return this.requireProject(projectId);
+    });
   }
 
-  async selectEnvironmentProfile(projectId: string, name: string, actor = "local-user", restart = false): Promise<Project> {
-    const project = this.requireProject(projectId);
-    const profileName = this.validateProfileName(name);
-    if (!project.environmentProfiles.some((profile) => profile.name === profileName)) throw new Error("Nie znaleziono profilu środowiska.");
-    if (project.selectedEnvironmentProfile === profileName) return project;
-    const active = this.isProjectActive(projectId);
-    if (active && !restart) throw new Error("Zatrzymaj serwer lub wybierz profil z restartem.");
-    if (active) await this.operate(projectId, "stop");
-    this.store.selectProjectEnvironmentProfile(projectId, profileName, actor);
-    this.logs.controller("project.environment_profile_selected", { projectId, profileName, actor });
-    if (active) await this.operate(projectId, "start");
-    return this.requireProject(projectId);
+  async selectEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }, restart = false): Promise<Project> {
+    return this.serialized(projectId, async () => {
+      const project = this.requireProject(projectId);
+      this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
+      const profileName = this.validateProfileName(name);
+      if (!project.environmentProfiles.some((profile) => profile.name === profileName)) throw new Error("Nie znaleziono profilu środowiska.");
+      if (project.selectedEnvironmentProfile === profileName) return project;
+      const active = this.isProjectActive(projectId);
+      if (active && !restart) throw new Error("Zatrzymaj serwer lub wybierz profil z restartem.");
+      if (active) await this.operateLocked(projectId, "stop", undefined, actor);
+      this.store.selectProjectEnvironmentProfile(projectId, profileName, actor.owner);
+      this.logs.controller("project.environment_profile_selected", { projectId, profileName, actor: actor.owner });
+      if (active) await this.operateLocked(projectId, "start", undefined, actor);
+      return this.requireProject(projectId);
+    });
   }
 
-  deleteEnvironmentProfile(projectId: string, name: string, actor = "local-user"): Project {
-    const project = this.requireProject(projectId);
-    const profileName = this.validateProfileName(name);
-    if (profileName === "default") throw new Error("Profilu default nie można usunąć.");
-    if (project.selectedEnvironmentProfile === profileName) throw new Error("Nie można usunąć aktywnego profilu środowiska.");
-    if (!project.environmentProfiles.some((profile) => profile.name === profileName)) throw new Error("Nie znaleziono profilu środowiska.");
-    this.store.deleteProjectEnvironmentProfile(projectId, profileName, actor);
-    this.logs.controller("project.environment_profile_deleted", { projectId, profileName, actor });
-    return this.requireProject(projectId);
+  async deleteEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }): Promise<Project> {
+    return this.serialized(projectId, async () => {
+      const project = this.requireProject(projectId);
+      this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
+      const profileName = this.validateProfileName(name);
+      if (profileName === "default") throw new Error("Profilu default nie można usunąć.");
+      if (project.selectedEnvironmentProfile === profileName) throw new Error("Nie można usunąć aktywnego profilu środowiska.");
+      if (!project.environmentProfiles.some((profile) => profile.name === profileName)) throw new Error("Nie znaleziono profilu środowiska.");
+      this.store.deleteProjectEnvironmentProfile(projectId, profileName, actor.owner);
+      this.logs.controller("project.environment_profile_deleted", { projectId, profileName, actor: actor.owner });
+      return this.requireProject(projectId);
+    });
   }
 
   private validateEnvironment(environment: Record<string, string>): Record<string, string> {

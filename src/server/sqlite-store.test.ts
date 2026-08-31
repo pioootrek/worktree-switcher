@@ -152,6 +152,27 @@ describe("SqliteStateStore", () => {
     database.close();
   });
 
+  it("does not overwrite profiles when replaying migration 9 against an existing column", () => {
+    const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-store-env-replay-"));
+    directories.push(directory);
+    const databasePath = join(directory, "state.sqlite3");
+    const store = new SqliteStateStore(databasePath);
+    const project = store.addProject(projectInput("Replay", "/code/replay", 3218));
+    store.saveProjectEnvironmentProfile(project.id, { name: "staging", environment: { FEATURE_MODE: "staging" } }, "local-user");
+    store.close();
+
+    const database = new Database(databasePath);
+    database.prepare("DELETE FROM schema_migrations WHERE version = 9").run();
+    database.close();
+
+    const migrated = new SqliteStateStore(databasePath);
+    expect(migrated.getProject(project.id)?.environmentProfiles).toEqual([
+      { name: "default", environment: {} },
+      { name: "staging", environment: { FEATURE_MODE: "staging" } },
+    ]);
+    migrated.close();
+  });
+
   it("persists controller-wide server capacity settings", () => {
     const store = createStore();
     expect(store.getServerCapacitySettings()).toEqual({ enabled: false, limit: 2 });

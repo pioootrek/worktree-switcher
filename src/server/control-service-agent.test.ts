@@ -71,6 +71,7 @@ describe("ControlService agent claims", () => {
     expect(claim.reservation.worktreePath).toBe(worktree.path);
     expect(start).toHaveBeenCalledOnce();
     await expect(service.operate(project.id, "stop")).rejects.toThrow("agent:mcp:session-1");
+    await expect(service.setProjectEnvironment(project.id, { FEATURE_MODE: "local" })).rejects.toThrow("agent:mcp:session-1");
     expect(stop).not.toHaveBeenCalled();
 
     service.releaseAgentClaim(project.id, claim.reservation.id, "agent:mcp:session-1", claim.leaseToken);
@@ -130,6 +131,74 @@ describe("ControlService agent claims", () => {
     });
     expect(claim.operationError).toBe("Dependency missing");
     expect(store.getActiveReservation(project.id)?.id).toBe(claim.reservation.id);
+    await expect(service.setProjectEnvironment(project.id, { FEATURE_MODE: "local" })).rejects.toThrow("agent:mcp:session-2");
+    await expect(service.setProjectEnvironment(project.id, { FEATURE_MODE: "agent" }, {
+      owner: "agent:mcp:session-2",
+      leaseToken: claim.leaseToken,
+    })).resolves.toMatchObject({ environment: { FEATURE_MODE: "agent" } });
+    store.close();
+  });
+
+  it("serializes an active-profile restart with concurrent operations", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-profile-restart-"));
+    directories.push(directory);
+    const store = new SqliteStateStore(join(directory, "state.sqlite3"));
+    const project = store.addProject({
+      name: "Web",
+      repositoryPath: "/code/web",
+      port: 3218,
+      executable: "pnpm",
+      args: ["run", "dev"],
+    });
+    const worktree: Worktree = {
+      path: "/code/web",
+      head: "abc",
+      shortHead: "abc",
+      branch: "main",
+      detached: false,
+      locked: false,
+      prunable: false,
+      dirty: false,
+    };
+    store.setSelectedWorktree(project.id, worktree.path);
+    const runtime: RuntimeSnapshot = {
+      phase: "running", pid: 123, worktreePath: worktree.path, startedAt: new Date().toISOString(), error: null, failure: null, logs: [],
+      resources: { status: "idle", currentRssBytes: null, peakRssBytes: null, cpuPercent: null, processCount: null, sampledAt: null, sampleAgeSeconds: null, warningThresholdBytes: null, history: [] },
+    };
+    const events: string[] = [];
+    let releaseStop!: () => void;
+    const stopGate = new Promise<void>((resolve) => { releaseStop = resolve; });
+    const stop = vi.fn(async () => {
+      events.push("stop");
+      await stopGate;
+      runtime.phase = "stopped";
+      runtime.pid = null;
+      runtime.worktreePath = null;
+    });
+    const start = vi.fn(async (startedProject) => {
+      events.push(`start:${startedProject.environment.FEATURE_MODE}`);
+      runtime.phase = "running";
+      runtime.pid = 456;
+      runtime.worktreePath = worktree.path;
+    });
+    const service = new ControlService(
+      store,
+      { list: vi.fn(async () => [worktree]) } as unknown as GitWorktreeReader,
+      { snapshot: () => ({ ...runtime }), start, stop } as unknown as ProcessManager,
+      undefined,
+      { resolve: () => ({ preset: "node", executable: "pnpm", args: ["run", "dev"], portMethod: "environment", tls: { mode: "off", keyPath: null, certPath: null, caPath: null } }) },
+    );
+
+    const profileRestart = service.saveEnvironmentProfile(project.id, "default", { FEATURE_MODE: "new" }, { owner: "local-user" }, true);
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+    const concurrentStart = service.operate(project.id, "start");
+    await Promise.resolve();
+    expect(start).not.toHaveBeenCalled();
+    releaseStop();
+    await profileRestart;
+    await concurrentStart;
+
+    expect(events).toEqual(["stop", "start:new", "start:new"]);
     store.close();
   });
 

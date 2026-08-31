@@ -206,6 +206,9 @@ on disk:
         "args": ["dev", "--", "--port", "{port}"]
       },
       "selectedEnvironmentProfile": "staging",
+      "environment": {
+        "FEATURE_MODE": "staging"
+      },
       "environmentProfiles": [
         { "name": "default", "environment": {} },
         {
