@@ -65,6 +65,15 @@ export function processExitFailure(
       technicalDetails,
     };
   }
+  if (/No module named ["']django["']|Couldn't import Django/i.test(text)) {
+    return {
+      code: "missing_dependency",
+      title: "Nie znaleziono Django",
+      message: "Wybrany interpreter Python nie ma zainstalowanego Django.",
+      suggestion: "Utwórz .venv lub venv w tym worktree i zainstaluj zależności projektu.",
+      technicalDetails,
+    };
+  }
   if (/unknown (option|argument)|unrecognized option|unexpected argument[^\n]*port|invalid project directory[^\n]*--port/i.test(text)) {
     return {
       code: "invalid_arguments",

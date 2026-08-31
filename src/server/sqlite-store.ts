@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 
 import Database from "better-sqlite3";
 
-import type { Project, Reservation, ServerCapacitySettings, WorktreeStorageHistoryPoint, WorktreeStorageSnapshot } from "@/shared/contracts";
+import type { LaunchPreset, Project, Reservation, ServerCapacitySettings, WorktreeStorageHistoryPoint, WorktreeStorageSnapshot } from "@/shared/contracts";
 import type { ProjectRegistration, ReservationRequest, StateStore, WorktreeStorageSample } from "./state-store";
 
 type ProjectRow = {
@@ -12,12 +12,16 @@ type ProjectRow = {
   name: string;
   repository_path: string;
   port: number;
+  launch_preset: LaunchPreset;
   tls_mode: "off" | "generated" | "custom";
   tls_key_path: string | null;
   tls_cert_path: string | null;
   tls_ca_path: string | null;
   executable: string;
   args_json: string;
+  environment_json: string;
+  environment_profiles_json: string;
+  selected_environment_profile: string;
   healthcheck_path: string;
   startup_timeout_ms: number;
   selected_worktree_path: string | null;
@@ -62,12 +66,16 @@ const schema = `
     name TEXT NOT NULL,
     repository_path TEXT NOT NULL UNIQUE,
     port INTEGER NOT NULL UNIQUE CHECK(port BETWEEN 1 AND 65535),
+    launch_preset TEXT NOT NULL DEFAULT 'node' CHECK(launch_preset IN ('auto', 'node', 'django')),
     tls_mode TEXT NOT NULL DEFAULT 'off' CHECK(tls_mode IN ('off', 'generated', 'custom')),
     tls_key_path TEXT,
     tls_cert_path TEXT,
     tls_ca_path TEXT,
     executable TEXT NOT NULL,
     args_json TEXT NOT NULL,
+    environment_json TEXT NOT NULL DEFAULT '{}',
+    environment_profiles_json TEXT NOT NULL DEFAULT '[{"name":"default","environment":{}}]',
+    selected_environment_profile TEXT NOT NULL DEFAULT 'default',
     healthcheck_path TEXT NOT NULL,
     startup_timeout_ms INTEGER NOT NULL,
     selected_worktree_path TEXT,
@@ -132,12 +140,16 @@ function mapProject(row: ProjectRow): Project {
     name: row.name,
     repositoryPath: row.repository_path,
     port: row.port,
+    launchPreset: row.launch_preset,
     tlsMode: row.tls_mode,
     tlsKeyPath: row.tls_key_path,
     tlsCertPath: row.tls_cert_path,
     tlsCaPath: row.tls_ca_path,
     executable: row.executable,
     args: JSON.parse(row.args_json) as string[],
+    environment: JSON.parse(row.environment_json) as Record<string, string>,
+    environmentProfiles: JSON.parse(row.environment_profiles_json) as Project["environmentProfiles"],
+    selectedEnvironmentProfile: row.selected_environment_profile,
     healthcheckPath: row.healthcheck_path,
     startupTimeoutMs: row.startup_timeout_ms,
     selectedWorktreePath: row.selected_worktree_path,
@@ -196,13 +208,14 @@ export class SqliteStateStore implements StateStore {
     this.database.transaction(() => {
       this.database.prepare(`
         INSERT INTO projects (
-          id, name, repository_path, port, executable, args_json,
+          id, name, repository_path, port, launch_preset, executable, args_json,
           healthcheck_path, startup_timeout_ms, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, '/', 45000, ?, ?)
-      `).run(id, input.name, input.repositoryPath, input.port, input.executable, JSON.stringify(input.args), now, now);
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, '/', 45000, ?, ?)
+      `).run(id, input.name, input.repositoryPath, input.port, input.launchPreset ?? "auto", input.executable, JSON.stringify(input.args), now, now);
       this.audit(id, "project.created", "local-user", {
         repositoryPath: input.repositoryPath,
         port: input.port,
+        launchPreset: input.launchPreset ?? "auto",
         executable: input.executable,
         args: input.args,
       });
@@ -237,6 +250,57 @@ export class SqliteStateStore implements StateStore {
       );
       if (result.changes === 0) throw new Error("Nie znaleziono projektu.");
       this.audit(projectId, "project.launch_updated", "local-user", input);
+    })();
+  }
+
+  updateProjectEnvironment(projectId: string, environment: Record<string, string>, actor: string): void {
+    const project = this.getProject(projectId);
+    if (!project) throw new Error("Nie znaleziono projektu.");
+    this.saveProjectEnvironmentProfile(projectId, { name: project.selectedEnvironmentProfile, environment }, actor);
+  }
+
+  saveProjectEnvironmentProfile(projectId: string, profile: Project["environmentProfiles"][number], actor: string): void {
+    const project = this.getProject(projectId);
+    if (!project) throw new Error("Nie znaleziono projektu.");
+    const profiles = [...project.environmentProfiles.filter(({ name }) => name !== profile.name), profile]
+      .sort((left, right) => left.name.localeCompare(right.name));
+    const environment = project.selectedEnvironmentProfile === profile.name ? profile.environment : project.environment;
+    this.persistEnvironmentProfiles(projectId, profiles, project.selectedEnvironmentProfile, environment, actor, "project.environment_profile_saved", profile.name, Object.keys(profile.environment));
+  }
+
+  deleteProjectEnvironmentProfile(projectId: string, profileName: string, actor: string): void {
+    const project = this.getProject(projectId);
+    if (!project) throw new Error("Nie znaleziono projektu.");
+    const profiles = project.environmentProfiles.filter(({ name }) => name !== profileName);
+    this.persistEnvironmentProfiles(projectId, profiles, project.selectedEnvironmentProfile, project.environment, actor, "project.environment_profile_deleted", profileName, []);
+  }
+
+  selectProjectEnvironmentProfile(projectId: string, profileName: string, actor: string): void {
+    const project = this.getProject(projectId);
+    if (!project) throw new Error("Nie znaleziono projektu.");
+    const profile = project.environmentProfiles.find(({ name }) => name === profileName);
+    if (!profile) throw new Error("Nie znaleziono profilu środowiska.");
+    this.persistEnvironmentProfiles(projectId, project.environmentProfiles, profileName, profile.environment, actor, "project.environment_profile_selected", profileName, Object.keys(profile.environment));
+  }
+
+  private persistEnvironmentProfiles(
+    projectId: string,
+    profiles: Project["environmentProfiles"],
+    selectedProfile: string,
+    environment: Record<string, string>,
+    actor: string,
+    eventType: string,
+    profileName: string,
+    variableNames: string[],
+  ): void {
+    const now = new Date().toISOString();
+    this.database.transaction(() => {
+      const result = this.database.prepare(`
+        UPDATE projects SET environment_profiles_json = ?, selected_environment_profile = ?,
+          environment_json = ?, updated_at = ? WHERE id = ?
+      `).run(JSON.stringify(profiles), selectedProfile, JSON.stringify(environment), now, projectId);
+      if (result.changes === 0) throw new Error("Nie znaleziono projektu.");
+      this.audit(projectId, eventType, actor, { profileName, variableNames: variableNames.sort() });
     })();
   }
 
@@ -550,6 +614,43 @@ export class SqliteStateStore implements StateStore {
             ON worktree_storage_samples(project_id, worktree_path, measured_at);
         `);
         this.recordMigration(6);
+      })();
+    }
+    if (!this.hasMigration(7)) {
+      this.database.transaction(() => {
+        const columns = this.database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
+        if (!columns.some(({ name }) => name === "launch_preset")) {
+          this.database.exec("ALTER TABLE projects ADD COLUMN launch_preset TEXT NOT NULL DEFAULT 'node' CHECK(launch_preset IN ('auto', 'node', 'django'))");
+        }
+        this.recordMigration(7);
+      })();
+    }
+    if (!this.hasMigration(8)) {
+      this.database.transaction(() => {
+        const columns = this.database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
+        if (!columns.some(({ name }) => name === "environment_json")) {
+          this.database.exec("ALTER TABLE projects ADD COLUMN environment_json TEXT NOT NULL DEFAULT '{}'");
+        }
+        this.recordMigration(8);
+      })();
+    }
+    if (!this.hasMigration(9)) {
+      this.database.transaction(() => {
+        const columns = this.database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>;
+        const names = new Set(columns.map(({ name }) => name));
+        const addedProfilesColumn = !names.has("environment_profiles_json");
+        if (addedProfilesColumn) {
+          this.database.exec(`ALTER TABLE projects ADD COLUMN environment_profiles_json TEXT NOT NULL DEFAULT '[{"name":"default","environment":{}}]'`);
+        }
+        if (!names.has("selected_environment_profile")) {
+          this.database.exec("ALTER TABLE projects ADD COLUMN selected_environment_profile TEXT NOT NULL DEFAULT 'default'");
+        }
+        if (addedProfilesColumn) {
+          this.database.prepare(`
+            UPDATE projects SET environment_profiles_json = json_array(json_object('name', 'default', 'environment', json(environment_json)))
+          `).run();
+        }
+        this.recordMigration(9);
       })();
     }
   }

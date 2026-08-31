@@ -3,7 +3,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
 
-import type { DashboardResponse, McpStatus } from "@/shared/contracts";
+import type { DashboardResponse, LaunchPreset, McpStatus } from "@/shared/contracts";
 import { ControlService } from "./control-service";
 import { localeFrom } from "../i18n/messages";
 import { localizeServerMessage } from "../i18n/server-errors";
@@ -46,10 +46,17 @@ function optionalString(record: JsonRecord, key: string, max: number): string | 
 }
 
 function parseAddProject(value: unknown) {
-  const record = strictRecord(value, ["name", "repositoryPath", "port"]);
+  const record = strictRecord(value, ["name", "repositoryPath", "port", "launchPreset"]);
   const port = record.port;
   if (typeof port !== "number" || !Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Nieprawidłowe pole port.");
-  return { name: requiredString(record, "name", 80), repositoryPath: requiredString(record, "repositoryPath", 4096), port };
+  const launchPreset = record.launchPreset ?? "auto";
+  if (launchPreset !== "auto" && launchPreset !== "node" && launchPreset !== "django") throw new Error("Nieprawidłowy preset uruchomienia.");
+  return {
+    name: requiredString(record, "name", 80),
+    repositoryPath: requiredString(record, "repositoryPath", 4096),
+    port,
+    launchPreset: launchPreset as LaunchPreset,
+  };
 }
 
 function parseOperation(value: unknown): {
@@ -87,6 +94,27 @@ function parseCapacitySettings(value: unknown): { enabled: boolean; limit: numbe
     throw new Error("Limit serwerów musi być liczbą całkowitą od 1 do 64.");
   }
   return { enabled: record.enabled, limit: record.limit as number };
+}
+
+function parseEnvironment(value: unknown): Record<string, string> {
+  const record = strictRecord(value, ["environment"]);
+  const environment = record.environment;
+  if (!environment || typeof environment !== "object" || Array.isArray(environment)) throw new Error("Nieprawidłowe pole environment.");
+  return environment as Record<string, string>;
+}
+
+function parseEnvironmentProfile(value: unknown): { name: string; environment: Record<string, string>; restart: boolean } {
+  const record = strictRecord(value, ["name", "environment", "restart"]);
+  const environment = record.environment;
+  if (!environment || typeof environment !== "object" || Array.isArray(environment)) throw new Error("Nieprawidłowe pole environment.");
+  if (record.restart !== undefined && typeof record.restart !== "boolean") throw new Error("Nieprawidłowe pole restart.");
+  return { name: requiredString(record, "name", 40), environment: environment as Record<string, string>, restart: record.restart === true };
+}
+
+function parseProfileSelection(value: unknown): { name: string; restart: boolean } {
+  const record = strictRecord(value, ["name", "restart"]);
+  if (record.restart !== undefined && typeof record.restart !== "boolean") throw new Error("Nieprawidłowe pole restart.");
+  return { name: requiredString(record, "name", 40), restart: record.restart === true };
 }
 
 function parseStorageRefresh(value: unknown): { worktreePath: string } {
@@ -272,6 +300,43 @@ export function createControllerServer(options: {
           );
           options.events.publish();
           json(response, 200, { ok: true });
+          return;
+        }
+        const environmentMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/environment$/);
+        if (request.method === "POST" && environmentMatch) {
+          const project = await options.service.setProjectEnvironment(
+            decodeURIComponent(environmentMatch[1]),
+            parseEnvironment(await readJson(request)),
+          );
+          options.events.publish();
+          json(response, 200, { project });
+          return;
+        }
+        const profilesMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/environment-profiles$/);
+        if (request.method === "POST" && profilesMatch) {
+          const input = parseEnvironmentProfile(await readJson(request));
+          const project = await options.service.saveEnvironmentProfile(
+            decodeURIComponent(profilesMatch[1]), input.name, input.environment, { owner: "local-user" }, input.restart,
+          );
+          options.events.publish();
+          json(response, 200, { project });
+          return;
+        }
+        if (request.method === "DELETE" && profilesMatch) {
+          const input = parseProfileSelection(await readJson(request));
+          const project = await options.service.deleteEnvironmentProfile(decodeURIComponent(profilesMatch[1]), input.name);
+          options.events.publish();
+          json(response, 200, { project });
+          return;
+        }
+        const profileSelectionMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/environment-profile-selection$/);
+        if (request.method === "POST" && profileSelectionMatch) {
+          const input = parseProfileSelection(await readJson(request));
+          const project = await options.service.selectEnvironmentProfile(
+            decodeURIComponent(profileSelectionMatch[1]), input.name, { owner: "local-user" }, input.restart,
+          );
+          options.events.publish();
+          json(response, 200, { project });
           return;
         }
         const storageRefreshMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/storage\/refresh$/);

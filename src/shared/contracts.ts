@@ -1,17 +1,27 @@
 export type RuntimePhase = "stopped" | "starting" | "running" | "stopping" | "failed";
 export type DevServerTlsMode = "off" | "generated" | "custom";
+export type LaunchPreset = "auto" | "node" | "django";
+
+export interface EnvironmentProfile {
+  name: string;
+  environment: Record<string, string>;
+}
 
 export interface Project {
   id: string;
   name: string;
   repositoryPath: string;
   port: number;
+  launchPreset: LaunchPreset;
   tlsMode: DevServerTlsMode;
   tlsKeyPath: string | null;
   tlsCertPath: string | null;
   tlsCaPath: string | null;
   executable: string;
   args: string[];
+  environment: Record<string, string>;
+  environmentProfiles: EnvironmentProfile[];
+  selectedEnvironmentProfile: string;
   healthcheckPath: string;
   startupTimeoutMs: number;
   selectedWorktreePath: string | null;
@@ -77,7 +87,7 @@ export interface RuntimeMetricsResponse {
 }
 
 export interface RuntimeFailure {
-  code: "port_in_use" | "missing_dev_script" | "invalid_arguments" | "missing_executable" | "resource_limit" | "startup_timeout" | "process_exit";
+  code: "port_in_use" | "missing_dev_script" | "missing_dependency" | "invalid_arguments" | "missing_executable" | "resource_limit" | "startup_timeout" | "process_exit";
   title: string;
   message: string;
   suggestion: string;

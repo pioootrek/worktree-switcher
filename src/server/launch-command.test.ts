@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { NodeLaunchCommandResolver } from "./launch-command";
+import { ProjectLaunchCommandResolver } from "./launch-command";
 
 const directories: string[] = [];
 
@@ -20,7 +20,7 @@ afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
-describe("NodeLaunchCommandResolver", () => {
+describe("ProjectLaunchCommandResolver", () => {
   it("uses PORT for Next.js and honors the declared package manager", () => {
     const directory = fixture({
       packageManager: "pnpm@11.5.2",
@@ -28,7 +28,8 @@ describe("NodeLaunchCommandResolver", () => {
       dependencies: { next: "16.2.11" },
     });
 
-    expect(new NodeLaunchCommandResolver().resolve(directory, 3000)).toEqual({
+    expect(new ProjectLaunchCommandResolver().resolve(directory, 3000)).toEqual({
+      preset: "node",
       executable: "pnpm",
       args: ["run", "dev"],
       portMethod: "environment",
@@ -39,7 +40,8 @@ describe("NodeLaunchCommandResolver", () => {
   it("passes --port to a Vite script using npm forwarding syntax", () => {
     const directory = fixture({ scripts: { dev: "vite" }, devDependencies: { vite: "8.0.0" } }, "package-lock.json");
 
-    expect(new NodeLaunchCommandResolver().resolve(directory, 4173)).toEqual({
+    expect(new ProjectLaunchCommandResolver().resolve(directory, 4173)).toEqual({
+      preset: "node",
       executable: "npm",
       args: ["run", "dev", "--", "--port", "4173"],
       portMethod: "argument",
@@ -49,12 +51,12 @@ describe("NodeLaunchCommandResolver", () => {
 
   it("detects a package manager from its lockfile", () => {
     const directory = fixture({ scripts: { dev: "node server.js" } }, "yarn.lock");
-    expect(new NodeLaunchCommandResolver().resolve(directory, 4000).executable).toBe("yarn");
+    expect(new ProjectLaunchCommandResolver().resolve(directory, 4000).executable).toBe("yarn");
   });
 
   it("rejects projects without a dev script during registration", () => {
     const directory = fixture({ scripts: { build: "tsc" } });
-    expect(() => new NodeLaunchCommandResolver().resolve(directory, 4000)).toThrow("skryptu dev");
+    expect(() => new ProjectLaunchCommandResolver().resolve(directory, 4000)).toThrow("skryptu dev");
   });
 
   it("enables a generated Next.js certificate", () => {
@@ -63,7 +65,7 @@ describe("NodeLaunchCommandResolver", () => {
       scripts: { dev: "next dev" },
       dependencies: { next: "16.2.11" },
     });
-    const command = new NodeLaunchCommandResolver().resolve(directory, 3000, {
+    const command = new ProjectLaunchCommandResolver().resolve(directory, 3000, "node", {
       mode: "generated", keyPath: null, certPath: null, caPath: null,
     });
     expect(command.args).toEqual(["run", "dev", "--experimental-https"]);
@@ -76,7 +78,7 @@ describe("NodeLaunchCommandResolver", () => {
     const certPath = join(directory, "dev-cert.pem");
     writeFileSync(keyPath, "key");
     writeFileSync(certPath, "cert");
-    const command = new NodeLaunchCommandResolver().resolve(directory, 3000, {
+    const command = new ProjectLaunchCommandResolver().resolve(directory, 3000, "node", {
       mode: "custom", keyPath, certPath, caPath: null,
     });
     expect(command.args).toEqual([
@@ -88,8 +90,43 @@ describe("NodeLaunchCommandResolver", () => {
 
   it("does not guess HTTPS flags for a non-Next project", () => {
     const directory = fixture({ scripts: { dev: "vite" }, devDependencies: { vite: "8.0.0" } });
-    expect(() => new NodeLaunchCommandResolver().resolve(directory, 4173, {
+    expect(() => new ProjectLaunchCommandResolver().resolve(directory, 4173, "node", {
       mode: "generated", keyPath: null, certPath: null, caPath: null,
     })).toThrow("tylko dla Next.js");
+  });
+
+  it("runs Django with a worktree-local .venv interpreter", () => {
+    const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-command-"));
+    directories.push(directory);
+    writeFileSync(join(directory, "manage.py"), "#!/usr/bin/env python3\n");
+    const venv = join(directory, ".venv", "bin");
+    mkdirSync(venv, { recursive: true });
+    writeFileSync(join(venv, "python"), "", { mode: 0o755 });
+
+    expect(new ProjectLaunchCommandResolver().resolve(directory, 8000)).toEqual({
+      preset: "django",
+      executable: "./.venv/bin/python",
+      args: ["manage.py", "runserver", "127.0.0.1:8000"],
+      portMethod: "argument",
+      tls: { mode: "off", keyPath: null, certPath: null, caPath: null },
+    });
+  });
+
+  it("falls back to venv and then python3 for Django", () => {
+    const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-command-"));
+    directories.push(directory);
+    writeFileSync(join(directory, "manage.py"), "");
+    expect(new ProjectLaunchCommandResolver().resolve(directory, 8001, "django").executable).toBe("python3");
+    const venv = join(directory, "venv", "bin");
+    mkdirSync(venv, { recursive: true });
+    writeFileSync(join(venv, "python"), "", { mode: 0o755 });
+    expect(new ProjectLaunchCommandResolver().resolve(directory, 8001, "django").executable).toBe("./venv/bin/python");
+  });
+
+  it("requires an explicit preset for a repository containing Node.js and Django", () => {
+    const directory = fixture({ scripts: { dev: "next dev" }, dependencies: { next: "16.2.11" } });
+    writeFileSync(join(directory, "manage.py"), "");
+    expect(() => new ProjectLaunchCommandResolver().resolve(directory, 3000)).toThrow("Wybierz preset");
+    expect(new ProjectLaunchCommandResolver().resolve(directory, 8000, "django").preset).toBe("django");
   });
 });

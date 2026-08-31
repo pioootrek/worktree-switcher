@@ -74,7 +74,16 @@ function fixture(count = 3, onStart: (project: Project) => Promise<void> = async
   const git = {
     list: vi.fn(async (repositoryPath: string) => worktrees.get(repositoryPath) ?? []),
   } as unknown as GitWorktreeReader;
-  return { service: new ControlService(store, git, processes), store, projects, runtimes, start, stop, worktrees };
+  const commands = {
+    resolve: vi.fn(() => ({
+      preset: "node" as const,
+      executable: "pnpm",
+      args: ["run", "dev"],
+      portMethod: "environment" as const,
+      tls: { mode: "off" as const, keyPath: null, certPath: null, caPath: null },
+    })),
+  };
+  return { service: new ControlService(store, git, processes, undefined, commands), store, projects, runtimes, start, stop, worktrees };
 }
 
 describe("ControlService server capacity", () => {

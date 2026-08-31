@@ -122,16 +122,6 @@
       "type": "feature"
     },
     {
-      "area": "process-manager",
-      "id": "FEAT-20260831-django-runtime-adapter",
-      "path": "feature/FEAT-20260831-django-runtime-adapter.json",
-      "priority": "next",
-      "risk_level": "medium",
-      "status": "open",
-      "title": "Manage Django development servers through runtime adapters",
-      "type": "feature"
-    },
-    {
       "area": "core",
       "id": "RWK-20260829-idle-memory-budget",
       "path": "rework/RWK-20260829-idle-memory-budget.json",

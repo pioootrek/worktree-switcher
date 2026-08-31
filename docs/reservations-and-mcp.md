@@ -117,10 +117,23 @@ list_projects
 get_server_capacity
 get_project_status
 get_project_storage
+list_worktrees
+set_project_environment
+list_environment_profiles
+save_environment_profile
+select_environment_profile
+delete_environment_profile
 claim_project
 renew_project_claim
 release_project_claim
 ```
+
+Environment-profile tools apply to every managed runtime, including Django.
+They expose named literal values but never inherited host values or a hidden
+lease token. Profile mutations remain audited, reject controller- and
+runtime-loader-owned variables (including `PORT`, `NODE_ENV`, `PATH`,
+`NODE_OPTIONS`, loader paths, and Python import paths), and require the managed server to be stopped; the browser may
+instead request an explicit stop-and-restart transaction.
 
 `claim_project` accepts a project, discovered worktree path, reason,
 requested TTL, and idempotency key. It atomically acquires an agent lease and,

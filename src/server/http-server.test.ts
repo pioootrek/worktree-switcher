@@ -22,6 +22,10 @@ async function fixture() {
   const dashboard = vi.fn(async () => ({ projects: [], capacity }));
   const addProject = vi.fn(async () => undefined);
   const setProjectTls = vi.fn(async () => undefined);
+  const setProjectEnvironment = vi.fn(() => ({ id: "project-1" }));
+  const saveEnvironmentProfile = vi.fn(async () => ({ id: "project-1" }));
+  const selectEnvironmentProfile = vi.fn(async () => ({ id: "project-1" }));
+  const deleteEnvironmentProfile = vi.fn(() => ({ id: "project-1" }));
   const setServerCapacity = vi.fn(() => capacity);
   const runtimeMetrics = vi.fn(() => ({ projects: [] }));
   const refreshWorktreeStorage = vi.fn(async () => undefined);
@@ -33,7 +37,7 @@ async function fixture() {
     directories: [{ name: "code", path: "/home/test/code" }],
     files: [],
   }));
-  const service = { addProject, dashboard, deleteWorktreeCache, refreshWorktreeStorage, runtimeMetrics, setProjectTls, setServerCapacity } as unknown as ControlService;
+  const service = { addProject, dashboard, deleteEnvironmentProfile, deleteWorktreeCache, refreshWorktreeStorage, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity } as unknown as ControlService;
   const controller = createControllerServer({
     service,
     directoryBrowser: { list: listDirectories } as unknown as DirectoryBrowser,
@@ -57,7 +61,7 @@ async function fixture() {
     controller.server.listen(0, "127.0.0.1", resolve);
   });
   const address = controller.server.address() as AddressInfo;
-  return { addProject, base: `http://127.0.0.1:${address.port}`, dashboard, deleteWorktreeCache, listDirectories, refreshWorktreeStorage, runtimeMetrics, setProjectTls, setServerCapacity };
+  return { addProject, base: `http://127.0.0.1:${address.port}`, dashboard, deleteEnvironmentProfile, deleteWorktreeCache, listDirectories, refreshWorktreeStorage, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity };
 }
 
 afterEach(async () => {
@@ -130,6 +134,17 @@ describe("controller access boundary", () => {
     expect(await response.json()).toEqual({ error: "The project is locked by agent:test." });
   });
 
+  it("accepts an explicit Django launch preset", async () => {
+    const { addProject, base } = await fixture();
+    const response = await fetch(`${base}/api/projects`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Worktree-Switcher-Token": "test-access-token" },
+      body: JSON.stringify({ name: "API", repositoryPath: "/tmp/api", port: 8000, launchPreset: "django" }),
+    });
+    expect(response.status).toBe(201);
+    expect(addProject).toHaveBeenCalledWith({ name: "API", repositoryPath: "/tmp/api", port: 8000, launchPreset: "django" });
+  });
+
   it("serves authenticated directory listings through the browser service", async () => {
     const { base, listDirectories } = await fixture();
     const response = await fetch(`${base}/api/directories?path=${encodeURIComponent("/home/test/code")}`, {
@@ -169,6 +184,35 @@ describe("controller access boundary", () => {
       certPath: "/certs/cert.pem",
       caPath: null,
     });
+  });
+
+  it("accepts literal project environment overrides", async () => {
+    const { base, setProjectEnvironment } = await fixture();
+    const environment = { PLAYWRIGHT_E2E: "1", WINPATH_DEV_ROUTE_DELAY_MS: "0" };
+    const response = await fetch(`${base}/api/projects/project-1/environment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Worktree-Switcher-Token": "test-access-token" },
+      body: JSON.stringify({ environment }),
+    });
+    expect(response.status).toBe(200);
+    expect(setProjectEnvironment).toHaveBeenCalledWith("project-1", environment);
+  });
+
+  it("saves, selects, and deletes named environment profiles", async () => {
+    const { base, deleteEnvironmentProfile, saveEnvironmentProfile, selectEnvironmentProfile } = await fixture();
+    const headers = { "Content-Type": "application/json", "X-Worktree-Switcher-Token": "test-access-token" };
+    expect((await fetch(`${base}/api/projects/project-1/environment-profiles`, {
+      method: "POST", headers, body: JSON.stringify({ name: "e2e", environment: { PLAYWRIGHT_E2E: "1" }, restart: true }),
+    })).status).toBe(200);
+    expect(saveEnvironmentProfile).toHaveBeenCalledWith("project-1", "e2e", { PLAYWRIGHT_E2E: "1" }, { owner: "local-user" }, true);
+    expect((await fetch(`${base}/api/projects/project-1/environment-profile-selection`, {
+      method: "POST", headers, body: JSON.stringify({ name: "e2e", restart: false }),
+    })).status).toBe(200);
+    expect(selectEnvironmentProfile).toHaveBeenCalledWith("project-1", "e2e", { owner: "local-user" }, false);
+    expect((await fetch(`${base}/api/projects/project-1/environment-profiles`, {
+      method: "DELETE", headers, body: JSON.stringify({ name: "e2e" }),
+    })).status).toBe(200);
+    expect(deleteEnvironmentProfile).toHaveBeenCalledWith("project-1", "e2e");
   });
 
   it("updates the global server capacity", async () => {
