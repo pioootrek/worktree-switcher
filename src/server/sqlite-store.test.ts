@@ -129,6 +129,46 @@ describe("SqliteStateStore", () => {
     store.close();
   });
 
+  it("persists controller-wide server capacity settings", () => {
+    const store = createStore();
+    expect(store.getServerCapacitySettings()).toEqual({ enabled: false, limit: 2 });
+    store.setServerCapacitySettings({ enabled: true, limit: 3 });
+    expect(store.getServerCapacitySettings()).toEqual({ enabled: true, limit: 3 });
+    store.close();
+  });
+
+  it("persists bounded worktree storage history and the latest breakdown", () => {
+    const store = createStore();
+    const project = store.addProject(projectInput("Storage", "/code/storage", 3220));
+    for (let index = 0; index < 181; index += 1) {
+      store.saveWorktreeStorage({
+        projectId: project.id,
+        worktreePath: "/code/storage",
+        totalBytes: 1_000 + index,
+        nextBytes: 400,
+        nextCacheBytes: 300,
+        nodeModulesBytes: 200,
+        topDirectories: [{ name: ".next", bytes: 400 }],
+        measuredAt: new Date(Date.UTC(2026, 7, 30, 0, 0, index)).toISOString(),
+      });
+    }
+
+    const snapshot = store.getWorktreeStorage(project.id, "/code/storage");
+    expect(snapshot).toMatchObject({
+      status: "available",
+      totalBytes: 1_180,
+      nextBytes: 400,
+      nextCacheBytes: 300,
+      nodeModulesBytes: 200,
+      otherBytes: 580,
+      topDirectories: [{ name: ".next", bytes: 400 }],
+    });
+    expect(snapshot?.history).toHaveLength(180);
+    expect(snapshot?.history[0].totalBytes).toBe(1_000);
+    expect(snapshot?.history[1].totalBytes).toBe(1_002);
+    store.close();
+  });
+
   it("adds TLS columns to a version 2 database", () => {
     const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-store-v2-"));
     directories.push(directory);
@@ -189,6 +229,8 @@ describe("SqliteStateStore", () => {
       "idempotency_key",
     ]));
     expect(inspected.prepare("SELECT 1 FROM schema_migrations WHERE version = 4").get()).toBeTruthy();
+    expect(inspected.prepare("SELECT 1 FROM schema_migrations WHERE version = 5").get()).toBeTruthy();
+    expect(inspected.prepare("SELECT 1 FROM schema_migrations WHERE version = 6").get()).toBeTruthy();
     inspected.close();
   });
 });

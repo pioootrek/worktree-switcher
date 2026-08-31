@@ -46,6 +46,7 @@ describe("ControlService agent claims", () => {
       error: null,
       failure: null,
       logs: [],
+      resources: { status: "idle", currentRssBytes: null, peakRssBytes: null, cpuPercent: null, processCount: null, sampledAt: null, sampleAgeSeconds: null, warningThresholdBytes: null, history: [] },
     };
     const start = vi.fn(async (_project, path: string) => {
       runtime.phase = "running";
@@ -107,6 +108,7 @@ describe("ControlService agent claims", () => {
       error: "Dependency missing",
       failure: null,
       logs: [],
+      resources: { status: "idle", currentRssBytes: null, peakRssBytes: null, cpuPercent: null, processCount: null, sampledAt: null, sampleAgeSeconds: null, warningThresholdBytes: null, history: [] },
     };
     const processes = {
       snapshot: () => ({ ...runtime }),

@@ -30,6 +30,9 @@ second copy behind your back.
 - Let MCP clients inspect projects and manage their own claims.
 - Run Next.js development servers over HTTP or development HTTPS.
 - Run the controller in a terminal or as a user service on Linux and macOS.
+- Optionally cap the number of concurrently running managed servers.
+- Monitor aggregate RAM, peak RAM, CPU, and process count for each managed server on Linux.
+- Track disk usage for every worktree, including `.next`, `.next/cache`, and `node_modules`.
 - Use the dashboard in English or Polish. English is the default.
 
 ## Quick start
@@ -92,6 +95,36 @@ configuration options, upgrades, logs, Linux session behavior, and removal.
 Each project owns one runtime slot. A switch stops that project's current
 process tree, starts the selected worktree on the same port, and waits for the
 port to become ready. Operations for other projects continue independently.
+
+The gauge in the dashboard configures an optional controller-wide capacity.
+Each starting or running server consumes one slot. A switch retains its current
+slot, while a failed start releases it. Lowering the limit never stops an
+already running server; new starts remain blocked until usage falls below the
+configured limit.
+
+Each project card also shows resource use for the complete process group owned
+by the controller, including package-manager and Next.js worker processes. The
+sampler runs every five seconds only while a server is active and retains at
+most five minutes of RAM history. Stopped servers do not consume sampling work.
+On unsupported systems, the panel reports that metrics are unavailable without
+changing the server lifecycle.
+
+The **Storage** tab measures allocated disk space for every discovered
+worktree. It separates `.next`, `.next/cache`, `node_modules`, and other files,
+shows the five largest top-level directories, and keeps the first measurement
+plus 179 recent samples in SQLite. Scans never follow symlinks, run one at a time, and are scheduled at
+first discovery and at most once every six hours. Use the refresh button for an
+explicit new sample.
+Git administrative data under `.git` is excluded so linked worktrees remain
+comparable with the repository's main checkout.
+
+For detected Next.js projects, the Storage tab can remove the selected
+worktree's `.next` directory after an explicit confirmation. The action is
+available only when that worktree is stopped, unlocked, and not being scanned.
+The controller derives the directory from an allowlisted cache identifier,
+refuses symlinks and non-Next.js projects, records the outcome in the audit
+trail, and schedules a fresh disk measurement. It never accepts a deletion
+path or removes `node_modules`.
 
 Dirty worktrees are allowed. The dashboard warns you but does not block the
 server.
@@ -164,7 +197,9 @@ Available tools:
 | Tool | What it does |
 | --- | --- |
 | `list_projects` | Lists registered projects and their runtime placement |
+| `get_server_capacity` | Reads the global server limit, usage, and slot holders |
 | `get_project_status` | Reads runtime, claim, and selected-worktree state |
+| `get_project_storage` | Reads cached disk usage and history for project worktrees |
 | `list_worktrees` | Lists worktrees discovered for a project |
 | `claim_project` | Claims a worktree and moves or starts its server |
 | `renew_project_claim` | Extends a claim owned by the current MCP session |
@@ -260,6 +295,7 @@ worktree-switcher start [options]
 --state-dir <path>     Lock, access record, and log directory
 --mcp-port <port>      MCP port. Default: 47832
 --no-mcp               Disable MCP
+--memory-warning-mib N Show a warning when a managed process group reaches N MiB
 ```
 
 Other commands:
@@ -339,7 +375,8 @@ rule that unrelated processes are never killed.
 - The dashboard uses HTTP and is intended for loopback or a trusted network.
 - Project registration is available only in the dashboard. Project removal is
   not implemented yet.
-- Managed-server CPU and memory monitoring is not implemented yet.
+- Managed-server resource monitoring currently uses Linux `/proc`; macOS shows
+  an explicit unsupported state.
 - The macOS LaunchAgent generator has unit coverage but still needs a real-host
   lifecycle test.
 - Windows process-tree and service management are not supported.

@@ -15,5 +15,7 @@ describe("server error localization", () => {
       .toBe("Select the private key file.");
     expect(localizeServerMessage("Nie znaleziono manage.py w katalogu głównym worktree.", "en"))
       .toBe("manage.py was not found at the worktree root.");
+    expect(localizeServerMessage("Osiągnięto limit 2 uruchomionych serwerów. Aktywne: Web, API.", "en"))
+      .toBe("The limit of 2 running servers has been reached. Active: Web, API.");
   });
 });

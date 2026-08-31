@@ -18,9 +18,14 @@ async function fixture() {
   directories.push(directory);
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "index.html"), "<!doctype html><title>Switcher</title>");
-  const dashboard = vi.fn(async () => ({ projects: [] }));
+  const capacity = { enabled: true, limit: 2, used: 0, available: 2, holders: [] };
+  const dashboard = vi.fn(async () => ({ projects: [], capacity }));
   const addProject = vi.fn(async () => undefined);
   const setProjectTls = vi.fn(async () => undefined);
+  const setServerCapacity = vi.fn(() => capacity);
+  const runtimeMetrics = vi.fn(() => ({ projects: [] }));
+  const refreshWorktreeStorage = vi.fn(async () => undefined);
+  const deleteWorktreeCache = vi.fn(async () => ({ cache: "next" as const, worktreePath: "/code/web-feature", removed: true }));
   const listDirectories = vi.fn(async () => ({
     root: "/home/test",
     current: "/home/test",
@@ -28,7 +33,7 @@ async function fixture() {
     directories: [{ name: "code", path: "/home/test/code" }],
     files: [],
   }));
-  const service = { addProject, dashboard, setProjectTls } as unknown as ControlService;
+  const service = { addProject, dashboard, deleteWorktreeCache, refreshWorktreeStorage, runtimeMetrics, setProjectTls, setServerCapacity } as unknown as ControlService;
   const controller = createControllerServer({
     service,
     directoryBrowser: { list: listDirectories } as unknown as DirectoryBrowser,
@@ -52,7 +57,7 @@ async function fixture() {
     controller.server.listen(0, "127.0.0.1", resolve);
   });
   const address = controller.server.address() as AddressInfo;
-  return { addProject, base: `http://127.0.0.1:${address.port}`, dashboard, listDirectories, setProjectTls };
+  return { addProject, base: `http://127.0.0.1:${address.port}`, dashboard, deleteWorktreeCache, listDirectories, refreshWorktreeStorage, runtimeMetrics, setProjectTls, setServerCapacity };
 }
 
 afterEach(async () => {
@@ -78,6 +83,7 @@ describe("controller access boundary", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       projects: [],
+      capacity: { enabled: true, limit: 2, used: 0, available: 2, holders: [] },
       mcp: {
         phase: "running",
         endpoint: "http://127.0.0.1:47832/mcp",
@@ -88,6 +94,17 @@ describe("controller access boundary", () => {
       },
     });
     expect(dashboard).toHaveBeenCalledOnce();
+  });
+
+  it("serves lightweight runtime metrics without rediscovering worktrees", async () => {
+    const { base, dashboard, runtimeMetrics } = await fixture();
+    const response = await fetch(`${base}/api/metrics`, {
+      headers: { "X-Worktree-Switcher-Token": "test-access-token" },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ projects: [] });
+    expect(runtimeMetrics).toHaveBeenCalledOnce();
+    expect(dashboard).not.toHaveBeenCalled();
   });
 
   it("localizes API errors from Accept-Language", async () => {
@@ -163,5 +180,46 @@ describe("controller access boundary", () => {
       certPath: "/certs/cert.pem",
       caPath: null,
     });
+  });
+
+  it("updates the global server capacity", async () => {
+    const { base, setServerCapacity } = await fixture();
+    const response = await fetch(`${base}/api/settings/capacity`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Worktree-Switcher-Token": "test-access-token" },
+      body: JSON.stringify({ enabled: true, limit: 2 }),
+    });
+    expect(response.status).toBe(200);
+    expect(setServerCapacity).toHaveBeenCalledWith({ enabled: true, limit: 2 });
+  });
+
+  it("queues a storage refresh for an explicit worktree", async () => {
+    const { base, refreshWorktreeStorage } = await fixture();
+    const response = await fetch(`${base}/api/projects/project-1/storage/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Worktree-Switcher-Token": "test-access-token" },
+      body: JSON.stringify({ worktreePath: "/code/web-feature" }),
+    });
+    expect(response.status).toBe(202);
+    expect(refreshWorktreeStorage).toHaveBeenCalledWith("project-1", "/code/web-feature");
+  });
+
+  it("accepts only the allowlisted Next.js cache deletion", async () => {
+    const { base, deleteWorktreeCache } = await fixture();
+    const response = await fetch(`${base}/api/projects/project-1/storage/cache`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", "X-Worktree-Switcher-Token": "test-access-token" },
+      body: JSON.stringify({ worktreePath: "/code/web-feature", cache: "next" }),
+    });
+    expect(response.status).toBe(200);
+    expect(deleteWorktreeCache).toHaveBeenCalledWith("project-1", "/code/web-feature", "next");
+
+    const rejected = await fetch(`${base}/api/projects/project-1/storage/cache`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", "X-Worktree-Switcher-Token": "test-access-token" },
+      body: JSON.stringify({ worktreePath: "/code/web-feature", cache: "node_modules" }),
+    });
+    expect(rejected.status).toBe(400);
+    expect(deleteWorktreeCache).toHaveBeenCalledOnce();
   });
 });

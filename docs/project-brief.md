@@ -83,6 +83,12 @@ optional environment overrides, health check, startup timeout, and whether it
 should start automatically. The selected worktree is runtime state and is
 never accepted as an arbitrary browser-provided working directory.
 
+An optional controller-wide counting semaphore limits concurrently starting
+or running managed servers. Capacity is independent from reservations: a lock
+consumes no slot until its server starts. Switching retains the current slot,
+failed starts release it, and lowering the limit never terminates existing
+processes.
+
 Registration offers automatic, Node.js, and Django launch presets. For Node.js
 projects, it detects `pnpm`, `npm`, `yarn`, or `bun` from
 `packageManager` and lockfiles. It requires a `dev` script. The launch resolver

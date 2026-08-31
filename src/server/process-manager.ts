@@ -2,13 +2,42 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createConnection } from "node:net";
 import { networkInterfaces } from "node:os";
 
-import type { Project, RuntimeFailure, RuntimeSnapshot } from "@/shared/contracts";
+import type { Project, RuntimeFailure, RuntimeResourceMetrics, RuntimeSnapshot } from "@/shared/contracts";
 import { type LogWriter, nullLogWriter } from "./log-writer";
+import { defaultProcessResourceSampler, type ProcessResourceSampler, type RawResourceSample } from "./resource-monitor";
 import { portInUseFailure, processExitFailure, spawnFailure, timeoutFailure } from "./runtime-failure";
 
 const MAX_LOG_LINES = 400;
+const DEFAULT_SAMPLE_INTERVAL_MS = 5_000;
+const DEFAULT_MAX_HISTORY_POINTS = 60;
 
-type RuntimeEntry = RuntimeSnapshot & { child: ChildProcess | null; projectId: string };
+type RuntimeEntry = RuntimeSnapshot & {
+  child: ChildProcess | null;
+  projectId: string;
+  resourceTimer: NodeJS.Timeout | null;
+  previousResourceSample: RawResourceSample | null;
+};
+
+export interface ProcessManagerOptions {
+  resourceSampler?: ProcessResourceSampler;
+  resourceSampleIntervalMs?: number;
+  maxResourceHistoryPoints?: number;
+  memoryWarningThresholdBytes?: number | null;
+}
+
+function emptyResources(status: RuntimeResourceMetrics["status"] = "idle", warningThresholdBytes: number | null = null): RuntimeResourceMetrics {
+  return {
+    status,
+    currentRssBytes: null,
+    peakRssBytes: null,
+    cpuPercent: null,
+    processCount: null,
+    sampledAt: null,
+    sampleAgeSeconds: null,
+    warningThresholdBytes,
+    history: [],
+  };
+}
 
 function emptyRuntime(projectId = "unknown"): RuntimeEntry {
   return {
@@ -20,7 +49,10 @@ function emptyRuntime(projectId = "unknown"): RuntimeEntry {
     error: null,
     failure: null,
     logs: [],
+    resources: emptyResources(),
     child: null,
+    resourceTimer: null,
+    previousResourceSample: null,
   };
 }
 
@@ -51,10 +83,18 @@ export class ProcessManager {
   private readonly runtimes = new Map<string, RuntimeEntry>();
   private readonly onChange: () => void;
   private readonly logs: LogWriter;
+  private readonly resourceSampler: ProcessResourceSampler;
+  private readonly resourceSampleIntervalMs: number;
+  private readonly maxResourceHistoryPoints: number;
+  private readonly memoryWarningThresholdBytes: number | null;
 
-  constructor(onChange: () => void = () => undefined, logs: LogWriter = nullLogWriter) {
+  constructor(onChange: () => void = () => undefined, logs: LogWriter = nullLogWriter, options: ProcessManagerOptions = {}) {
     this.onChange = onChange;
     this.logs = logs;
+    this.resourceSampler = options.resourceSampler ?? defaultProcessResourceSampler();
+    this.resourceSampleIntervalMs = options.resourceSampleIntervalMs ?? DEFAULT_SAMPLE_INTERVAL_MS;
+    this.maxResourceHistoryPoints = options.maxResourceHistoryPoints ?? DEFAULT_MAX_HISTORY_POINTS;
+    this.memoryWarningThresholdBytes = options.memoryWarningThresholdBytes ?? null;
   }
 
   snapshot(projectId: string): RuntimeSnapshot {
@@ -67,6 +107,13 @@ export class ProcessManager {
       error: runtime.error,
       failure: runtime.failure,
       logs: [...runtime.logs],
+      resources: {
+        ...runtime.resources,
+        sampleAgeSeconds: runtime.resources.sampledAt
+          ? Math.max(0, Math.round((Date.now() - new Date(runtime.resources.sampledAt).getTime()) / 1_000))
+          : null,
+        history: [...runtime.resources.history],
+      },
     };
   }
 
@@ -99,10 +146,18 @@ export class ProcessManager {
     });
     runtime.child = child;
     runtime.pid = child.pid ?? null;
+    runtime.resources = emptyResources(this.resourceSampler.supported ? "unavailable" : "unsupported", this.memoryWarningThresholdBytes);
+    if (runtime.pid) this.startResourceMonitoring(runtime);
     child.stdout?.on("data", (chunk: Buffer) => this.appendChunk(runtime, chunk));
     child.stderr?.on("data", (chunk: Buffer) => this.appendChunk(runtime, chunk));
-    child.once("error", (error) => this.markFailed(runtime, spawnFailure(project, error)));
+    child.once("error", (error) => {
+      this.stopResourceMonitoring(runtime);
+      runtime.child = null;
+      runtime.pid = null;
+      this.markFailed(runtime, spawnFailure(project, error));
+    });
     child.once("exit", (code, signal) => {
+      this.stopResourceMonitoring(runtime);
       runtime.child = null;
       runtime.pid = null;
       if (runtime.phase !== "stopping" && runtime.phase !== "stopped" && runtime.phase !== "failed") {
@@ -158,6 +213,7 @@ export class ProcessManager {
     runtime.phase = "stopped";
     runtime.error = null;
     runtime.failure = null;
+    this.stopResourceMonitoring(runtime);
     this.append(runtime, "process_stopped_by=worktree-switcher");
     this.onChange();
   }
@@ -189,6 +245,67 @@ export class ProcessManager {
 
   private appendChunk(runtime: RuntimeEntry, chunk: Buffer): void {
     for (const line of chunk.toString("utf8").split(/\r?\n/).filter(Boolean)) this.append(runtime, line);
+  }
+
+  private startResourceMonitoring(runtime: RuntimeEntry): void {
+    if (!runtime.pid || runtime.resourceTimer) return;
+    void this.sampleResources(runtime, runtime.pid);
+    runtime.resourceTimer = setInterval(() => {
+      if (runtime.pid) void this.sampleResources(runtime, runtime.pid);
+    }, this.resourceSampleIntervalMs);
+    runtime.resourceTimer.unref();
+  }
+
+  private stopResourceMonitoring(runtime: RuntimeEntry): void {
+    if (runtime.resourceTimer) clearInterval(runtime.resourceTimer);
+    runtime.resourceTimer = null;
+    runtime.previousResourceSample = null;
+    if (runtime.resources.status === "available" || runtime.resources.status === "unavailable") {
+      runtime.resources = {
+        ...runtime.resources,
+        status: "stale",
+        currentRssBytes: null,
+        cpuPercent: null,
+        processCount: null,
+      };
+    }
+  }
+
+  private async sampleResources(runtime: RuntimeEntry, processGroupId: number): Promise<void> {
+    try {
+      const sample = await this.resourceSampler.sample(processGroupId);
+      if (runtime.pid !== processGroupId || !runtime.child) return;
+      const sampledAt = new Date().toISOString();
+      const previous = runtime.previousResourceSample;
+      const processDelta = previous ? sample.processCpuTicks - previous.processCpuTicks : 0;
+      const hostDelta = previous ? sample.hostCpuTicks - previous.hostCpuTicks : 0;
+      const cpuPercent = previous && processDelta >= 0 && hostDelta > 0
+        ? Math.round((processDelta / hostDelta) * sample.cpuCount * 10_000) / 100
+        : null;
+      const history = [...runtime.resources.history, { sampledAt, rssBytes: sample.rssBytes }]
+        .slice(-this.maxResourceHistoryPoints);
+      runtime.resources = {
+        status: "available",
+        currentRssBytes: sample.rssBytes,
+        peakRssBytes: Math.max(runtime.resources.peakRssBytes ?? 0, sample.rssBytes),
+        cpuPercent,
+        processCount: sample.processCount,
+        sampledAt,
+        sampleAgeSeconds: 0,
+        warningThresholdBytes: this.memoryWarningThresholdBytes,
+        history,
+      };
+      runtime.previousResourceSample = sample;
+    } catch {
+      if (runtime.pid !== processGroupId || !runtime.child) return;
+      runtime.resources = {
+        ...runtime.resources,
+        status: this.resourceSampler.supported ? "unavailable" : "unsupported",
+        currentRssBytes: null,
+        cpuPercent: null,
+        processCount: null,
+      };
+    }
   }
 
   private append(runtime: RuntimeEntry, line: string): void {

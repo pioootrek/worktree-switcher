@@ -143,6 +143,7 @@ export class McpRuntime {
       port: project.port,
       runtime: runtime.phase,
       worktreePath: runtime.worktreePath ?? project.selectedWorktreePath,
+      resources: runtime.resources,
       reservation,
     }));
 
@@ -151,6 +152,12 @@ export class McpRuntime {
       "worktree-switcher://projects",
       { description: "Registered projects and their current runtime placement", mimeType: "application/json" },
       async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(await projectList(), null, 2) }] }),
+    );
+    server.registerResource(
+      "server-capacity",
+      "worktree-switcher://capacity",
+      { description: "Global managed-server capacity and current slot holders", mimeType: "application/json" },
+      async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(await english(() => this.service.serverCapacity()), null, 2) }] }),
     );
     server.registerResource(
       "project-status",
@@ -188,11 +195,22 @@ export class McpRuntime {
       annotations: { readOnlyHint: true, idempotentHint: true },
     }, async () => jsonContent(await projectList()));
 
+    server.registerTool("get_server_capacity", {
+      description: "Read the global managed-server limit, current usage, available slots, and slot holders.",
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    }, async () => jsonContent(await english(() => this.service.serverCapacity())));
+
     server.registerTool("get_project_status", {
       description: "Read the full runtime, reservation, and selected-worktree status of one project.",
       inputSchema: { projectId: z.string().uuid() },
       annotations: { readOnlyHint: true, idempotentHint: true },
     }, async ({ projectId }) => jsonContent(agentSnapshot(await english(() => this.service.projectSnapshot(projectId)))));
+
+    server.registerTool("get_project_storage", {
+      description: "Read cached disk-usage snapshots and bounded history for every discovered worktree in one project.",
+      inputSchema: { projectId: z.string().uuid() },
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    }, async ({ projectId }) => jsonContent((await english(() => this.service.projectSnapshot(projectId))).storage));
 
     server.registerTool("list_worktrees", {
       description: "List Git worktrees discovered for one registered project.",

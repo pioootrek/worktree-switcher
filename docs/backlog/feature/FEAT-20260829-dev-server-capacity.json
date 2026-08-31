@@ -13,6 +13,11 @@
       "author": "user",
       "date": "2026-08-29",
       "text": "Allow a global maximum number of concurrently running development servers, for example two counting-semaphore slots."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-08-29",
+      "text": "Implemented the persisted optional counting semaphore across the shared ControlService used by HTTP and MCP. The dashboard can enable a limit from 1 to 64 and shows usage and holders; service status and the MCP get_server_capacity tool expose the same state. Starts acquire atomically, switches retain their slot, failures release it, and lowering the limit preserves running servers. Focused tests cover contention for the final slot, capacity exhaustion, switch retention, failed-start release, persistence, HTTP, MCP, and localization. Keep the item open until the rebuilt controller is explicitly installed and exercised with real managed processes; the active service was not restarted implicitly."
     }
   ],
   "priority": "now",

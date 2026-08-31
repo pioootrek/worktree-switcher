@@ -45,6 +45,14 @@ const exactEnglish = new Map<string, string>([
   ["Proces zakończył się podczas startu.", "The process exited during startup."],
   ["Na tym porcie działa inny serwer. Worktree Switcher pozostawił go bez zmian.", "Another server is using this port. Worktree Switcher left it unchanged."],
   ["Kontroler nie może uruchomić skonfigurowanej komendy.", "The controller cannot run the configured command."],
+  ["Limit serwerów musi być liczbą całkowitą od 1 do 64.", "The server limit must be an integer from 1 to 64."],
+  ["Nieprawidłowy katalog pamięci podręcznej.", "Invalid cache directory."],
+  ["Katalog .next nie jest zwykłym katalogiem. Nie został usunięty.", "The .next path is not a regular directory and was not removed."],
+  ["Zatrzymaj serwer tego worktree przed usunięciem katalogu .next.", "Stop this worktree's server before removing its .next directory."],
+  ["Zwolnij blokadę tego worktree przed usunięciem katalogu .next.", "Release this worktree's lock before removing its .next directory."],
+  ["Poczekaj na zakończenie pomiaru dysku przed usunięciem katalogu .next.", "Wait for the disk measurement to finish before removing the .next directory."],
+  ["Worktree nie jest zwykłym katalogiem. Pamięć podręczna nie została usunięta.", "The worktree is not a regular directory. Its cache was not removed."],
+  ["Ta operacja jest dostępna tylko dla projektów Next.js.", "This operation is available only for Next.js projects."],
   ["System odrzucił próbę uruchomienia serwera deweloperskiego.", "The operating system rejected the development server launch."],
   ["W pliku package.json nie znaleziono skryptu potrzebnego do uruchomienia serwera.", "No development server script was found in package.json."],
   ["Wybrany interpreter Python nie ma zainstalowanego Django.", "The selected Python interpreter does not have Django installed."],
@@ -74,6 +82,8 @@ export function localizeServerMessage(message: string, locale: Locale): string {
   if (match) return `The project is locked by ${match[1]}.`;
   match = message.match(/^Projekt jest zablokowany na (.+) przez (.+)\.$/);
   if (match) return `The project is locked to ${match[1]} by ${match[2]}.`;
+  match = message.match(/^Osiągnięto limit (\d+) uruchomionych serwerów\. Aktywne: (.+)\.$/);
+  if (match) return `The limit of ${match[1]} running servers has been reached. Active: ${match[2]}.`;
   match = message.match(/^Proces działał, ale nie odpowiedział na porcie (\d+) w ciągu (.+) sekund\.$/);
   if (match) return `The process did not respond on port ${match[1]} within ${match[2]} seconds.`;
   return message;

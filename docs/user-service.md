@@ -69,10 +69,14 @@ node dist/cli/index.js service install \
   --mcp-port 47832 \
   --browse-root /home/me/development \
   --data-dir /home/me/.local/share/worktree-switcher \
-  --state-dir /home/me/.local/state/worktree-switcher
+  --state-dir /home/me/.local/state/worktree-switcher \
+  --memory-warning-mib 1536
 ```
 
 Use `--no-mcp` if you do not want the MCP listener.
+`--memory-warning-mib` adds a visual warning when one managed process group
+reaches the configured aggregate resident-memory threshold. It reports only;
+the controller never terminates a server because of this threshold.
 
 The values become part of the service definition. Repeat them when you later
 run `service install --refresh`, otherwise the omitted values return to their
@@ -97,7 +101,12 @@ node dist/cli/index.js service status
 
 Status reports the service state, definition path, controller PID, uptime,
 restart count when available, version, endpoints, log directory, CPU use, and
-resident memory for the controller process.
+resident memory for the controller process. When the controller API is
+reachable, it also reports managed-server capacity and current slot holders.
+The dashboard separately samples each active managed process group every five
+seconds and shows current and peak RAM, CPU, child-process count, and a bounded
+history. This monitoring is Linux-only in the current release; other systems
+show an explicit unsupported state.
 
 Open the dashboard:
 

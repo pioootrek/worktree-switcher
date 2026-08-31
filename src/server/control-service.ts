@@ -1,12 +1,13 @@
 import { createHash, randomBytes } from "node:crypto";
 import { basename, resolve } from "node:path";
 
-import type { DashboardResponse, Project, ProjectSnapshot, Reservation, Worktree } from "@/shared/contracts";
+import type { CacheDeletionResult, DashboardResponse, Project, ProjectSnapshot, Reservation, RuntimeMetricsResponse, SafeCacheKind, ServerCapacitySettings, ServerCapacityStatus, Worktree } from "@/shared/contracts";
 import type { GitWorktreeReader } from "./git-worktrees";
 import { type LaunchCommandResolver, type NextTlsConfiguration, ProjectLaunchCommandResolver } from "./launch-command";
 import { type LogWriter, nullLogWriter } from "./log-writer";
 import { ProcessManager } from "./process-manager";
 import type { NewProject, ReservationRequest, StateStore } from "./state-store";
+import { AllowlistedWorktreeCacheCleaner, type WorktreeCacheCleaner, type WorktreeStorageManager } from "./worktree-storage";
 
 const AGENT_LEASE_DEFAULT_SECONDS = 30 * 60;
 const AGENT_LEASE_MAX_SECONDS = 8 * 60 * 60;
@@ -38,6 +39,7 @@ function leaseTokenHash(token: string): string {
 
 export class ControlService {
   private readonly locks = new Map<string, Promise<unknown>>();
+  private readonly pendingStarts = new Set<string>();
 
   constructor(
     private readonly store: StateStore,
@@ -45,11 +47,35 @@ export class ControlService {
     private readonly processes: ProcessManager,
     private readonly logs: LogWriter = nullLogWriter,
     private readonly commands: LaunchCommandResolver = new ProjectLaunchCommandResolver(),
+    private readonly storage?: WorktreeStorageManager,
+    private readonly cacheCleaner: WorktreeCacheCleaner = new AllowlistedWorktreeCacheCleaner(),
   ) {}
 
   async dashboard(): Promise<DashboardResponse> {
-    const projects = await Promise.all(this.store.listProjects().map((project) => this.snapshot(project)));
-    return { projects };
+    const projects = await Promise.all(this.store.listProjects().map((project) => this.snapshot(project, true)));
+    return { projects, capacity: this.capacityStatus(projects) };
+  }
+
+  serverCapacity(): ServerCapacityStatus {
+    return this.capacityStatus();
+  }
+
+  runtimeMetrics(): RuntimeMetricsResponse {
+    return {
+      projects: this.store.listProjects().map((project) => ({
+        projectId: project.id,
+        resources: this.processes.snapshot(project.id).resources,
+      })),
+    };
+  }
+
+  setServerCapacity(settings: ServerCapacitySettings): ServerCapacityStatus {
+    if (typeof settings.enabled !== "boolean" || !Number.isInteger(settings.limit) || settings.limit < 1 || settings.limit > 64) {
+      throw new Error("Limit serwerów musi być liczbą całkowitą od 1 do 64.");
+    }
+    this.store.setServerCapacitySettings(settings);
+    this.logs.controller("server_capacity.updated", { ...settings });
+    return this.capacityStatus();
   }
 
   async addProject(input: NewProject): Promise<Project> {
@@ -105,25 +131,30 @@ export class ControlService {
         const worktrees = await this.git.list(project.repositoryPath);
         const selected = this.resolveWorktree(project, worktrees, worktreePath);
         this.assertReservationAllows(projectId, selected.path, actor);
-        if (operation === "restart" || operation === "switch") await this.processes.stop(projectId);
-        if (operation === "switch") this.store.setSelectedWorktree(projectId, selected.path);
-        const launch = this.commands.resolve(selected.path, project.port, project.launchPreset, {
-          mode: project.tlsMode,
-          keyPath: project.tlsKeyPath,
-          certPath: project.tlsCertPath,
-          caPath: project.tlsCaPath,
-        });
-        if (project.executable !== launch.executable || JSON.stringify(project.args) !== JSON.stringify(launch.args)) {
-          this.store.updateProjectLaunch(projectId, {
-            tlsMode: launch.tls.mode,
-            tlsKeyPath: launch.tls.keyPath,
-            tlsCertPath: launch.tls.certPath,
-            tlsCaPath: launch.tls.caPath,
-            executable: launch.executable,
-            args: launch.args,
+        this.acquireCapacity(project);
+        try {
+          if (operation === "restart" || operation === "switch") await this.processes.stop(projectId);
+          if (operation === "switch") this.store.setSelectedWorktree(projectId, selected.path);
+          const launch = this.commands.resolve(selected.path, project.port, project.launchPreset, {
+            mode: project.tlsMode,
+            keyPath: project.tlsKeyPath,
+            certPath: project.tlsCertPath,
+            caPath: project.tlsCaPath,
           });
+          if (project.executable !== launch.executable || JSON.stringify(project.args) !== JSON.stringify(launch.args)) {
+            this.store.updateProjectLaunch(projectId, {
+              tlsMode: launch.tls.mode,
+              tlsKeyPath: launch.tls.keyPath,
+              tlsCertPath: launch.tls.certPath,
+              tlsCaPath: launch.tls.caPath,
+              executable: launch.executable,
+              args: launch.args,
+            });
+          }
+          await this.processes.start(this.requireProject(projectId), selected.path);
+        } finally {
+          this.pendingStarts.delete(projectId);
         }
-        await this.processes.start(this.requireProject(projectId), selected.path);
         this.logs.controller(`project.${operation}`, { projectId, worktreePath: selected.path });
       });
     } catch (error) {
@@ -215,9 +246,14 @@ export class ControlService {
         this.assertReservationAllows(input.projectId, selected.path, { owner: input.owner, leaseToken });
         const runtime = this.processes.snapshot(input.projectId);
         if (runtime.phase !== "running" || runtime.worktreePath !== selected.path) {
-          if (runtime.phase !== "stopped") await this.processes.stop(input.projectId);
-          if (project.selectedWorktreePath !== selected.path) this.store.setSelectedWorktree(input.projectId, selected.path);
-          await this.processes.start(this.requireProject(input.projectId), selected.path);
+          this.acquireCapacity(project);
+          try {
+            if (runtime.phase !== "stopped") await this.processes.stop(input.projectId);
+            if (project.selectedWorktreePath !== selected.path) this.store.setSelectedWorktree(input.projectId, selected.path);
+            await this.processes.start(this.requireProject(input.projectId), selected.path);
+          } finally {
+            this.pendingStarts.delete(input.projectId);
+          }
         }
       } catch (error) {
         operationError = error instanceof Error ? error.message : String(error);
@@ -267,19 +303,66 @@ export class ControlService {
     return this.snapshot(this.requireProject(projectId));
   }
 
+  async refreshWorktreeStorage(projectId: string, worktreePath: string): Promise<void> {
+    const project = this.requireProject(projectId);
+    const worktrees = await this.git.list(project.repositoryPath);
+    const selected = this.resolveWorktree(project, worktrees, worktreePath);
+    this.storage?.queue(project.id, selected.path, true);
+    this.logs.controller("worktree_storage.refresh_requested", { projectId, worktreePath: selected.path });
+  }
+
+  async deleteWorktreeCache(projectId: string, worktreePath: string, cache: SafeCacheKind): Promise<CacheDeletionResult> {
+    const project = this.requireProject(projectId);
+    const worktrees = await this.git.list(project.repositoryPath);
+    const selected = this.resolveWorktree(project, worktrees, worktreePath);
+    const auditDetails = { worktreePath: selected.path, cache, target: `${selected.path}/.next` };
+    try {
+      const runtime = this.processes.snapshot(projectId);
+      if (
+        runtime.worktreePath === selected.path
+        && (runtime.phase === "starting" || runtime.phase === "running" || runtime.phase === "stopping")
+      ) {
+        throw new Error("Zatrzymaj serwer tego worktree przed usunięciem katalogu .next.");
+      }
+      const reservation = this.store.getActiveReservation(projectId);
+      if (reservation?.worktreePath === selected.path) {
+        throw new Error("Zwolnij blokadę tego worktree przed usunięciem katalogu .next.");
+      }
+      if (this.storage?.isBusy(projectId, selected.path)) {
+        throw new Error("Poczekaj na zakończenie pomiaru dysku przed usunięciem katalogu .next.");
+      }
+      const result = await this.cacheCleaner.remove(selected.path, cache);
+      this.store.recordProjectEvent(projectId, "worktree_cache.delete_succeeded", "local-user", { ...auditDetails, removed: result.removed });
+      this.storage?.queue(projectId, selected.path, true);
+      this.logs.controller("worktree_cache.deleted", { projectId, ...auditDetails, removed: result.removed });
+      return result;
+    } catch (error) {
+      this.store.recordProjectEvent(projectId, "worktree_cache.delete_failed", "local-user", {
+        ...auditDetails,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
   async shutdown(): Promise<void> {
     await this.processes.stopAll();
+    await this.storage?.close();
     this.store.close();
     await this.logs.close();
   }
 
-  private async snapshot(project: Project): Promise<ProjectSnapshot> {
+  private async snapshot(project: Project, scheduleStorage = false): Promise<ProjectSnapshot> {
     try {
+      const worktrees = await this.git.list(project.repositoryPath);
+      const worktreePaths = worktrees.map(({ path }) => path);
+      if (scheduleStorage) this.storage?.ensureFresh(project.id, worktreePaths);
       return {
         project,
         runtime: this.processes.snapshot(project.id),
         reservation: this.store.getActiveReservation(project.id),
-        worktrees: await this.git.list(project.repositoryPath),
+        worktrees,
+        storage: this.storage?.snapshots(project.id, worktreePaths) ?? [],
       };
     } catch (error) {
       return {
@@ -287,6 +370,7 @@ export class ControlService {
         runtime: this.processes.snapshot(project.id),
         reservation: this.store.getActiveReservation(project.id),
         worktrees: [],
+        storage: [],
         discoveryError: error instanceof Error ? error.message : String(error),
       };
     }
@@ -315,6 +399,46 @@ export class ControlService {
     const project = this.store.getProject(id);
     if (!project) throw new Error("Nie znaleziono projektu.");
     return project;
+  }
+
+  private acquireCapacity(project: Project): void {
+    const status = this.capacityStatus();
+    if (status.holders.some(({ projectId }) => projectId === project.id)) {
+      this.pendingStarts.add(project.id);
+      return;
+    }
+    if (status.enabled && status.used >= status.limit) {
+      const holders = status.holders.map(({ projectName }) => projectName).join(", ");
+      throw new Error(`Osiągnięto limit ${status.limit} uruchomionych serwerów. Aktywne: ${holders || "brak"}.`);
+    }
+    this.pendingStarts.add(project.id);
+  }
+
+  private capacityStatus(snapshots?: ProjectSnapshot[]): ServerCapacityStatus {
+    const settings = this.store.getServerCapacitySettings();
+    const projects: Array<Pick<ProjectSnapshot, "project" | "runtime">> = snapshots
+      ?? this.store.listProjects().map((project) => ({
+        project,
+        runtime: this.processes.snapshot(project.id),
+      }));
+    const holders = projects.flatMap(({ project, runtime }) => {
+      const pending = this.pendingStarts.has(project.id);
+      if (!pending && runtime.phase !== "starting" && runtime.phase !== "running" && runtime.phase !== "stopping") return [];
+      const phase: ServerCapacityStatus["holders"][number]["phase"] = runtime.phase === "running" || runtime.phase === "stopping"
+        ? runtime.phase
+        : "starting";
+      return [{
+        projectId: project.id,
+        projectName: project.name,
+        phase,
+      }];
+    });
+    return {
+      ...settings,
+      used: holders.length,
+      available: settings.enabled ? Math.max(0, settings.limit - holders.length) : null,
+      holders,
+    };
   }
 
   private async serialized<T>(projectId: string, operation: () => Promise<T>): Promise<T> {

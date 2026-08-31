@@ -93,16 +93,6 @@
     },
     {
       "area": "process-manager",
-      "id": "FEAT-20260829-monitor-managed-memory",
-      "path": "feature/FEAT-20260829-monitor-managed-memory.json",
-      "priority": "next",
-      "risk_level": "low",
-      "status": "open",
-      "title": "Monitor memory used by managed server process trees",
-      "type": "feature"
-    },
-    {
-      "area": "process-manager",
       "id": "FEAT-20260829-next-production-runtime",
       "path": "feature/FEAT-20260829-next-production-runtime.json",
       "priority": "next",
@@ -129,6 +119,16 @@
       "risk_level": "high",
       "status": "open",
       "title": "Issue scoped MCP access tokens for coding agents",
+      "type": "feature"
+    },
+    {
+      "area": "process-manager",
+      "id": "FEAT-20260831-django-runtime-adapter",
+      "path": "feature/FEAT-20260831-django-runtime-adapter.json",
+      "priority": "next",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Manage Django development servers through runtime adapters",
       "type": "feature"
     },
     {

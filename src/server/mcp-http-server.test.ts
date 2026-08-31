@@ -39,8 +39,22 @@ const snapshot: ProjectSnapshot = {
     error: null,
     failure: null,
     logs: [],
+    resources: { status: "available", currentRssBytes: 128_000_000, peakRssBytes: 140_000_000, cpuPercent: 12.5, processCount: 3, sampledAt: "2026-08-29T00:00:05.000Z", sampleAgeSeconds: 0, warningThresholdBytes: null, history: [] },
   },
   reservation: null,
+  storage: [{
+    worktreePath: "/code/web",
+    status: "available",
+    totalBytes: 1_000_000,
+    nextBytes: 400_000,
+    nextCacheBytes: 300_000,
+    nodeModulesBytes: 200_000,
+    otherBytes: 400_000,
+    measuredAt: "2026-08-30T08:00:00.000Z",
+    topDirectories: [{ name: ".next", bytes: 400_000 }],
+    history: [],
+    error: null,
+  }],
   worktrees: [{
     path: "/code/web",
     head: "abc",
@@ -70,7 +84,8 @@ describe("MCP loopback server", () => {
       expiresAt: "2026-08-29T00:30:00.000Z",
       maximumExpiresAt: "2026-08-29T08:00:00.000Z",
     };
-    const dashboard = vi.fn(async (): Promise<DashboardResponse> => ({ projects: [snapshot] }));
+    const capacity = { enabled: true, limit: 2, used: 1, available: 1, holders: [{ projectId, projectName: "Web", phase: "running" as const }] };
+    const dashboard = vi.fn(async (): Promise<DashboardResponse> => ({ projects: [snapshot], capacity }));
     const claimProject = vi.fn(async () => ({
       reservation,
       leaseToken: "never-return-this-lease-secret",
@@ -80,6 +95,7 @@ describe("MCP loopback server", () => {
     const releaseAgentClaim = vi.fn();
     const service = {
       dashboard,
+      serverCapacity: vi.fn(() => capacity),
       projectSnapshot: vi.fn(async () => snapshot),
       claimProject,
       renewAgentClaim: vi.fn(() => reservation),
@@ -109,12 +125,31 @@ describe("MCP loopback server", () => {
     await client.connect(transport);
     expect((await client.listTools()).tools.map(({ name }) => name)).toEqual([
       "list_projects",
+      "get_server_capacity",
       "get_project_status",
+      "get_project_storage",
       "list_worktrees",
       "claim_project",
       "renew_project_claim",
       "release_project_claim",
     ]);
+
+    const capacityResult = await client.callTool({ name: "get_server_capacity", arguments: {} });
+    const capacityText = (capacityResult as { content: Array<{ type: "text"; text: string }> }).content[0].text;
+    expect(JSON.parse(capacityText)).toMatchObject({ enabled: true, limit: 2, used: 1, available: 1 });
+
+    const statusResult = await client.callTool({ name: "get_project_status", arguments: { projectId } });
+    const statusText = (statusResult as { content: Array<{ type: "text"; text: string }> }).content[0].text;
+    expect(JSON.parse(statusText).runtime.resources).toMatchObject({
+      status: "available",
+      currentRssBytes: 128_000_000,
+      peakRssBytes: 140_000_000,
+      cpuPercent: 12.5,
+      processCount: 3,
+    });
+    const storageResult = await client.callTool({ name: "get_project_storage", arguments: { projectId } });
+    const storageText = (storageResult as { content: Array<{ type: "text"; text: string }> }).content[0].text;
+    expect(JSON.parse(storageText)[0]).toMatchObject({ worktreePath: "/code/web", nextCacheBytes: 300_000 });
 
     const claim = await client.callTool({
       name: "claim_project",
