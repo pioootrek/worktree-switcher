@@ -1,0 +1,67 @@
+{
+  "area": "process-manager",
+  "created": "2026-08-31",
+  "id": "FEAT-20260831-django-runtime-adapter",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-cli-project-management",
+      "FEAT-20260829-launch-environment-profiles",
+      "FEAT-20260829-multi-project-worktree-switching",
+      "FEAT-20260829-scoped-mcp-agent-tokens"
+    ]
+  },
+  "notes": [
+    {
+      "author": "user",
+      "date": "2026-08-31",
+      "text": "Support Django projects with the same managed worktree switching, reservations, monitoring, logs, GUI, and MCP workflow as Next.js projects."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-08-31",
+      "text": "Most controller behavior is already framework-independent. The main architectural change is resolving a typed launch adapter for the selected worktree at every start, because a Django interpreter may live inside that worktree rather than at one path captured during registration."
+    }
+  ],
+  "priority": "next",
+  "problem": [
+    "Project registration currently requires package.json and a Node.js dev script. Django repositories therefore cannot use the controller's stable ports, worktree switching, reservations, resource monitoring, logs, or MCP lifecycle tools without bypassing Worktree Switcher."
+  ],
+  "risk": {
+    "dimensions": [
+      "process",
+      "data-exposure",
+      "availability"
+    ],
+    "level": "medium",
+    "rollback": "Disable Django registration and retain the existing Node.js launch resolver. Removing the adapter must not alter Django repositories, virtual environments, databases, uploads, or generated files."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Introduce a persisted runtime kind and a typed launch-adapter boundary instead of adding Django branches to the Node.js resolver. Preserve existing Node.js and Next.js behavior through their own adapter.",
+    "Resolve the launch command against the exact Git-discovered worktree on every start or switch. Do not persist an executable path derived from one worktree and reuse it blindly for another.",
+    "Detect Django without executing repository code, initially from a regular manage.py file and optionally corroborating pyproject.toml or requirements files. Allow an explicit human selection when detection is ambiguous.",
+    "Resolve Python without shell activation, preferring an executable selected worktree/.venv/bin/python, then selected worktree/venv/bin/python, then an explicitly approved interpreter path, with an actionable failure when none is usable.",
+    "Start development mode with a shell-free argument array equivalent to python manage.py runserver 0.0.0.0:{port}. Keep host and port controller-owned so environment profiles or MCP input cannot redirect the managed listener.",
+    "Integrate Django settings, working directories, environment files, and non-secret or referenced-secret variables through FEAT-20260829-launch-environment-profiles rather than accepting free-form shell commands.",
+    "Reuse the existing process ownership, capacity, reservation, bounded logs, resource monitoring, and TCP readiness mechanisms. Add human-readable failures for missing manage.py, interpreter, Django module, settings imports, occupied ports, and early process exit; never run migrations automatically.",
+    "Expose detected runtime kind, interpreter source, effective redacted configuration, and runtime diagnostics in the dashboard and read-only MCP status. Existing claim, start, switch, renew, and release tools must work without framework-specific variants; configuration mutations remain capability-gated and audited.",
+    "Extend worktree storage visibility with allowlisted Python cache categories. Any cleanup must require a stopped and unreserved worktree, reject symlinks and canonical-path escape, and never remove virtual environments, migrations, SQLite databases, collected static files, media, uploads, or dependency directories.",
+    "Keep Gunicorn, Uvicorn, Daphne, ASGI/WSGI production profiles, automatic dependency installation, virtual-environment creation, migrations, and controller-managed Django HTTPS outside the initial development-server adapter. Track production serving separately after the development workflow is validated."
+  ],
+  "source": "Product discussion on 2026-08-31",
+  "status": "open",
+  "title": "Manage Django development servers through runtime adapters",
+  "type": "feature",
+  "validation": [
+    "Register a Django repository, start its selected worktree, and verify the managed process listens on the stable configured LAN port while status, logs, CPU, RAM, and process count remain available.",
+    "Switch between two Django worktrees with different project-local virtual-environment paths and verify each launch resolves its own interpreter without starting a duplicate server or reusing the previous worktree's executable.",
+    "Verify missing manage.py, missing or non-executable Python, missing Django, settings import failure, occupied port, and startup timeout each produce a useful operator-facing error without leaking environment values.",
+    "Verify reservations and global server capacity apply identically to Django and Node.js projects through both the dashboard and existing MCP lifecycle tools.",
+    "Verify detection never imports or executes managed repository code and launch remains shell-free even when paths or settings contain spaces or shell metacharacters.",
+    "Verify Python cache cleanup cannot follow symlinks or delete .venv, venv, migrations, db.sqlite3, static output, media, uploads, source files, or paths outside the selected Git-discovered worktree.",
+    "Verify all existing Node.js and Next.js launch, TLS, switching, and cache-reset tests remain unchanged and pass after introducing the adapter boundary."
+  ],
+  "value": [
+    "Django developers and coding agents can share the same bounded local control plane as Next.js projects without ad hoc server commands, port conflicts, or framework-specific MCP workflows."
+  ]
+}
