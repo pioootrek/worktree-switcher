@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { Project } from "@/shared/contracts";
 import { ProcessManager } from "./process-manager";
+import type { ProcessResourceSampler, RawResourceSample } from "./resource-monitor";
 
 const managers: ProcessManager[] = [];
 
@@ -38,6 +39,14 @@ async function unusedPort(): Promise<number> {
   return address.port;
 }
 
+async function waitFor(check: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 afterEach(async () => {
   await Promise.all(managers.splice(0).map((manager) => manager.stopAll()));
 });
@@ -68,5 +77,64 @@ describe("ProcessManager", () => {
     expect(server.listening).toBe(true);
     expect(manager.snapshot("fixture").failure?.title).toBe(`Port ${address.port} jest już używany`);
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+
+  it("tracks current, peak, CPU, and bounded history while the process is active", async () => {
+    let calls = 0;
+    const sampler: ProcessResourceSampler = {
+      supported: true,
+      sample: async (): Promise<RawResourceSample> => {
+        calls += 1;
+        return {
+          rssBytes: calls === 1 ? 10_000 : 8_000,
+          processCount: 3,
+          processCpuTicks: calls * 20,
+          hostCpuTicks: calls * 200,
+          cpuCount: 4,
+        };
+      },
+    };
+    const manager = new ProcessManager(undefined, undefined, {
+      resourceSampler: sampler,
+      resourceSampleIntervalMs: 20,
+      maxResourceHistoryPoints: 2,
+      memoryWarningThresholdBytes: 9_000,
+    });
+    managers.push(manager);
+    const fixture = project(await unusedPort());
+
+    await manager.start(fixture, process.cwd());
+    await waitFor(() => calls >= 3);
+    const resources = manager.snapshot(fixture.id).resources;
+    expect(resources).toMatchObject({
+      status: "available",
+      currentRssBytes: 8_000,
+      peakRssBytes: 10_000,
+      cpuPercent: 40,
+      processCount: 3,
+      warningThresholdBytes: 9_000,
+    });
+    expect(resources.history).toHaveLength(2);
+
+    await manager.stop(fixture.id);
+    const stopped = manager.snapshot(fixture.id).resources;
+    expect(stopped.status).toBe("stale");
+    expect(stopped.currentRssBytes).toBeNull();
+    const callsAfterStop = calls;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls).toBe(callsAfterStop);
+  });
+
+  it("degrades to unsupported without affecting server startup", async () => {
+    const sampler: ProcessResourceSampler = {
+      supported: false,
+      sample: async () => { throw new Error("unsupported"); },
+    };
+    const manager = new ProcessManager(undefined, undefined, { resourceSampler: sampler, resourceSampleIntervalMs: 20 });
+    managers.push(manager);
+    const fixture = project(await unusedPort());
+    await manager.start(fixture, process.cwd());
+    await waitFor(() => manager.snapshot(fixture.id).resources.status === "unsupported");
+    expect(manager.snapshot(fixture.id).phase).toBe("running");
   });
 });

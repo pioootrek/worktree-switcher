@@ -93,16 +93,6 @@
     },
     {
       "area": "process-manager",
-      "id": "FEAT-20260829-monitor-managed-memory",
-      "path": "feature/FEAT-20260829-monitor-managed-memory.json",
-      "priority": "next",
-      "risk_level": "low",
-      "status": "open",
-      "title": "Monitor memory used by managed server process trees",
-      "type": "feature"
-    },
-    {
-      "area": "process-manager",
       "id": "FEAT-20260829-next-production-runtime",
       "path": "feature/FEAT-20260829-next-production-runtime.json",
       "priority": "next",

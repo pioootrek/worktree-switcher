@@ -89,6 +89,17 @@ function parseCapacitySettings(value: unknown): { enabled: boolean; limit: numbe
   return { enabled: record.enabled, limit: record.limit as number };
 }
 
+function parseStorageRefresh(value: unknown): { worktreePath: string } {
+  const record = strictRecord(value, ["worktreePath"]);
+  return { worktreePath: requiredString(record, "worktreePath", 4096) };
+}
+
+function parseCacheDeletion(value: unknown): { worktreePath: string; cache: "next" } {
+  const record = strictRecord(value, ["worktreePath", "cache"]);
+  if (record.cache !== "next") throw new Error("Nieprawidłowy katalog pamięci podręcznej.");
+  return { worktreePath: requiredString(record, "worktreePath", 4096), cache: record.cache };
+}
+
 function parseReservation(value: unknown): {
   action: "acquire" | "release" | "force-release";
   worktreePath?: string;
@@ -213,6 +224,10 @@ export function createControllerServer(options: {
           });
           return;
         }
+        if (request.method === "GET" && url.pathname === "/api/metrics") {
+          json(response, 200, options.service.runtimeMetrics());
+          return;
+        }
         if (request.method === "GET" && url.pathname === "/api/directories") {
           json(response, 200, await options.directoryBrowser.list(
             url.searchParams.get("path") ?? undefined,
@@ -257,6 +272,20 @@ export function createControllerServer(options: {
           );
           options.events.publish();
           json(response, 200, { ok: true });
+          return;
+        }
+        const storageRefreshMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/storage\/refresh$/);
+        if (request.method === "POST" && storageRefreshMatch) {
+          const input = parseStorageRefresh(await readJson(request));
+          await options.service.refreshWorktreeStorage(decodeURIComponent(storageRefreshMatch[1]), input.worktreePath);
+          json(response, 202, { queued: true });
+          return;
+        }
+        const cacheMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/storage\/cache$/);
+        if (request.method === "DELETE" && cacheMatch) {
+          const input = parseCacheDeletion(await readJson(request));
+          const result = await options.service.deleteWorktreeCache(decodeURIComponent(cacheMatch[1]), input.worktreePath, input.cache);
+          json(response, 200, result);
           return;
         }
         const reservationMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/reservation$/);

@@ -90,6 +90,10 @@ controller must be event-driven and have bounded memory use:
 - no continuous Git polling while the dashboard is closed;
 - lazy dirty-state calculation with debounced refresh;
 - bounded per-project and global log buffers;
+- one five-second resource sampler per active Linux process group, with at
+  most 60 in-memory RAM points and no sampler for stopped projects;
+- one serialized filesystem scan queue for worktree disk usage, refreshed no
+  more than once per six hours unless a user explicitly requests it;
 - one controller process and no resident Next.js runtime;
 - release benchmarks report idle RSS, idle CPU, startup time, and growth while
   managing several fixture projects.
@@ -97,6 +101,33 @@ controller must be event-driven and have bounded memory use:
 Initial acceptance targets are at most 50 MiB idle RSS and negligible idle CPU
 on the supported Linux reference environment. These are budgets to verify, not
 assumptions about Node.js behavior.
+
+The Linux resource adapter aggregates `/proc` counters for every member of the
+detached process group created by the controller. This covers the package
+manager, Next.js, and worker children without trusting unrelated PIDs. A
+lightweight authenticated endpoint serves the in-memory snapshots so GUI
+refreshes do not trigger Git discovery. Unsupported platforms and transient
+permission/read failures produce explicit monitoring states and never affect
+start, stop, readiness, or switching.
+
+Worktree storage scans use filesystem metadata in a single traversal. They do
+not invoke a shell, follow symlinks, include `.git` administrative data, or
+leave a Git-discovered worktree root.
+The scanner records allocated bytes for the complete tree, `.next`,
+`.next/cache`, `node_modules`, and the five largest top-level directories.
+Results are persisted in SQLite with the first measurement and at most 179
+recent samples per worktree. Browser
+refreshes may schedule a missing or stale measurement; read-only MCP calls
+only consume the stored snapshot.
+
+The first maintenance action uses a closed allowlist containing only the
+Next.js `.next` directory. The service resolves the worktree through current
+Git discovery, verifies a regular worktree root and a Next.js dependency,
+rejects a symlinked `.next`, and refuses deletion while that worktree is
+running, reserved, or being scanned. Browser input selects the `next` cache
+kind and never supplies the deletion target. Successful, missing-directory,
+and rejected attempts are written to the project audit trail. Cache deletion
+is not exposed through read-only MCP.
 
 ## Persistence
 
@@ -143,6 +174,10 @@ The initial schema contains `schema_migrations`, `settings`, `projects`,
 `reservations`, and append-only `audit_events`. Logs and Git-derived worktree
 metadata are not stored as relational history in the MVP. Database backup uses
 the SQLite backup API rather than copying live database/WAL files.
+
+Bounded worktree disk-usage samples are the one derived-history exception.
+They live in `worktree_storage_samples`, are keyed by project and canonical
+worktree path, and are discarded with their owning project.
 
 Accounts would also require authentication, authorization, ownership,
 and audit semantics; SQLite alone does not make the application multi-user.

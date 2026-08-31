@@ -25,10 +25,18 @@ import { resolveAppPaths } from "../server/paths";
 import { ProcessManager } from "../server/process-manager";
 import { loadOrCreateSecret } from "../server/secret-file";
 import { SqliteStateStore } from "../server/sqlite-store";
+import { WorktreeStorageManager } from "../server/worktree-storage";
 
 function option(name: string, args = process.argv): string | undefined {
   const index = args.indexOf(name);
   return index === -1 ? undefined : args[index + 1];
+}
+
+function optionalPositiveNumber(value: string | undefined, label: string): number | null {
+  if (value === undefined) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${label} must be a positive number.`);
+  return parsed;
 }
 
 async function main(): Promise<void> {
@@ -72,8 +80,12 @@ async function main(): Promise<void> {
   const events = new EventStream();
   const logs = new FileLogWriter(paths.logDirectory);
   const store = new SqliteStateStore(paths.databasePath);
-  const processes = new ProcessManager(events.publish, logs);
-  const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs);
+  const memoryWarningMiB = optionalPositiveNumber(option("--memory-warning-mib"), "Memory warning threshold");
+  const processes = new ProcessManager(events.publish, logs, {
+    memoryWarningThresholdBytes: memoryWarningMiB === null ? null : Math.round(memoryWarningMiB * 1024 * 1024),
+  });
+  const storage = new WorktreeStorageManager(store, undefined, events.publish);
+  const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs, undefined, storage);
   const accessToken = randomBytes(32).toString("base64url");
   const sessionId = randomBytes(8).toString("hex");
   const mcpSessions = new Set<string>();
@@ -179,6 +191,7 @@ async function handleServiceCommand(args: string[], paths: ReturnType<typeof res
     const mcpPort = validatedPort(option("--mcp-port", args) ?? "47832", "MCP");
     const host = option("--host", args) ?? "0.0.0.0";
     const browseRoot = resolve(option("--browse-root", args) ?? homedir());
+    const memoryWarningMiB = optionalPositiveNumber(option("--memory-warning-mib", args), "Memory warning threshold");
     mkdirSync(paths.logDirectory, { recursive: true, mode: 0o700 });
     const startArguments = [
       "--service-mode", "--no-open",
@@ -191,6 +204,7 @@ async function handleServiceCommand(args: string[], paths: ReturnType<typeof res
       "--web-root", webRoot,
     ];
     if (args.includes("--no-mcp")) startArguments.push("--no-mcp");
+    if (memoryWarningMiB !== null) startArguments.push("--memory-warning-mib", String(memoryWarningMiB));
     const result = manager.install({
       nodePath: resolve(process.execPath),
       entrypointPath,

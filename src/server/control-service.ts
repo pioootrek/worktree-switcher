@@ -1,12 +1,13 @@
 import { createHash, randomBytes } from "node:crypto";
 import { basename, resolve } from "node:path";
 
-import type { DashboardResponse, Project, ProjectSnapshot, Reservation, ServerCapacitySettings, ServerCapacityStatus, Worktree } from "@/shared/contracts";
+import type { CacheDeletionResult, DashboardResponse, Project, ProjectSnapshot, Reservation, RuntimeMetricsResponse, SafeCacheKind, ServerCapacitySettings, ServerCapacityStatus, Worktree } from "@/shared/contracts";
 import type { GitWorktreeReader } from "./git-worktrees";
 import { type LaunchCommandResolver, type NextTlsConfiguration, NodeLaunchCommandResolver } from "./launch-command";
 import { type LogWriter, nullLogWriter } from "./log-writer";
 import { ProcessManager } from "./process-manager";
 import type { NewProject, ReservationRequest, StateStore } from "./state-store";
+import { AllowlistedWorktreeCacheCleaner, type WorktreeCacheCleaner, type WorktreeStorageManager } from "./worktree-storage";
 
 const AGENT_LEASE_DEFAULT_SECONDS = 30 * 60;
 const AGENT_LEASE_MAX_SECONDS = 8 * 60 * 60;
@@ -46,15 +47,26 @@ export class ControlService {
     private readonly processes: ProcessManager,
     private readonly logs: LogWriter = nullLogWriter,
     private readonly commands: LaunchCommandResolver = new NodeLaunchCommandResolver(),
+    private readonly storage?: WorktreeStorageManager,
+    private readonly cacheCleaner: WorktreeCacheCleaner = new AllowlistedWorktreeCacheCleaner(),
   ) {}
 
   async dashboard(): Promise<DashboardResponse> {
-    const projects = await Promise.all(this.store.listProjects().map((project) => this.snapshot(project)));
+    const projects = await Promise.all(this.store.listProjects().map((project) => this.snapshot(project, true)));
     return { projects, capacity: this.capacityStatus(projects) };
   }
 
   serverCapacity(): ServerCapacityStatus {
     return this.capacityStatus();
+  }
+
+  runtimeMetrics(): RuntimeMetricsResponse {
+    return {
+      projects: this.store.listProjects().map((project) => ({
+        projectId: project.id,
+        resources: this.processes.snapshot(project.id).resources,
+      })),
+    };
   }
 
   setServerCapacity(settings: ServerCapacitySettings): ServerCapacityStatus {
@@ -272,19 +284,66 @@ export class ControlService {
     return this.snapshot(this.requireProject(projectId));
   }
 
+  async refreshWorktreeStorage(projectId: string, worktreePath: string): Promise<void> {
+    const project = this.requireProject(projectId);
+    const worktrees = await this.git.list(project.repositoryPath);
+    const selected = this.resolveWorktree(project, worktrees, worktreePath);
+    this.storage?.queue(project.id, selected.path, true);
+    this.logs.controller("worktree_storage.refresh_requested", { projectId, worktreePath: selected.path });
+  }
+
+  async deleteWorktreeCache(projectId: string, worktreePath: string, cache: SafeCacheKind): Promise<CacheDeletionResult> {
+    const project = this.requireProject(projectId);
+    const worktrees = await this.git.list(project.repositoryPath);
+    const selected = this.resolveWorktree(project, worktrees, worktreePath);
+    const auditDetails = { worktreePath: selected.path, cache, target: `${selected.path}/.next` };
+    try {
+      const runtime = this.processes.snapshot(projectId);
+      if (
+        runtime.worktreePath === selected.path
+        && (runtime.phase === "starting" || runtime.phase === "running" || runtime.phase === "stopping")
+      ) {
+        throw new Error("Zatrzymaj serwer tego worktree przed usunięciem katalogu .next.");
+      }
+      const reservation = this.store.getActiveReservation(projectId);
+      if (reservation?.worktreePath === selected.path) {
+        throw new Error("Zwolnij blokadę tego worktree przed usunięciem katalogu .next.");
+      }
+      if (this.storage?.isBusy(projectId, selected.path)) {
+        throw new Error("Poczekaj na zakończenie pomiaru dysku przed usunięciem katalogu .next.");
+      }
+      const result = await this.cacheCleaner.remove(selected.path, cache);
+      this.store.recordProjectEvent(projectId, "worktree_cache.delete_succeeded", "local-user", { ...auditDetails, removed: result.removed });
+      this.storage?.queue(projectId, selected.path, true);
+      this.logs.controller("worktree_cache.deleted", { projectId, ...auditDetails, removed: result.removed });
+      return result;
+    } catch (error) {
+      this.store.recordProjectEvent(projectId, "worktree_cache.delete_failed", "local-user", {
+        ...auditDetails,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
   async shutdown(): Promise<void> {
     await this.processes.stopAll();
+    await this.storage?.close();
     this.store.close();
     await this.logs.close();
   }
 
-  private async snapshot(project: Project): Promise<ProjectSnapshot> {
+  private async snapshot(project: Project, scheduleStorage = false): Promise<ProjectSnapshot> {
     try {
+      const worktrees = await this.git.list(project.repositoryPath);
+      const worktreePaths = worktrees.map(({ path }) => path);
+      if (scheduleStorage) this.storage?.ensureFresh(project.id, worktreePaths);
       return {
         project,
         runtime: this.processes.snapshot(project.id),
         reservation: this.store.getActiveReservation(project.id),
-        worktrees: await this.git.list(project.repositoryPath),
+        worktrees,
+        storage: this.storage?.snapshots(project.id, worktreePaths) ?? [],
       };
     } catch (error) {
       return {
@@ -292,6 +351,7 @@ export class ControlService {
         runtime: this.processes.snapshot(project.id),
         reservation: this.store.getActiveReservation(project.id),
         worktrees: [],
+        storage: [],
         discoveryError: error instanceof Error ? error.message : String(error),
       };
     }

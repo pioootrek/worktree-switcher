@@ -6,9 +6,11 @@ import {
   GitBranch,
   GitCommitHorizontal,
   Gauge,
+  HardDrive,
   LoaderCircle,
   LockKeyhole,
   Languages,
+  MemoryStick,
   Moon,
   Play,
   Plus,
@@ -38,11 +40,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Switch } from "@/components/ui/switch";
 import { DirectoryPicker } from "@/components/directory-picker";
 import { CertificateFilePicker } from "@/components/certificate-file-picker";
+import { WorktreeStoragePanel } from "@/components/worktree-storage-panel";
 import { useI18n } from "@/i18n/provider";
 import { dashboardSummary, type Translate } from "@/i18n/messages";
-import type { ControllerDashboardResponse, DevServerTlsMode, McpStatus, Project, ProjectSnapshot, RuntimeFailure, RuntimePhase, ServerCapacityStatus } from "@/shared/contracts";
+import type { ControllerDashboardResponse, DevServerTlsMode, McpStatus, Project, ProjectSnapshot, RuntimeFailure, RuntimeMetricsResponse, RuntimePhase, RuntimeResourceMetrics, ServerCapacityStatus } from "@/shared/contracts";
 
 const EMPTY_CAPACITY: ServerCapacityStatus = { enabled: false, limit: 2, used: 0, available: null, holders: [] };
+const EMPTY_RESOURCES: RuntimeResourceMetrics = { status: "idle", currentRssBytes: null, peakRssBytes: null, cpuPercent: null, processCount: null, sampledAt: null, sampleAgeSeconds: null, warningThresholdBytes: null, history: [] };
 
 const EMPTY_MCP_STATUS: McpStatus = {
   phase: "unknown",
@@ -52,6 +56,8 @@ const EMPTY_MCP_STATUS: McpStatus = {
   authentication: "bearer",
   activeSessions: 0,
 };
+
+type Mutate = (path: string, body: unknown, success: string, method?: "POST" | "DELETE") => Promise<void>;
 
 async function parseResponse<T>(response: Response, fallback: string): Promise<T> {
   const body = await response.json() as T & { error?: string };
@@ -108,10 +114,10 @@ export function Dashboard() {
     };
   }, [refresh, t]);
 
-  const mutate = useCallback(async (path: string, body: unknown, success: string) => {
+  const mutate = useCallback(async (path: string, body: unknown, success: string, method: "POST" | "DELETE" = "POST") => {
     if (!token) throw new Error(t("dashboard.sessionPending"));
     const response = await fetch(path, {
-      method: "POST",
+      method,
       headers: { "Accept-Language": locale, "Content-Type": "application/json", "X-Worktree-Switcher-Token": token },
       body: JSON.stringify(body),
     });
@@ -125,6 +131,41 @@ export function Dashboard() {
     () => data.projects.filter(({ runtime }) => runtime.phase === "running").length,
     [data.projects],
   );
+  const monitoredProjectIds = useMemo(
+    () => data.projects.filter(({ runtime }) => runtime.phase === "running" || runtime.phase === "starting").map(({ project }) => project.id).join(","),
+    [data.projects],
+  );
+
+  useEffect(() => {
+    if (!token || !monitoredProjectIds) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const response = await fetch("/api/metrics", {
+          cache: "no-store",
+          headers: { "X-Worktree-Switcher-Token": token },
+        });
+        const body = await parseResponse<RuntimeMetricsResponse>(response, t("http.error", { status: response.status }));
+        if (cancelled) return;
+        const metrics = new Map(body.projects.map(({ projectId, resources }) => [projectId, resources]));
+        setData((current) => ({
+          ...current,
+          projects: current.projects.map((snapshot) => ({
+            ...snapshot,
+            runtime: { ...snapshot.runtime, resources: metrics.get(snapshot.project.id) ?? snapshot.runtime.resources ?? EMPTY_RESOURCES },
+          })),
+        }));
+      } catch {
+        // The dashboard/SSE connection owns the visible connection error state.
+      }
+    };
+    void poll();
+    const interval = window.setInterval(() => void poll(), 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [monitoredProjectIds, t, token]);
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,oklch(0.26_0.06_260/.32),transparent_34rem)]">
@@ -197,7 +238,7 @@ function CapacityDialog({
   setError,
 }: {
   status: ServerCapacityStatus;
-  mutate: (path: string, body: unknown, success: string) => Promise<void>;
+  mutate: Mutate;
   setError: (message: string | null) => void;
 }) {
   const { t } = useI18n();
@@ -396,12 +437,13 @@ function ProjectCard({
   token,
 }: {
   snapshot: ProjectSnapshot;
-  mutate: (path: string, body: unknown, success: string) => Promise<void>;
+  mutate: Mutate;
   setError: (message: string | null) => void;
   token: string;
 }) {
   const { locale, t } = useI18n();
   const { project, runtime, reservation, worktrees } = snapshot;
+  const resources = runtime.resources ?? EMPTY_RESOURCES;
   const initial = project.selectedWorktreePath ?? worktrees[0]?.path ?? "";
   const [selected, setSelected] = useState(initial);
   const [pending, setPending] = useState<string | null>(null);
@@ -538,6 +580,7 @@ function ProjectCard({
           <TabsList>
             <TabsTrigger value="status">{t("project.status")}</TabsTrigger>
             <TabsTrigger value="logs">{t("project.logs")} <span className="text-muted-foreground">{runtime.logs.length}</span></TabsTrigger>
+            <TabsTrigger value="storage"><HardDrive aria-hidden />{t("storage.tab")}</TabsTrigger>
           </TabsList>
           <TabsContent value="status" className="mt-4">
             <dl className="grid grid-cols-2 gap-x-5 gap-y-3 text-sm sm:grid-cols-3">
@@ -549,6 +592,7 @@ function ProjectCard({
               <Metric label={t("project.branch")} value={selectedWorktree?.branch ?? "detached"} />
               <Metric label={t("project.started")} value={runtime.startedAt ? new Date(runtime.startedAt).toLocaleTimeString(locale === "pl" ? "pl-PL" : "en-US") : "—"} />
             </dl>
+            <ResourceMonitor resources={resources} />
             {failureCopy && runtime.failure ? (
               <Alert variant="destructive" className="mt-4">
                 <AlertTriangle aria-hidden />
@@ -572,6 +616,33 @@ function ProjectCard({
                 {runtime.logs.length ? runtime.logs.join("\n") : t("project.noLogs")}
               </pre>
             </ScrollArea>
+          </TabsContent>
+          <TabsContent value="storage" className="mt-4">
+            <WorktreeStoragePanel
+              key={runtime.worktreePath ?? selected}
+              storage={snapshot.storage ?? []}
+              defaultPath={runtime.worktreePath ?? selected}
+              refresh={(worktreePath) => mutate(
+                `/api/projects/${project.id}/storage/refresh`,
+                { worktreePath },
+                t("storage.refreshQueued"),
+              )}
+              deleteCache={async (worktreePath) => {
+                try {
+                  await mutate(
+                    `/api/projects/${project.id}/storage/cache`,
+                    { worktreePath, cache: "next" },
+                    t("storage.deleted"),
+                    "DELETE",
+                  );
+                } catch (cause) {
+                  setError(cause instanceof Error ? cause.message : String(cause));
+                  throw cause;
+                }
+              }}
+              activeWorktreePath={runtime.phase === "running" || runtime.phase === "starting" || runtime.phase === "stopping" ? runtime.worktreePath : null}
+              reservedWorktreePath={reservation?.worktreePath ?? null}
+            />
           </TabsContent>
         </Tabs>
 
@@ -611,7 +682,7 @@ function TlsSettingsDialog({
   project: Project;
   phase: RuntimePhase;
   token: string;
-  mutate: (path: string, body: unknown, success: string) => Promise<void>;
+  mutate: Mutate;
   setError: (message: string | null) => void;
 }) {
   const { t } = useI18n();
@@ -719,10 +790,65 @@ function Metric({ label, value, mono = false }: { label: string; value: string; 
   return <div className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className={`truncate pt-0.5 ${mono ? "font-mono text-xs" : ""}`} title={value}>{value}</dd></div>;
 }
 
+function formatBytes(bytes: number | null): string {
+  if (bytes === null) return "—";
+  const units = ["B", "KiB", "MiB", "GiB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value >= 100 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+}
+
+function ResourceMonitor({ resources }: { resources: RuntimeResourceMetrics }) {
+  const { locale, t } = useI18n();
+  const history = resources.history ?? [];
+  const values = history.map(({ rssBytes }) => rssBytes);
+  const maximum = Math.max(...values, 1);
+  const minimum = Math.min(...values, 0);
+  const range = Math.max(1, maximum - minimum);
+  const points = values.map((value, index) => {
+    const x = values.length <= 1 ? 50 : (index / (values.length - 1)) * 100;
+    const y = 30 - ((value - minimum) / range) * 26;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const warning = resources.currentRssBytes !== null
+    && resources.warningThresholdBytes !== null
+    && resources.currentRssBytes >= resources.warningThresholdBytes;
+  const sampleAge = resources.sampleAgeSeconds;
+
+  return (
+    <section className={`mt-4 rounded-lg border p-3 ${warning ? "border-amber-400/30 bg-amber-400/5" : "border-white/7 bg-black/10"}`} aria-label={t("resources.title")}>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-medium"><MemoryStick className="size-4 text-indigo-300" aria-hidden />{t("resources.title")}</div>
+        <span className="text-xs text-muted-foreground">
+          {resources.status === "available" && sampleAge !== null
+            ? t("resources.sampleAge", { seconds: sampleAge })
+            : t(`resources.status.${resources.status}`)}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+        <Metric label={t("resources.memoryNow")} value={formatBytes(resources.currentRssBytes)} mono />
+        <Metric label={t("resources.memoryPeak")} value={formatBytes(resources.peakRssBytes)} mono />
+        <Metric label={t("resources.cpu")} value={resources.cpuPercent === null ? "—" : `${resources.cpuPercent.toLocaleString(locale === "pl" ? "pl-PL" : "en-US", { maximumFractionDigits: 1 })}%`} mono />
+        <Metric label={t("resources.processes")} value={resources.processCount === null ? "—" : String(resources.processCount)} mono />
+      </div>
+      {points && (
+        <svg className="mt-3 h-9 w-full text-indigo-300" viewBox="0 0 100 34" preserveAspectRatio="none" role="img" aria-label={t("resources.memoryHistory")}>
+          <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+        </svg>
+      )}
+      {warning && <p className="mt-2 text-xs text-amber-300">{t("resources.warning", { threshold: formatBytes(resources.warningThresholdBytes) })}</p>}
+    </section>
+  );
+}
+
 function AddProjectDialog({ open, onOpenChange, mutate, token }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  mutate: (path: string, body: unknown, success: string) => Promise<void>;
+  mutate: Mutate;
   token: string;
 }) {
   const { t } = useI18n();

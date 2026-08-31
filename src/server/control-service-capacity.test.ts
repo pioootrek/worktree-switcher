@@ -17,7 +17,10 @@ afterEach(() => {
 });
 
 function stoppedRuntime(): RuntimeSnapshot {
-  return { phase: "stopped", pid: null, worktreePath: null, startedAt: null, error: null, failure: null, logs: [] };
+  return {
+    phase: "stopped", pid: null, worktreePath: null, startedAt: null, error: null, failure: null, logs: [],
+    resources: { status: "idle", currentRssBytes: null, peakRssBytes: null, cpuPercent: null, processCount: null, sampledAt: null, sampleAgeSeconds: null, warningThresholdBytes: null, history: [] },
+  };
 }
 
 function fixture(count = 3, onStart: (project: Project) => Promise<void> = async () => undefined) {

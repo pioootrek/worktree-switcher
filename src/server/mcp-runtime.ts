@@ -143,6 +143,7 @@ export class McpRuntime {
       port: project.port,
       runtime: runtime.phase,
       worktreePath: runtime.worktreePath ?? project.selectedWorktreePath,
+      resources: runtime.resources,
       reservation,
     }));
 
@@ -204,6 +205,12 @@ export class McpRuntime {
       inputSchema: { projectId: z.string().uuid() },
       annotations: { readOnlyHint: true, idempotentHint: true },
     }, async ({ projectId }) => jsonContent(agentSnapshot(await english(() => this.service.projectSnapshot(projectId)))));
+
+    server.registerTool("get_project_storage", {
+      description: "Read cached disk-usage snapshots and bounded history for every discovered worktree in one project.",
+      inputSchema: { projectId: z.string().uuid() },
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    }, async ({ projectId }) => jsonContent((await english(() => this.service.projectSnapshot(projectId))).storage));
 
     server.registerTool("list_worktrees", {
       description: "List Git worktrees discovered for one registered project.",

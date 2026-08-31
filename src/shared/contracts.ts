@@ -50,6 +50,30 @@ export interface RuntimeSnapshot {
   error: string | null;
   failure: RuntimeFailure | null;
   logs: string[];
+  resources: RuntimeResourceMetrics;
+}
+
+export type ResourceMetricsStatus = "idle" | "available" | "stale" | "unavailable" | "unsupported";
+
+export interface ResourceHistoryPoint {
+  sampledAt: string;
+  rssBytes: number;
+}
+
+export interface RuntimeResourceMetrics {
+  status: ResourceMetricsStatus;
+  currentRssBytes: number | null;
+  peakRssBytes: number | null;
+  cpuPercent: number | null;
+  processCount: number | null;
+  sampledAt: string | null;
+  sampleAgeSeconds: number | null;
+  warningThresholdBytes: number | null;
+  history: ResourceHistoryPoint[];
+}
+
+export interface RuntimeMetricsResponse {
+  projects: Array<{ projectId: string; resources: RuntimeResourceMetrics }>;
 }
 
 export interface RuntimeFailure {
@@ -65,7 +89,43 @@ export interface ProjectSnapshot {
   runtime: RuntimeSnapshot;
   reservation: Reservation | null;
   worktrees: Worktree[];
+  storage: WorktreeStorageSnapshot[];
   discoveryError?: string;
+}
+
+export interface WorktreeStorageHistoryPoint {
+  measuredAt: string;
+  totalBytes: number;
+  nextBytes: number;
+  nextCacheBytes: number;
+  nodeModulesBytes: number;
+}
+
+export interface WorktreeStorageDirectory {
+  name: string;
+  bytes: number;
+}
+
+export interface WorktreeStorageSnapshot {
+  worktreePath: string;
+  status: "unmeasured" | "pending" | "scanning" | "available" | "unavailable";
+  totalBytes: number | null;
+  nextBytes: number | null;
+  nextCacheBytes: number | null;
+  nodeModulesBytes: number | null;
+  otherBytes: number | null;
+  measuredAt: string | null;
+  topDirectories: WorktreeStorageDirectory[];
+  history: WorktreeStorageHistoryPoint[];
+  error: string | null;
+}
+
+export type SafeCacheKind = "next";
+
+export interface CacheDeletionResult {
+  cache: SafeCacheKind;
+  worktreePath: string;
+  removed: boolean;
 }
 
 export interface DashboardResponse {

@@ -13,6 +13,11 @@
       "author": "user",
       "date": "2026-08-29",
       "text": "Provide an explicit way to reset the selected worktree's .next cache when stale generated state interferes with development."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-08-30",
+      "text": "The authenticated dashboard now implements reset-now for an explicitly selected Git-discovered worktree. It accepts only the allowlisted Next.js cache kind, refuses active, reserved, scanning, non-Next.js, or symlinked targets, records success/no-op/failure in the project audit trail, and refreshes storage metrics. CLI, MCP authority design, and one-shot reset-before-start remain open scope."
     }
   ],
   "priority": "next",
