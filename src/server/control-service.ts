@@ -12,7 +12,12 @@ import { AllowlistedWorktreeCacheCleaner, type WorktreeCacheCleaner, type Worktr
 const AGENT_LEASE_DEFAULT_SECONDS = 30 * 60;
 const AGENT_LEASE_MAX_SECONDS = 8 * 60 * 60;
 const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const RESERVED_ENVIRONMENT_NAMES = new Set(["PORT", "NODE_ENV"]);
+const RESERVED_ENVIRONMENT_NAMES = new Set([
+  "PORT", "NODE_ENV", "PATH",
+  "NODE_OPTIONS",
+  "LD_PRELOAD", "LD_LIBRARY_PATH",
+  "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME",
+]);
 const ENVIRONMENT_PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 interface OperationActor {
@@ -231,10 +236,15 @@ export class ControlService {
       const active = this.isProjectActive(projectId);
       const changesActiveProfile = project.selectedEnvironmentProfile === profileName;
       if (active && changesActiveProfile && !restart) throw new Error("Zatrzymaj serwer lub wybierz zapis z restartem.");
-      if (active && changesActiveProfile) await this.operateLocked(projectId, "stop", undefined, actor);
-      this.store.saveProjectEnvironmentProfile(projectId, { name: profileName, environment: normalized }, actor.owner);
-      this.logs.controller("project.environment_profile_saved", { projectId, profileName, variableNames: Object.keys(normalized), actor: actor.owner });
-      if (active && changesActiveProfile) await this.operateLocked(projectId, "start", undefined, actor);
+      if (active && changesActiveProfile) this.acquireCapacity(project);
+      try {
+        if (active && changesActiveProfile) await this.operateLocked(projectId, "stop", undefined, actor);
+        this.store.saveProjectEnvironmentProfile(projectId, { name: profileName, environment: normalized }, actor.owner);
+        this.logs.controller("project.environment_profile_saved", { projectId, profileName, variableNames: Object.keys(normalized), actor: actor.owner });
+        if (active && changesActiveProfile) await this.operateLocked(projectId, "start", undefined, actor);
+      } finally {
+        if (active && changesActiveProfile) this.pendingStarts.delete(projectId);
+      }
       return this.requireProject(projectId);
     });
   }
@@ -248,10 +258,15 @@ export class ControlService {
       if (project.selectedEnvironmentProfile === profileName) return project;
       const active = this.isProjectActive(projectId);
       if (active && !restart) throw new Error("Zatrzymaj serwer lub wybierz profil z restartem.");
-      if (active) await this.operateLocked(projectId, "stop", undefined, actor);
-      this.store.selectProjectEnvironmentProfile(projectId, profileName, actor.owner);
-      this.logs.controller("project.environment_profile_selected", { projectId, profileName, actor: actor.owner });
-      if (active) await this.operateLocked(projectId, "start", undefined, actor);
+      if (active) this.acquireCapacity(project);
+      try {
+        if (active) await this.operateLocked(projectId, "stop", undefined, actor);
+        this.store.selectProjectEnvironmentProfile(projectId, profileName, actor.owner);
+        this.logs.controller("project.environment_profile_selected", { projectId, profileName, actor: actor.owner });
+        if (active) await this.operateLocked(projectId, "start", undefined, actor);
+      } finally {
+        if (active) this.pendingStarts.delete(projectId);
+      }
       return this.requireProject(projectId);
     });
   }
@@ -275,8 +290,10 @@ export class ControlService {
     if (entries.length > 100) throw new Error("Można ustawić maksymalnie 100 zmiennych środowiskowych.");
     for (const [name, value] of entries) {
       if (!ENVIRONMENT_NAME.test(name) || name.length > 128) throw new Error(`Nieprawidłowa nazwa zmiennej środowiskowej: ${name}.`);
-      if (RESERVED_ENVIRONMENT_NAMES.has(name)) throw new Error(`Zmienna ${name} jest zarządzana przez kontroler.`);
-      if (typeof value !== "string" || value.length > 8192 || value.includes("\0")) throw new Error(`Nieprawidłowa wartość zmiennej ${name}.`);
+      if (RESERVED_ENVIRONMENT_NAMES.has(name) || name.startsWith("DYLD_")) throw new Error(`Zmienna ${name} jest zarządzana przez kontroler.`);
+      if (typeof value !== "string" || value.length > 8192 || value.includes("\0") || value.includes("\n") || value.includes("\r") || value.trim() !== value) {
+        throw new Error(`Nieprawidłowa wartość zmiennej ${name}.`);
+      }
     }
     return Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right)));
   }

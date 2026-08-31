@@ -194,6 +194,7 @@ describe("ControlService agent claims", () => {
     const concurrentStart = service.operate(project.id, "start");
     await Promise.resolve();
     expect(start).not.toHaveBeenCalled();
+    expect(service.serverCapacity()).toMatchObject({ used: 1, holders: [{ projectId: project.id }] });
     releaseStop();
     await profileRestart;
     await concurrentStart;
@@ -249,8 +250,24 @@ describe("ControlService agent claims", () => {
       DJANGO_SETTINGS_MODULE: "config.settings.staging",
       SWITCHER_TEST_VALUE: "staging",
     });
+    await expect(service.setProjectEnvironment(project.id, { PORT: "9000" })).rejects.toThrow("PORT");
+    await expect(service.setProjectEnvironment(project.id, { NODE_OPTIONS: "--require=/tmp/payload.js" })).rejects.toThrow("NODE_OPTIONS");
+    await expect(service.setProjectEnvironment(project.id, { DYLD_INSERT_LIBRARIES: "/tmp/payload.dylib" })).rejects.toThrow("DYLD_INSERT_LIBRARIES");
+    await expect(service.setProjectEnvironment(project.id, { "INVALID-NAME": "value" })).rejects.toThrow("INVALID-NAME");
+    await expect(service.setProjectEnvironment(project.id, { [`A${"B".repeat(128)}`]: "value" })).rejects.toThrow("Nieprawidłowa nazwa");
+    await expect(service.setProjectEnvironment(project.id, Object.fromEntries(Array.from({ length: 101 }, (_, index) => [`VAR_${index}`, "value"])))).rejects.toThrow("maksymalnie 100");
+    await expect(service.setProjectEnvironment(project.id, { VALUE: `x${"y".repeat(8192)}` })).rejects.toThrow("Nieprawidłowa wartość");
+    await expect(service.setProjectEnvironment(project.id, { VALUE: "bad\0value" })).rejects.toThrow("Nieprawidłowa wartość");
+    await expect(service.setProjectEnvironment(project.id, { VALUE: "line1\nline2" })).rejects.toThrow("Nieprawidłowa wartość");
+    await expect(service.setProjectEnvironment(project.id, { VALUE: " padded " })).rejects.toThrow("Nieprawidłowa wartość");
+    await expect(service.saveEnvironmentProfile(project.id, "bad profile", {})).rejects.toThrow("Nieprawidłowa nazwa profilu");
+    await expect(service.deleteEnvironmentProfile(project.id, "default")).rejects.toThrow("default");
     await service.selectEnvironmentProfile(project.id, "staging");
+    await expect(service.deleteEnvironmentProfile(project.id, "staging")).rejects.toThrow("aktywnego profilu");
     await service.operate(project.id, "start", worktrees[0].path);
+    await expect(service.setProjectEnvironment(project.id, { SWITCHER_TEST_VALUE: "changed" })).rejects.toThrow("Zatrzymaj serwer");
+    await expect(service.saveEnvironmentProfile(project.id, "staging", { SWITCHER_TEST_VALUE: "changed" })).rejects.toThrow("restartem");
+    await expect(service.selectEnvironmentProfile(project.id, "default")).rejects.toThrow("restartem");
     await service.operate(project.id, "switch", worktrees[1].path);
 
     expect(resolve.mock.calls.map(([path]) => path)).toEqual(worktrees.map(({ path }) => path));

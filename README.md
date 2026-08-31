@@ -222,6 +222,7 @@ Available tools:
 | `get_project_status` | Reads runtime, claim, and selected-worktree state |
 | `get_project_storage` | Reads cached disk usage and history for project worktrees |
 | `list_worktrees` | Lists worktrees discovered for a project |
+| `set_project_environment` | Replaces the selected profile's literal variables while the server is stopped |
 | `list_environment_profiles` | Lists named profiles and the selected profile |
 | `save_environment_profile` | Creates or replaces a literal environment profile |
 | `select_environment_profile` | Selects a profile while the server is stopped |
