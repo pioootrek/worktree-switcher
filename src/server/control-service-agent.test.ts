@@ -157,6 +157,7 @@ describe("ControlService agent claims", () => {
     }));
     const runtime: RuntimeSnapshot = {
       phase: "stopped", pid: null, worktreePath: null, startedAt: null, error: null, failure: null, logs: [],
+      resources: { status: "idle", currentRssBytes: null, peakRssBytes: null, cpuPercent: null, processCount: null, sampledAt: null, sampleAgeSeconds: null, warningThresholdBytes: null, history: [] },
     };
     const start = vi.fn(async (_project, path: string) => { runtime.phase = "running"; runtime.worktreePath = path; });
     const stop = vi.fn(async () => { runtime.phase = "stopped"; runtime.worktreePath = null; });
@@ -175,11 +176,21 @@ describe("ControlService agent claims", () => {
       { resolve },
     );
 
+    await service.saveEnvironmentProfile(project.id, "staging", {
+      DJANGO_SETTINGS_MODULE: "config.settings.staging",
+      SWITCHER_TEST_VALUE: "staging",
+    });
+    await service.selectEnvironmentProfile(project.id, "staging");
     await service.operate(project.id, "start", worktrees[0].path);
     await service.operate(project.id, "switch", worktrees[1].path);
 
     expect(resolve.mock.calls.map(([path]) => path)).toEqual(worktrees.map(({ path }) => path));
     expect(start.mock.calls[1][0].executable).toBe("./.venv/bin/python");
+    expect(start.mock.calls.map(([startedProject]) => startedProject.environment)).toEqual([
+      { DJANGO_SETTINGS_MODULE: "config.settings.staging", SWITCHER_TEST_VALUE: "staging" },
+      { DJANGO_SETTINGS_MODULE: "config.settings.staging", SWITCHER_TEST_VALUE: "staging" },
+    ]);
+    expect(store.getProject(project.id)?.selectedEnvironmentProfile).toBe("staging");
     store.close();
   });
 });

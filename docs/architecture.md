@@ -205,9 +205,16 @@ on disk:
         "executable": "pnpm",
         "args": ["dev", "--", "--port", "{port}"]
       },
-      "environment": {
-        "NODE_ENV": "development"
-      },
+      "selectedEnvironmentProfile": "staging",
+      "environmentProfiles": [
+        { "name": "default", "environment": {} },
+        {
+          "name": "staging",
+          "environment": {
+            "FEATURE_MODE": "staging"
+          }
+        }
+      ],
       "healthcheck": {
         "path": "/",
         "timeoutMs": 30000

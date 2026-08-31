@@ -174,6 +174,27 @@ For every Django worktree, the resolver prefers `.venv/bin/python`, then
 migrations, or manage `collectstatic`. Custom commands, external virtual
 environments, ASGI servers, and Django LAN binding are not supported yet.
 
+## Environment profiles
+
+Every managed project has a `default` environment profile and may define
+additional named profiles such as `staging`, `e2e`, or `fixtures`. Profiles are
+framework-independent: the selected literal variables are injected into both
+Node.js and Django processes and remain selected when the project switches to
+another worktree. For Django, a profile can select settings without adding
+free-form command text, for example:
+
+```text
+DJANGO_SETTINGS_MODULE=config.settings.staging
+SWITCHER_TEST_VALUE=staging
+```
+
+`PORT` and `NODE_ENV` remain controller-owned. Variable names are validated,
+processes are still spawned without a shell, and audit events record variable
+names without their values. Editing or selecting a profile for an active server
+requires an explicit restart. Literal values are stored in SQLite; do not put
+secrets in them. Secret references, `.env` files, relative working directories,
+PATH prefixes, and required runtime directories remain planned work.
+
 ## MCP for coding agents
 
 MCP is enabled by default at:
@@ -201,6 +222,10 @@ Available tools:
 | `get_project_status` | Reads runtime, claim, and selected-worktree state |
 | `get_project_storage` | Reads cached disk usage and history for project worktrees |
 | `list_worktrees` | Lists worktrees discovered for a project |
+| `list_environment_profiles` | Lists named profiles and the selected profile |
+| `save_environment_profile` | Creates or replaces a literal environment profile |
+| `select_environment_profile` | Selects a profile while the server is stopped |
+| `delete_environment_profile` | Deletes a non-default, inactive profile |
 | `claim_project` | Claims a worktree and moves or starts its server |
 | `renew_project_claim` | Extends a claim owned by the current MCP session |
 | `release_project_claim` | Releases a claim without stopping the server |

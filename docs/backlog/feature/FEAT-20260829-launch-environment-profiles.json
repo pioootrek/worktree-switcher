@@ -24,6 +24,11 @@
       "author": "user",
       "date": "2026-08-29",
       "text": "Extend environment configuration with directories and make appropriate profile operations available to agents through MCP."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-08-31",
+      "text": "Implemented validated literal per-project environment overrides and named profiles. Existing values migrate into default; dashboard users can create, copy, edit, select, delete, and save-and-restart profiles, while MCP exposes list, save, select, and delete operations. Selection persists across Node.js and Django worktree switches. PORT and NODE_ENV remain reserved, and audits record names without values. Secret references, environment files, working directories, PATH prefixes, required directories, scoped MCP capabilities, and CLI support remain open."
     }
   ],
   "priority": "next",

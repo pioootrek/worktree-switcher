@@ -83,6 +83,13 @@ optional environment overrides, health check, startup timeout, and whether it
 should start automatically. The selected worktree is runtime state and is
 never accepted as an arbitrary browser-provided working directory.
 
+Named environment profiles provide validated literal overrides for both Node.js
+and Django processes. The selected profile persists across worktree switches;
+changing an active profile requires a controlled restart. `PORT` and `NODE_ENV`
+remain controller-owned, and audit events record variable names without values.
+Secrets, environment files, relative working directories, PATH prefixes, and
+required runtime directories remain part of the broader profile backlog.
+
 An optional controller-wide counting semaphore limits concurrently starting
 or running managed servers. Capacity is independent from reservations: a lock
 consumes no slot until its server starts. Switching retains the current slot,
