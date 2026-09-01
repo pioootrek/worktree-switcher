@@ -30,7 +30,7 @@ type PackageJson = {
 };
 
 const PACKAGE_MANAGERS = ["pnpm", "npm", "yarn", "bun"] as const;
-const PORT_ARGUMENT_PACKAGES = ["vite", "astro", "nuxt", "@angular/cli"];
+const PORT_ARGUMENT_PACKAGES = ["vite", "astro", "nuxt"];
 
 function isPackageManager(value: string): value is LaunchCommand["executable"] {
   return PACKAGE_MANAGERS.some((manager) => manager === value);
@@ -57,8 +57,19 @@ function usesPortArgument(packageJson: PackageJson): boolean {
   return PORT_ARGUMENT_PACKAGES.some((name) => name in packages);
 }
 
+function angularWorkspace(worktreePath: string, packageJson: PackageJson): boolean {
+  const configurationPath = join(worktreePath, "angular.json");
+  if (!existsSync(configurationPath) || !statSync(configurationPath).isFile()) return false;
+  const packages = { ...packageJson.dependencies, ...packageJson.devDependencies };
+  return "@angular/cli" in packages;
+}
+
+function angularServeScript(value: unknown): value is string {
+  return typeof value === "string" && /(?:^|[;&|]\s*|\s)ng\s+(?:serve|dev|s)(?:\s|$)/.test(value);
+}
+
 function forwardedArgs(manager: LaunchCommand["executable"], args: string[]): string[] {
-  return manager === "npm" ? ["--", ...args] : args;
+  return manager === "npm" && args.length > 0 ? ["--", ...args] : args;
 }
 
 function canonicalFile(path: string | null, label: string, required: boolean): string | null {
@@ -151,21 +162,27 @@ export class ProjectLaunchCommandResolver implements LaunchCommandResolver {
     } catch {
       throw new Error("Nie udało się odczytać package.json. Sprawdź, czy plik zawiera prawidłowy JSON.");
     }
-    if (typeof packageJson.scripts?.dev !== "string") {
-      throw new Error("Projekt nie ma skryptu dev w package.json.");
-    }
+    const isAngular = angularWorkspace(worktreePath, packageJson);
+    const scriptName = isAngular
+      ? angularServeScript(packageJson.scripts?.dev) ? "dev"
+        : angularServeScript(packageJson.scripts?.start) ? "start"
+          : null
+      : typeof packageJson.scripts?.dev === "string" ? "dev" : null;
+    if (!scriptName && isAngular) throw new Error("Projekt Angular nie ma skryptu dev ani start uruchamiającego ng serve.");
+    if (!scriptName) throw new Error("Projekt nie ma skryptu dev w package.json.");
 
     const executable = detectPackageManager(worktreePath, packageJson);
-    const passPortAsArgument = usesPortArgument(packageJson);
+    const passPortAsArgument = isAngular || usesPortArgument(packageJson);
     const tls = resolveTls(packageJson, tlsInput);
     const devArgs = [
-      ...(passPortAsArgument ? ["--port", String(port)] : []),
+      ...(isAngular ? ["--host", "127.0.0.1", "--port", String(port)]
+        : passPortAsArgument ? ["--port", String(port)] : []),
       ...tlsArgs(tls),
     ];
     return {
       preset: "node",
       executable,
-      args: ["run", "dev", ...forwardedArgs(executable, devArgs)],
+      args: ["run", scriptName, ...forwardedArgs(executable, devArgs)],
       portMethod: passPortAsArgument ? "argument" : "environment",
       tls,
     };
