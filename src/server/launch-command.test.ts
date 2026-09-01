@@ -85,12 +85,25 @@ describe("ProjectLaunchCommandResolver", () => {
     expect(() => new ProjectLaunchCommandResolver().resolve(directory, 4200)).toThrow("ng serve");
   });
 
-  it("does not treat an Angular CLI dependency without angular.json as an Angular workspace", () => {
+  it("preserves stable port forwarding when Angular CLI is hoisted without root angular.json", () => {
     const directory = fixture({
       scripts: { dev: "node server.js" },
       devDependencies: { "@angular/cli": "22.1.4" },
     });
-    expect(new ProjectLaunchCommandResolver().resolve(directory, 4200).args).toEqual(["run", "dev"]);
+    expect(new ProjectLaunchCommandResolver().resolve(directory, 4200).args).toEqual([
+      "run", "dev", "--", "--port", "4200",
+    ]);
+  });
+
+  it("keeps wrapped Angular dev scripts working with the previous port fallback", () => {
+    const directory = fixture({
+      packageManager: "pnpm@11.22.0",
+      scripts: { dev: "concurrently \"ng serve\" \"json-server db.json\"" },
+      devDependencies: { "@angular/cli": "22.1.4" },
+    }, undefined, true);
+    expect(new ProjectLaunchCommandResolver().resolve(directory, 4202).args).toEqual([
+      "run", "dev", "--port", "4202",
+    ]);
   });
 
   it("detects a package manager from its lockfile", () => {

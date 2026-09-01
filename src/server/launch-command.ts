@@ -30,7 +30,7 @@ type PackageJson = {
 };
 
 const PACKAGE_MANAGERS = ["pnpm", "npm", "yarn", "bun"] as const;
-const PORT_ARGUMENT_PACKAGES = ["vite", "astro", "nuxt"];
+const PORT_ARGUMENT_PACKAGES = ["vite", "astro", "nuxt", "@angular/cli"];
 
 function isPackageManager(value: string): value is LaunchCommand["executable"] {
   return PACKAGE_MANAGERS.some((manager) => manager === value);
@@ -163,11 +163,10 @@ export class ProjectLaunchCommandResolver implements LaunchCommandResolver {
       throw new Error("Nie udało się odczytać package.json. Sprawdź, czy plik zawiera prawidłowy JSON.");
     }
     const isAngular = angularWorkspace(worktreePath, packageJson);
-    const scriptName = isAngular
-      ? angularServeScript(packageJson.scripts?.dev) ? "dev"
-        : angularServeScript(packageJson.scripts?.start) ? "start"
-          : null
-      : typeof packageJson.scripts?.dev === "string" ? "dev" : null;
+    const hasDevScript = typeof packageJson.scripts?.dev === "string";
+    const directAngularDev = isAngular && angularServeScript(packageJson.scripts?.dev);
+    const directAngularStart = isAngular && !hasDevScript && angularServeScript(packageJson.scripts?.start);
+    const scriptName = hasDevScript ? "dev" : directAngularStart ? "start" : null;
     if (!scriptName && isAngular) throw new Error("Projekt Angular nie ma skryptu dev ani start uruchamiającego ng serve.");
     if (!scriptName) throw new Error("Projekt nie ma skryptu dev w package.json.");
 
@@ -175,7 +174,7 @@ export class ProjectLaunchCommandResolver implements LaunchCommandResolver {
     const passPortAsArgument = isAngular || usesPortArgument(packageJson);
     const tls = resolveTls(packageJson, tlsInput);
     const devArgs = [
-      ...(isAngular ? ["--host", "127.0.0.1", "--port", String(port)]
+      ...(directAngularDev || directAngularStart ? ["--host", "127.0.0.1", "--port", String(port)]
         : passPortAsArgument ? ["--port", String(port)] : []),
       ...tlsArgs(tls),
     ];
