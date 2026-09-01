@@ -87,6 +87,29 @@ function fixture(count = 3, onStart: (project: Project) => Promise<void> = async
 }
 
 describe("ControlService server capacity", () => {
+  it("stops an owned process before removing its project", async () => {
+    const { service, store, projects, stop } = fixture(1);
+    const removed = await service.removeProject(projects[0].id);
+    expect(removed.id).toBe(projects[0].id);
+    expect(stop).toHaveBeenCalledWith(projects[0].id);
+    expect(store.getProject(projects[0].id)).toBeNull();
+    store.close();
+  });
+
+  it("does not remove a project reserved by another owner", async () => {
+    const { service, store, projects, stop } = fixture(1);
+    store.acquireReservation({
+      projectId: projects[0].id,
+      worktreePath: projects[0].repositoryPath,
+      kind: "human",
+      owner: "another-user",
+    });
+    await expect(service.removeProject(projects[0].id)).rejects.toThrow("another-user");
+    expect(stop).not.toHaveBeenCalled();
+    expect(store.getProject(projects[0].id)).not.toBeNull();
+    store.close();
+  });
+
   it("rejects a third server at capacity two and keeps existing servers when the limit is lowered", async () => {
     const { service, store, projects, start } = fixture();
     service.setServerCapacity({ enabled: true, limit: 2 });

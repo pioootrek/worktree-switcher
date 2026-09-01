@@ -25,6 +25,26 @@ afterEach(() => {
 });
 
 describe("SqliteStateStore", () => {
+  it("removes a project, releases its port, and preserves a controller audit event", () => {
+    const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-store-remove-"));
+    directories.push(directory);
+    const databasePath = join(directory, "state.sqlite3");
+    const store = new SqliteStateStore(databasePath);
+    const project = store.addProject(projectInput("Old App", "/code/old-app", 3210));
+
+    store.removeProject(project.id, "local-user");
+    expect(store.getProject(project.id)).toBeNull();
+    expect(() => store.removeProject(project.id, "local-user")).toThrow("Nie znaleziono projektu");
+    expect(store.addProject(projectInput("New App", "/code/new-app", 3210)).port).toBe(3210);
+
+    const database = new Database(databasePath);
+    const event = database.prepare("SELECT actor, details_json FROM controller_audit_events WHERE event_type = 'project.removed'").get() as { actor: string; details_json: string };
+    expect(event.actor).toBe("local-user");
+    expect(JSON.parse(event.details_json)).toMatchObject({ projectId: project.id, name: "Old App", port: 3210 });
+    database.close();
+    store.close();
+  });
+
   it("allows only one active reservation per project and permits release by its owner", () => {
     const store = createStore();
     const project = store.addProject(projectInput("App", "/code/app", 3210));

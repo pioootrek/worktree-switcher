@@ -278,6 +278,13 @@ export function createControllerServer(options: {
           json(response, 201, { project });
           return;
         }
+        const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
+        if (request.method === "DELETE" && projectMatch) {
+          const project = await options.service.removeProject(decodeURIComponent(projectMatch[1]));
+          options.events.publish();
+          json(response, 200, { project });
+          return;
+        }
         if (request.method === "POST" && url.pathname === "/api/settings/capacity") {
           const capacity = options.service.setServerCapacity(parseCapacitySettings(await readJson(request)));
           options.events.publish();

@@ -12,6 +12,13 @@ export interface ControllerLock {
   release(): void;
 }
 
+export class ControllerAlreadyRunningError extends Error {
+  constructor(readonly pid: number) {
+    super(`Worktree Switcher is already running (PID ${pid}). Stop it before starting another controller.`);
+    this.name = "ControllerAlreadyRunningError";
+  }
+}
+
 export function acquireControllerLock(path: string): ControllerLock {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const record: LockRecord = {
@@ -45,7 +52,7 @@ export function acquireControllerLock(path: string): ControllerLock {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       const current = readLock(path);
       if (current && processExists(current.pid)) {
-        throw new Error(`Worktree Switcher is already running (PID ${current.pid}). Stop it before starting another controller.`);
+        throw new ControllerAlreadyRunningError(current.pid);
       }
       try {
         unlinkSync(path);

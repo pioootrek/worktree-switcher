@@ -21,6 +21,7 @@ async function fixture() {
   const capacity = { enabled: true, limit: 2, used: 0, available: 2, holders: [] };
   const dashboard = vi.fn(async () => ({ projects: [], capacity }));
   const addProject = vi.fn(async () => undefined);
+  const removeProject = vi.fn(async () => ({ id: "project-1", name: "App" }));
   const setProjectTls = vi.fn(async () => undefined);
   const setProjectEnvironment = vi.fn(() => ({ id: "project-1" }));
   const saveEnvironmentProfile = vi.fn(async () => ({ id: "project-1" }));
@@ -37,7 +38,7 @@ async function fixture() {
     directories: [{ name: "code", path: "/home/test/code" }],
     files: [],
   }));
-  const service = { addProject, dashboard, deleteEnvironmentProfile, deleteWorktreeCache, refreshWorktreeStorage, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity } as unknown as ControlService;
+  const service = { addProject, dashboard, deleteEnvironmentProfile, deleteWorktreeCache, refreshWorktreeStorage, removeProject, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity } as unknown as ControlService;
   const controller = createControllerServer({
     service,
     directoryBrowser: { list: listDirectories } as unknown as DirectoryBrowser,
@@ -61,7 +62,7 @@ async function fixture() {
     controller.server.listen(0, "127.0.0.1", resolve);
   });
   const address = controller.server.address() as AddressInfo;
-  return { addProject, base: `http://127.0.0.1:${address.port}`, dashboard, deleteEnvironmentProfile, deleteWorktreeCache, listDirectories, refreshWorktreeStorage, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity };
+  return { addProject, base: `http://127.0.0.1:${address.port}`, dashboard, deleteEnvironmentProfile, deleteWorktreeCache, listDirectories, refreshWorktreeStorage, removeProject, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity };
 }
 
 afterEach(async () => {
@@ -143,6 +144,17 @@ describe("controller access boundary", () => {
     });
     expect(response.status).toBe(201);
     expect(addProject).toHaveBeenCalledWith({ name: "API", repositoryPath: "/tmp/api", port: 8000, launchPreset: "django" });
+  });
+
+  it("removes a project through the authenticated controller API", async () => {
+    const { base, removeProject } = await fixture();
+    const response = await fetch(`${base}/api/projects/project-1`, {
+      method: "DELETE",
+      headers: { "X-Worktree-Switcher-Token": "test-access-token" },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ project: { id: "project-1", name: "App" } });
+    expect(removeProject).toHaveBeenCalledWith("project-1");
   });
 
   it("serves authenticated directory listings through the browser service", async () => {

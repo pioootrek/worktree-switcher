@@ -117,6 +117,26 @@ export class ControlService {
     return this.requireProject(project.id);
   }
 
+  async removeProject(projectId: string, actor: OperationActor = { owner: "local-user" }): Promise<Project> {
+    return this.serialized(projectId, async () => {
+      const project = this.requireProject(projectId);
+      this.assertReservationAllows(
+        projectId,
+        this.processes.snapshot(projectId).worktreePath ?? project.selectedWorktreePath,
+        actor,
+      );
+      await this.processes.stop(projectId);
+      this.store.removeProject(projectId, actor.owner);
+      this.logs.controller("project.removed", {
+        projectId: project.id,
+        repositoryPath: project.repositoryPath,
+        port: project.port,
+        actor: actor.owner,
+      });
+      return project;
+    });
+  }
+
   async operate(
     projectId: string,
     operation: "start" | "stop" | "restart" | "switch",

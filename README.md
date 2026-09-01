@@ -332,6 +332,10 @@ Other commands:
 ```text
 worktree-switcher config path
 worktree-switcher config mcp
+worktree-switcher project add <path> [--name <name>] [--port <port>] [--preset auto|node|django]
+worktree-switcher project list [--json]
+worktree-switcher project remove <id>
+worktree-switcher doctor
 worktree-switcher service install [start options] [--refresh]
 worktree-switcher service status
 worktree-switcher service start
@@ -342,8 +346,12 @@ worktree-switcher service url
 worktree-switcher service uninstall
 ```
 
-Project registration is currently available in the dashboard. Project removal,
-CLI project management, and `doctor` are planned but not implemented.
+When `--port` is omitted, `project add` selects the first available port from
+3000 through 3999. Project commands use the authenticated controller API while
+the user service is running. With no controller, they acquire the singleton
+lock and use the same control services directly; they never write concurrently
+to an owned database. `doctor` verifies Node.js, Git, application state, and
+worktree discovery without requiring a browser.
 
 ## Data and logs
 

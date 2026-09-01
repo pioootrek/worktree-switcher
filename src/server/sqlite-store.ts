@@ -223,6 +223,25 @@ export class SqliteStateStore implements StateStore {
     return this.getProject(id)!;
   }
 
+  removeProject(projectId: string, actor: string): void {
+    const project = this.getProject(projectId);
+    if (!project) throw new Error("Nie znaleziono projektu.");
+    const now = new Date().toISOString();
+    this.database.transaction(() => {
+      this.database.prepare(`
+        INSERT INTO controller_audit_events(event_type, actor, details_json, created_at)
+        VALUES ('project.removed', ?, ?, ?)
+      `).run(actor, JSON.stringify({
+        projectId: project.id,
+        name: project.name,
+        repositoryPath: project.repositoryPath,
+        port: project.port,
+      }), now);
+      const result = this.database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+      if (result.changes === 0) throw new Error("Nie znaleziono projektu.");
+    })();
+  }
+
   updateProjectLaunch(projectId: string, input: {
     tlsMode: "off" | "generated" | "custom";
     tlsKeyPath: string | null;
