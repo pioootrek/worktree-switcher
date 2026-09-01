@@ -1,6 +1,6 @@
 ---
 audience: "contributors and coding agents"
-last_reviewed: "2026-08-31"
+last_reviewed: "2026-09-01"
 source_of_truth: "product intent and initial architecture of Worktree Switcher"
 status: "active"
 ---
@@ -99,11 +99,14 @@ processes.
 
 Registration offers automatic, Node.js, and Django launch presets. For Node.js
 projects, it detects `pnpm`, `npm`, `yarn`, or `bun` from
-`packageManager` and lockfiles. It requires a `dev` script. The launch resolver
-chooses how to pass the stable port instead of appending one universal argument
-sequence: Next.js and unknown Node servers receive `PORT`, while Vite, Astro,
-Nuxt, and Angular receive their supported `--port` argument through the package
-manager's forwarding syntax. Django projects are detected through a root-level
+`packageManager` and lockfiles. It requires a `dev` script, except that an
+Angular workspace identified by `angular.json` and `@angular/cli` may use the
+standard `start: ng serve` script. The launch resolver chooses how to pass the
+stable port instead of appending one universal argument sequence: Next.js and
+unknown Node servers receive `PORT`, while Vite, Astro, and Nuxt receive their
+supported `--port` argument through the package manager's forwarding syntax.
+Angular receives explicit loopback `--host` and stable `--port` arguments
+through either its `dev` or `start` script. Django projects are detected through a root-level
 `manage.py` and run on loopback with `.venv/bin/python`, `venv/bin/python`, or a
 `python3` fallback. The command is resolved again for the selected worktree
 before every start, so local virtual environments can differ between worktrees.

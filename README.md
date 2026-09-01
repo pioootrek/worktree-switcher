@@ -153,12 +153,15 @@ command.
 
 When you add a repository, Worktree Switcher detects Node.js from `package.json`
 or Django from a root-level `manage.py`. You can also select the preset
-explicitly. Node.js projects must have a `dev` script.
+explicitly. Node.js projects must have a `dev` script. Angular workspaces are
+detected from `angular.json` plus `@angular/cli`; they may use either
+`dev: ng serve` or the standard `start: ng serve` script.
 
 | Project type | How the port is passed |
 | --- | --- |
 | Next.js | `PORT` environment variable |
-| Vite, Astro, Nuxt, Angular | Framework-specific `--port` argument |
+| Vite, Astro, Nuxt | Framework-specific `--port` argument |
+| Angular | `ng serve --host 127.0.0.1 --port {port}` through `dev` or `start` |
 | Other Node.js servers | `PORT` environment variable |
 | Django | `manage.py runserver 127.0.0.1:{port}` |
 

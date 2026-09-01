@@ -8,11 +8,12 @@ import { ProjectLaunchCommandResolver } from "./launch-command";
 
 const directories: string[] = [];
 
-function fixture(packageJson: object, lockfile?: string): string {
+function fixture(packageJson: object, lockfile?: string, angular = false): string {
   const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-command-"));
   directories.push(directory);
   writeFileSync(join(directory, "package.json"), JSON.stringify(packageJson));
   if (lockfile) writeFileSync(join(directory, lockfile), "");
+  if (angular) writeFileSync(join(directory, "angular.json"), JSON.stringify({ version: 1, projects: {} }));
   return directory;
 }
 
@@ -47,6 +48,62 @@ describe("ProjectLaunchCommandResolver", () => {
       portMethod: "argument",
       tls: { mode: "off", keyPath: null, certPath: null, caPath: null },
     });
+  });
+
+  it("runs a standard Angular start script with an explicit loopback host and stable port", () => {
+    const directory = fixture({
+      scripts: { start: "ng serve" },
+      devDependencies: { "@angular/cli": "22.1.4" },
+    }, "package-lock.json", true);
+
+    expect(new ProjectLaunchCommandResolver().resolve(directory, 4201)).toEqual({
+      preset: "node",
+      executable: "npm",
+      args: ["run", "start", "--", "--host", "127.0.0.1", "--port", "4201"],
+      portMethod: "argument",
+      tls: { mode: "off", keyPath: null, certPath: null, caPath: null },
+    });
+  });
+
+  it("prefers an Angular dev script and forwards flags directly with pnpm", () => {
+    const directory = fixture({
+      packageManager: "pnpm@11.22.0",
+      scripts: { dev: "ng serve", start: "ng serve --configuration production" },
+      devDependencies: { "@angular/cli": "22.1.4" },
+    }, "pnpm-lock.yaml", true);
+
+    expect(new ProjectLaunchCommandResolver().resolve(directory, 4300).args).toEqual([
+      "run", "dev", "--host", "127.0.0.1", "--port", "4300",
+    ]);
+  });
+
+  it("rejects an Angular workspace without an ng serve script", () => {
+    const directory = fixture({
+      scripts: { start: "node server.js" },
+      devDependencies: { "@angular/cli": "22.1.4" },
+    }, undefined, true);
+    expect(() => new ProjectLaunchCommandResolver().resolve(directory, 4200)).toThrow("ng serve");
+  });
+
+  it("preserves stable port forwarding when Angular CLI is hoisted without root angular.json", () => {
+    const directory = fixture({
+      scripts: { dev: "node server.js" },
+      devDependencies: { "@angular/cli": "22.1.4" },
+    });
+    expect(new ProjectLaunchCommandResolver().resolve(directory, 4200).args).toEqual([
+      "run", "dev", "--", "--port", "4200",
+    ]);
+  });
+
+  it("keeps wrapped Angular dev scripts working with the previous port fallback", () => {
+    const directory = fixture({
+      packageManager: "pnpm@11.22.0",
+      scripts: { dev: "concurrently \"ng serve\" \"json-server db.json\"" },
+      devDependencies: { "@angular/cli": "22.1.4" },
+    }, undefined, true);
+    expect(new ProjectLaunchCommandResolver().resolve(directory, 4202).args).toEqual([
+      "run", "dev", "--port", "4202",
+    ]);
   });
 
   it("detects a package manager from its lockfile", () => {

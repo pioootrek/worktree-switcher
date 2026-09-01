@@ -24,6 +24,7 @@ const exactEnglish = new Map<string, string>([
   ["Nie znaleziono manage.py w katalogu głównym worktree.", "manage.py was not found at the worktree root."],
   ["Nie udało się odczytać package.json. Sprawdź, czy plik zawiera prawidłowy JSON.", "package.json could not be read. Check that it contains valid JSON."],
   ["Projekt nie ma skryptu dev w package.json.", "The project has no dev script in package.json."],
+  ["Projekt Angular nie ma skryptu dev ani start uruchamiającego ng serve.", "The Angular project has no dev or start script that runs ng serve."],
   ["HTTPS zarządzany przez Switcher jest obecnie obsługiwany tylko dla Next.js.", "Switcher-managed HTTPS currently supports Next.js only."],
   ["Nie można przeglądać katalogów poza dozwolonym katalogiem głównym.", "Directories outside the configured browser root cannot be accessed."],
   ["Brak uprawnień do odczytu tego katalogu.", "You do not have permission to read this directory."],
