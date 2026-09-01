@@ -7,7 +7,7 @@ import type { DashboardResponse, LaunchPreset, Project } from "../shared/contrac
 import { localizeServerMessage } from "../i18n/server-errors";
 import { type Locale, translate } from "../i18n/messages";
 import { ControlService } from "../server/control-service";
-import { acquireControllerLock, type ControllerLock } from "../server/controller-lock";
+import { acquireControllerLock, ControllerAlreadyRunningError, type ControllerLock } from "../server/controller-lock";
 import { SystemGitWorktreeReader } from "../server/git-worktrees";
 import { nullLogWriter } from "../server/log-writer";
 import type { AppPaths } from "../server/paths";
@@ -38,7 +38,7 @@ export async function openProjectGateway(paths: AppPaths, locale: Locale): Promi
   try {
     lock = acquireControllerLock(paths.controllerLockPath);
   } catch (error) {
-    if (error instanceof Error && error.message.includes("already running")) {
+    if (error instanceof ControllerAlreadyRunningError) {
       throw new Error(translate(locale, "cli.project.controllerUnavailable"));
     }
     throw error;
@@ -93,19 +93,22 @@ export async function runProjectCommand(
   if (action === "add") {
     const repositoryPath = positionalArgument(args, 1, ["--name", "--port", "--preset"]);
     if (!repositoryPath) throw new Error(translate(locale, "cli.project.addUsage"));
-    const preset = optionValue(args, "--preset") ?? "auto";
+    const preset = optionValue(args, "--preset", locale) ?? "auto";
     if (preset !== "auto" && preset !== "node" && preset !== "django") {
       throw new Error(translate(locale, "cli.project.invalidPreset"));
     }
     const dashboard = await gateway.dashboard();
-    const requestedPort = optionValue(args, "--port");
+    const requestedPort = optionValue(args, "--port", locale);
+    const configuredPorts = new Map(dashboard.projects.map(({ project }) => [project.port, project.name]));
     let port: number;
     if (requestedPort) {
       port = parseProjectPort(requestedPort, locale);
+      const assignedProject = configuredPorts.get(port);
+      if (assignedProject) throw new Error(translate(locale, "cli.project.portAssigned", { port, name: assignedProject }));
     } else {
       try {
         port = await findAvailablePort(
-          new Set(dashboard.projects.map(({ project }) => project.port)),
+          new Set(configuredPorts.keys()),
           dependencies.isPortAvailable ?? isPortAvailable,
         );
       } catch {
@@ -114,7 +117,7 @@ export async function runProjectCommand(
     }
     const resolvedPath = resolve(repositoryPath);
     const project = await gateway.addProject({
-      name: optionValue(args, "--name") ?? basename(resolvedPath),
+      name: optionValue(args, "--name", locale) ?? basename(resolvedPath),
       repositoryPath: resolvedPath,
       port,
       launchPreset: preset,
@@ -217,12 +220,14 @@ class OfflineProjectGateway implements ProjectGateway {
 class ControllerProjectGateway implements ProjectGateway {
   readonly mode = "controller" as const;
   private readonly token: string;
+  private readonly endpoints: string[];
 
-  constructor(private readonly endpoint: string, accessUrl: string, private readonly locale: Locale) {
+  constructor(endpoint: string, accessUrl: string, private readonly locale: Locale) {
     const parsed = new URL(accessUrl);
     const token = new URLSearchParams(parsed.hash.slice(1)).get("token");
     if (!token) throw new Error(translate(locale, "cli.project.controllerUnavailable"));
     this.token = token;
+    this.endpoints = controllerEndpoints(endpoint);
   }
 
   async dashboard(): Promise<DashboardResponse> {
@@ -242,33 +247,57 @@ class ControllerProjectGateway implements ProjectGateway {
   async close(): Promise<void> {}
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    let response: Response;
-    try {
-      response = await fetch(`${this.endpoint}${path}`, {
-        ...init,
-        headers: {
-          "Accept-Language": this.locale,
-          "Content-Type": "application/json",
-          "X-Worktree-Switcher-Token": this.token,
-          ...init.headers,
-        },
-        signal: AbortSignal.timeout(5_000),
-      });
-    } catch {
-      throw new Error(translate(this.locale, "cli.project.controllerUnavailable"));
+    const failures: string[] = [];
+    for (const endpoint of this.endpoints) {
+      let response: Response;
+      try {
+        response = await fetch(`${endpoint}${path}`, {
+          ...init,
+          headers: {
+            "Accept-Language": this.locale,
+            "Content-Type": "application/json",
+            "X-Worktree-Switcher-Token": this.token,
+            ...init.headers,
+          },
+          signal: AbortSignal.timeout(15_000),
+        });
+      } catch (error) {
+        failures.push(`${endpoint}: ${messageWithCause(error)}`);
+        continue;
+      }
+      let body: { error?: string } & T;
+      try {
+        body = await response.json() as { error?: string } & T;
+      } catch {
+        throw new Error(translate(this.locale, "cli.project.controllerInvalidResponse", {
+          endpoint,
+          status: response.status,
+        }));
+      }
+      if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+      return body;
     }
-    const body = await response.json() as { error?: string } & T;
-    if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
-    return body;
+    throw new Error(translate(this.locale, "cli.project.controllerRequestFailed", {
+      endpoint: this.endpoints.join(", "),
+      error: failures.join("; "),
+    }));
   }
 }
 
-function optionValue(args: string[], name: string): string | undefined {
+function optionValue(args: string[], name: string, locale: Locale): string | undefined {
   const index = args.indexOf(name);
   if (index === -1) return undefined;
   const value = args[index + 1];
-  if (!value || value.startsWith("--")) throw new Error(`Missing value for ${name}.`);
+  if (!value || value.startsWith("--")) throw new Error(translate(locale, "cli.optionMissing", { option: name }));
   return value;
+}
+
+function controllerEndpoints(endpoint: string): string[] {
+  const recorded = new URL(endpoint);
+  recorded.pathname = recorded.pathname.replace(/\/$/, "");
+  const loopback = new URL(recorded);
+  loopback.hostname = "127.0.0.1";
+  return [...new Set([loopback.toString().replace(/\/$/, ""), recorded.toString().replace(/\/$/, "")])];
 }
 
 function positionalArgument(args: string[], targetIndex: number, optionsWithValues: string[]): string | undefined {
@@ -309,4 +338,11 @@ function processExists(pid: number): boolean {
 
 function messageFrom(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function messageWithCause(error: unknown): string {
+  const message = messageFrom(error);
+  if (!(error instanceof Error) || !("cause" in error) || !error.cause) return message;
+  const cause = error.cause as NodeJS.ErrnoException;
+  return `${message}${cause.code ? ` (${cause.code})` : ""}${cause.message ? `: ${cause.message}` : ""}`;
 }

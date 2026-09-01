@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { acquireControllerLock } from "../server/controller-lock";
 import { resolveAppPaths } from "../server/paths";
 import { findAvailablePort, openProjectGateway, runDoctorCommand, runProjectCommand } from "./project-management";
 import { writeServiceAccess } from "./service-access";
@@ -60,6 +61,8 @@ describe("project management CLI", () => {
       expect(JSON.parse(output.at(-1)!)).toMatchObject([{ port: 3001, runtimePhase: "stopped" }]);
 
       const projectId = dashboard.projects[0].project.id;
+      await expect(runProjectCommand(["add", createNodeRepository(), "--port", "3001"], gateway, "en"))
+        .rejects.toThrow(`Port 3001 is already assigned to project ${dashboard.projects[0].project.name}.`);
       await runProjectCommand(["remove", projectId], gateway, "en", { write: (line) => output.push(line) });
       expect((await gateway.dashboard()).projects).toEqual([]);
       expect(output.at(-1)).toContain("Removed project");
@@ -78,6 +81,8 @@ describe("project management CLI", () => {
         .rejects.toThrow("repozytorium Git");
       await expect(runProjectCommand(["add", createNodeRepository(false), "--port", "3101"], gateway, "en"))
         .rejects.toThrow("skryptu dev");
+      await expect(runProjectCommand(["add", plainDirectory, "--port"], gateway, "pl"))
+        .rejects.toThrow("Brak wartości opcji --port.");
       expect((await gateway.dashboard()).projects).toEqual([]);
     } finally {
       await gateway.close();
@@ -116,14 +121,15 @@ describe("project management CLI", () => {
       server.once("error", reject);
       server.listen(0, "127.0.0.1", resolve);
     });
-    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const localEndpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const recordedEndpoint = `http://192.0.2.1:${(server.address() as AddressInfo).port}`;
     writeServiceAccess(paths.serviceAccessPath, {
       pid: process.pid,
       startedAt: new Date().toISOString(),
       version: "0.0.1",
-      dashboardEndpoint: endpoint,
+      dashboardEndpoint: recordedEndpoint,
       mcpEndpoint: null,
-      accessUrl: `${endpoint}/#token=controller-token`,
+      accessUrl: `${localEndpoint}/#token=controller-token`,
       logDirectory: paths.logDirectory,
     });
 
@@ -139,6 +145,50 @@ describe("project management CLI", () => {
     } finally {
       await gateway.close();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("reports controller transport failures separately from invalid access records", async () => {
+    const dataDirectory = temporaryDirectory("worktree-switcher-cli-transport-data-");
+    const stateDirectory = temporaryDirectory("worktree-switcher-cli-transport-state-");
+    const paths = resolveAppPaths(dataDirectory, stateDirectory);
+    const server = createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    writeServiceAccess(paths.serviceAccessPath, {
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      version: "0.0.1",
+      dashboardEndpoint: endpoint,
+      mcpEndpoint: null,
+      accessUrl: `${endpoint}/#token=controller-token`,
+      logDirectory: paths.logDirectory,
+    });
+
+    const gateway = await openProjectGateway(paths, "en");
+    try {
+      const failure = await gateway.dashboard().then(() => null, (error: Error) => error);
+      expect(failure?.message).toContain(`Could not connect to the controller at ${endpoint}`);
+      expect(failure?.message).toContain("ECONNREFUSED");
+      expect(failure?.message).not.toContain("access record");
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("refuses offline database access through a typed live-controller lock", async () => {
+    const dataDirectory = temporaryDirectory("worktree-switcher-cli-lock-data-");
+    const stateDirectory = temporaryDirectory("worktree-switcher-cli-lock-state-");
+    const paths = resolveAppPaths(dataDirectory, stateDirectory);
+    const lock = acquireControllerLock(paths.controllerLockPath);
+    try {
+      await expect(openProjectGateway(paths, "pl")).rejects.toThrow("brakuje prawidłowego rekordu dostępu");
+    } finally {
+      lock.release();
     }
   });
 
