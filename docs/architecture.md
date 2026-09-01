@@ -254,13 +254,19 @@ supports:
 worktree-switcher [start] [--no-open]
 worktree-switcher config path
 worktree-switcher config mcp
+worktree-switcher project add <path> [--name <name>] [--port <port>] [--preset auto|node|django]
+worktree-switcher project list [--json]
+worktree-switcher project remove <id>
+worktree-switcher doctor
 worktree-switcher service install [--refresh]
 worktree-switcher service status|start|stop|restart|open|url|uninstall
 ```
 
-Project registration still belongs to the dashboard. Project removal, CLI
-project management, and `doctor` are backlog items, not part of the current
-interface.
+Project mutations share `ControlService` with HTTP and MCP. When the user
+service is running, the CLI uses its owner-only access record and authenticated
+HTTP API. When no controller owns the state, the CLI acquires the same
+singleton lock before opening SQLite. A foreground controller without a safe
+access record causes a clear refusal instead of concurrent database access.
 
 Until the package is published, source-checkout commands use the built entry
 point:

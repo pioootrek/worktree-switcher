@@ -2,16 +2,6 @@
   "generated_by": "hub.py fmt",
   "items": [
     {
-      "area": "distribution",
-      "id": "FEAT-20260829-cli-project-management",
-      "path": "feature/FEAT-20260829-cli-project-management.json",
-      "priority": "now",
-      "risk_level": "low",
-      "status": "open",
-      "title": "Manage projects from the CLI",
-      "type": "feature"
-    },
-    {
       "area": "core",
       "id": "FEAT-20260829-dev-server-capacity",
       "path": "feature/FEAT-20260829-dev-server-capacity.json",

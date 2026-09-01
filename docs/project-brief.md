@@ -144,11 +144,12 @@ process tree it started. It never terminates an unknown process merely because
 that process occupies a configured port. Leaving managed servers running after
 controller exit is not part of the MVP.
 
-Implemented supporting commands cover `config path`, `config mcp`, and the
+Implemented supporting commands cover `config path`, `config mcp`,
+`project add|list|remove`, `doctor`, and the
 `service install|status|start|stop|restart|open|url|uninstall` lifecycle.
-`project add`, `project list`, project removal, and `doctor` remain planned CLI
-work. Standalone platform binaries remain deferred until real usage justifies
-their maintenance.
+Project commands delegate to an authenticated running user service or acquire
+the controller singleton lock for offline access. Standalone platform binaries
+remain deferred until real usage justifies their maintenance.
 
 ## Interface system
 

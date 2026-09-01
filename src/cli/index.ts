@@ -8,9 +8,11 @@ import { fileURLToPath } from "node:url";
 import packageJson from "../../package.json";
 import type { ControllerDashboardResponse } from "../shared/contracts";
 import { systemLocale, translate } from "../i18n/messages";
+import { localizeServerMessage } from "../i18n/server-errors";
 import { openBrowser } from "./browser";
 import { writeCliLine } from "./output";
 import { pairingUrl } from "./pairing-url";
+import { openProjectGateway, runDoctorCommand, runProjectCommand } from "./project-management";
 import { readServiceAccess, removeServiceAccess, writeServiceAccess } from "./service-access";
 import { UserServiceManager } from "./service-manager";
 import { ControlService } from "../server/control-service";
@@ -49,6 +51,22 @@ async function main(): Promise<void> {
   }
   if (command === "config" && process.argv[3] === "path") {
     writeCliLine(paths.databasePath);
+    return;
+  }
+  if (command === "project" || command === "doctor") {
+    const gateway = await openProjectGateway(paths, locale);
+    try {
+      if (command === "project") {
+        await runProjectCommand(process.argv.slice(3), gateway, locale, { write: writeCliLine });
+      } else if (!await runDoctorCommand(gateway, locale, writeCliLine)) {
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(localizeServerMessage(message, locale));
+    } finally {
+      await gateway.close();
+    }
     return;
   }
   const mcpPort = Number(option("--mcp-port") ?? 47832);

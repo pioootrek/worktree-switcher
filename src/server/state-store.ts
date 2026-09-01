@@ -43,6 +43,7 @@ export interface StateStore {
   listProjects(): Project[];
   getProject(id: string): Project | null;
   addProject(input: ProjectRegistration): Project;
+  removeProject(projectId: string, actor: string): void;
   updateProjectLaunch(projectId: string, input: ProjectLaunchUpdate): void;
   updateProjectEnvironment(projectId: string, environment: Record<string, string>, actor: string): void;
   saveProjectEnvironmentProfile(projectId: string, profile: EnvironmentProfile, actor: string): void;
