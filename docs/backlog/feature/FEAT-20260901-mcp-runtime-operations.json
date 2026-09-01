@@ -1,0 +1,56 @@
+{
+  "area": "core",
+  "created": "2026-09-01",
+  "id": "FEAT-20260901-mcp-runtime-operations",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-dev-server-capacity",
+      "FEAT-20260829-multi-project-worktree-switching",
+      "FEAT-20260829-scoped-mcp-agent-tokens"
+    ]
+  },
+  "notes": [
+    {
+      "author": "user",
+      "date": "2026-09-01",
+      "text": "Expose explicit MCP operations for starting, restarting, and stopping a managed development server."
+    }
+  ],
+  "priority": "next",
+  "problem": [
+    "MCP can currently start or switch a server only as a side effect of claim_project. Repeating a claim for an already running server is a no-op, and release_project_claim intentionally leaves the server running, so an agent cannot explicitly restart or stop the runtime it owns."
+  ],
+  "risk": {
+    "dimensions": [
+      "availability",
+      "process",
+      "auth-rbac"
+    ],
+    "level": "medium",
+    "rollback": "Remove the explicit MCP runtime tools while retaining the existing read, claim, renew, and release contract. Existing claims and managed processes must remain unchanged."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Add start_project, restart_project, and stop_project MCP tools over the existing serialized ControlService runtime operations; do not expose arbitrary commands, ports, or filesystem paths.",
+    "Require the calling MCP session to hold the active agent claim for the target project. Resolve the lease token only from private session state and reject unclaimed projects, another owner's claim, stale claims, and mismatched project or reservation identifiers.",
+    "Start and restart only the worktree pinned by the active claim. Starting an already running claimed worktree is idempotent; restarting performs a controlled stop and start even when placement is unchanged; stopping leaves the claim held and releases its server-capacity slot.",
+    "Apply the existing global server-capacity gate to starts and restarts, preserve the slot across a successful restart, and release it exactly once after a failed start or confirmed stop.",
+    "Return the resulting runtime snapshot and explicit operation error without exposing MCP credentials, lease secrets, session identifiers, command arrays, or unbounded logs. Attribute every operation and failure to the MCP agent identity in the audit and controller logs.",
+    "Update the packaged Worktree Switcher skill so agents inspect status before acting, use explicit restart or stop only when the task authorizes disruption, verify placement and phase afterward, and understand that releasing a claim still does not stop the server."
+  ],
+  "source": "Product discussion on 2026-09-01",
+  "status": "open",
+  "title": "Control managed server runtime through MCP",
+  "type": "feature",
+  "validation": [
+    "Claim a stopped project and verify start_project starts only the claimed worktree; repeat start_project and verify it is idempotent without spawning a second process.",
+    "Restart a running claimed project and verify exactly one controlled stop/start cycle, stable port and worktree placement, retained claim ownership, and no transient second capacity slot.",
+    "Stop a running claimed project and verify its complete owned process tree exits, its capacity slot is released, the claim remains active, and release_project_claim still does not affect runtime state.",
+    "Verify every runtime tool rejects a project without this session's active claim, another owner's reservation, a stale or mismatched reservation, malformed identifiers, and attempts to target an arbitrary worktree or command.",
+    "Run concurrent MCP and HTTP operations for one project and verify existing per-project serialization, reservation authorization, capacity accounting, audit attribution, and failure isolation remain correct.",
+    "Verify MCP responses, errors, audit records, and logs never expose bearer tokens, lease secrets, session identifiers, or secret environment values."
+  ],
+  "value": [
+    "An agent that owns a project can deliberately recover, restart, or shut down its managed development server without bypassing Worktree Switcher or disturbing another owner."
+  ]
+}
