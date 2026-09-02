@@ -77,6 +77,7 @@ describe("TestJobManager", () => {
   it("cancels queued and running jobs and restricts agent cancellation to the author", async () => {
     const { store, project, manager, worktree, command } = fixture();
     const longRunning = command(2_000);
+    longRunning.preset.timeoutMs = 30_000;
     longRunning.args = ["-e", "console.log('ready'); setInterval(() => {}, 1000)"];
     const running = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: longRunning, environment: {}, actor: "agent:mcp:one" });
     const queued = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/b"), command: command(20), environment: {}, actor: "agent:mcp:one" });
