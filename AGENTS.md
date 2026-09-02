@@ -14,6 +14,20 @@ a stable configured port.
 Read `docs/project-brief.md` before making product or architecture decisions.
 Keep the control plane independent from every repository it supervises.
 
+## Managed verification
+
+When a registered project exposes a finite verification preset through the
+Worktree Switcher MCP, agents must use `list_test_presets` and queue it with
+`run_test` for the exact path returned by `list_worktrees`. Reuse the same
+idempotency key when retrying one request, poll `get_test_run` to a terminal
+state, and do not bypass the queue by launching the same command directly.
+
+Queued verification does not claim, start, or switch a development server. An
+end-to-end test that needs that server must acquire a separate project claim
+and target the same worktree. If the test-queue tools are unavailable, use the
+repository's supported finite command and continue to respect host resource
+limits.
+
 ## Backlog
 
 This project keeps its backlog and durable agent memory as canonical JSON under
