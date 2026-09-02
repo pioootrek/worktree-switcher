@@ -27,6 +27,8 @@ export interface ProjectLaunchUpdate {
   args: string[];
 }
 
+export type PendingTestRun = Pick<TestRun, "id" | "projectId" | "worktreePath" | "phase" | "queuePosition" | "queuedAt">;
+
 export interface ReservationRequest {
   projectId: string;
   worktreePath: string;
@@ -54,6 +56,8 @@ export interface StateStore {
   setServerCapacitySettings(settings: ServerCapacitySettings): void;
   getTestQueueSettings(): TestQueueSettings;
   setTestQueueSettings(settings: TestQueueSettings): void;
+  countTestRuns(phases: TestRun["phase"][], projectId?: string, worktreePath?: string): number;
+  listPendingTestRuns(): PendingTestRun[];
   listTestRuns(projectId?: string, limit?: number): TestRun[];
   getTestRun(id: string): TestRun | null;
   findTestRunByIdempotency(actor: string, idempotencyKey: string): TestRun | null;

@@ -9,11 +9,13 @@ import type { TestCommand } from "./test-command";
 const MAX_LOG_LINES = 200;
 const MAX_LOG_LINE_LENGTH = 2_000;
 const MAX_QUEUED_RUNS = 100;
+const LOG_PERSISTENCE_INTERVAL_MS = 250;
 
 interface ActiveRun {
   child: ChildProcess;
   run: TestRun;
   timeout: NodeJS.Timeout;
+  cancellationRequested: boolean;
   timedOut: boolean;
   worktreePath: string;
 }
@@ -32,6 +34,7 @@ export class TestJobManager {
   private pumping = false;
   private closed = false;
   private outputNotification: NodeJS.Timeout | null = null;
+  private readonly logPersistence = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly store: StateStore,
@@ -43,11 +46,10 @@ export class TestJobManager {
 
   status(): TestQueueStatus {
     const settings = this.store.getTestQueueSettings();
-    const runs = this.store.listTestRuns(undefined, 500);
     return {
       ...settings,
       running: this.active.size,
-      queued: runs.filter(({ phase }) => phase === "queued").length,
+      queued: this.store.countTestRuns(["queued"]),
     };
   }
 
@@ -71,7 +73,7 @@ export class TestJobManager {
         return repeated;
       }
     }
-    if (this.store.listTestRuns(undefined, 500).filter(({ phase }) => phase === "queued").length >= MAX_QUEUED_RUNS) {
+    if (this.store.countTestRuns(["queued"]) >= MAX_QUEUED_RUNS) {
       throw new Error(`Kolejka testów może zawierać najwyżej ${MAX_QUEUED_RUNS} oczekujących zadań.`);
     }
     const run: TestRun = {
@@ -102,6 +104,7 @@ export class TestJobManager {
     this.environments.set(run.id, input.environment);
     this.timeouts.set(run.id, input.command.preset.timeoutMs);
     this.write(run, `$ ${run.executable} ${run.args.join(" ")}`);
+    this.persistNow(run);
     this.pump();
     this.onChange();
     return this.requireRun(run.id);
@@ -115,16 +118,14 @@ export class TestJobManager {
     if (run.phase === "queued") {
       run.phase = "cancelled";
       run.finishedAt = new Date().toISOString();
-      this.store.saveTestRun(run);
+      this.persistNow(run);
       this.cleanup(run.id);
       this.pump();
       this.onChange();
       return run;
     }
     if (!active || run.phase !== "running") return run;
-    run.phase = "cancelled";
-    run.finishedAt = new Date().toISOString();
-    this.store.saveTestRun(run);
+    active.cancellationRequested = true;
     this.signal(active.child, "SIGTERM");
     setTimeout(() => {
       if (this.active.has(run.id)) this.signal(active.child, "SIGKILL");
@@ -137,12 +138,10 @@ export class TestJobManager {
     this.closed = true;
     if (this.outputNotification) clearTimeout(this.outputNotification);
     this.outputNotification = null;
-    const unfinished = this.store.listTestRuns(undefined, 500)
-      .filter(({ phase }) => phase === "queued" || phase === "running");
+    const unfinished = this.store.listPendingTestRuns();
     for (const run of unfinished) this.cancel(run.id, "local-user");
     await Promise.all([...this.active.values()].map(({ child }) => new Promise<void>((resolve) => {
-      if (child.exitCode !== null || child.signalCode !== null) return resolve();
-      child.once("exit", () => resolve());
+      child.once("close", () => resolve());
       setTimeout(resolve, 4_500).unref();
     })));
   }
@@ -157,7 +156,7 @@ export class TestJobManager {
       try {
         if (this.closed) return;
         const limit = this.store.getTestQueueSettings().limit;
-        const queued = this.store.listTestRuns(undefined, 500)
+        const queued = this.store.listPendingTestRuns()
           .filter(({ phase }) => phase === "queued")
           .sort((left, right) => left.queuedAt.localeCompare(right.queuedAt));
         const occupiedWorktrees = new Set([...this.active.values()].map(({ worktreePath }) => worktreePath));
@@ -166,7 +165,7 @@ export class TestJobManager {
           if (!next) break;
           queued.splice(queued.indexOf(next), 1);
           occupiedWorktrees.add(next.worktreePath);
-          this.start(next);
+          this.start(this.requireRun(next.id));
         }
         this.updateQueuePositions();
       } finally {
@@ -206,7 +205,7 @@ export class TestJobManager {
       }, 3_500).unref();
     }, this.timeouts.get(run.id) ?? 15 * 60_000);
     timeout.unref();
-    this.active.set(run.id, { child, run, timeout, timedOut: false, worktreePath: run.worktreePath });
+    this.active.set(run.id, { child, run, timeout, cancellationRequested: false, timedOut: false, worktreePath: run.worktreePath });
     child.stdout?.on("data", (chunk: Buffer) => this.appendChunk(run, chunk));
     child.stderr?.on("data", (chunk: Buffer) => this.appendChunk(run, chunk));
     child.once("error", (error) => {
@@ -216,13 +215,13 @@ export class TestJobManager {
       run.finishedAt = new Date().toISOString();
       this.finish(run);
     });
-    child.once("exit", (code, signal) => {
+    child.once("close", (code, signal) => {
       if (!this.active.has(run.id)) return;
       const active = this.active.get(run.id)!;
       run.exitCode = code;
       run.signal = signal;
-      run.finishedAt = run.finishedAt ?? new Date().toISOString();
-      if (run.phase !== "cancelled") run.phase = active.timedOut ? "timed_out" : code === 0 ? "passed" : "failed";
+      run.finishedAt = new Date().toISOString();
+      run.phase = active.cancellationRequested ? "cancelled" : active.timedOut ? "timed_out" : code === 0 ? "passed" : "failed";
       if (run.phase === "failed" && !run.error) run.error = `Proces testowy zakończył się z kodem ${code ?? signal ?? "unknown"}.`;
       this.finish(run);
     });
@@ -232,8 +231,8 @@ export class TestJobManager {
   private finish(run: TestRun): void {
     const active = this.active.get(run.id);
     if (active) clearTimeout(active.timeout);
+    this.persistNow(run);
     this.active.delete(run.id);
-    this.store.saveTestRun(run);
     this.cleanup(run.id);
     this.logs.controller("test_run.finished", { runId: run.id, projectId: run.projectId, phase: run.phase, exitCode: run.exitCode });
     this.pump();
@@ -248,24 +247,28 @@ export class TestJobManager {
     const bounded = line.slice(0, MAX_LOG_LINE_LENGTH);
     run.logs.push(bounded);
     if (run.logs.length > MAX_LOG_LINES) run.logs.splice(0, run.logs.length - MAX_LOG_LINES);
-    this.store.saveTestRun(run);
     this.logs.test(run.id, bounded);
+    this.schedulePersistence(run);
     this.notifyOutput();
   }
 
   private updateQueuePositions(): void {
-    const queued = this.store.listTestRuns(undefined, 500)
+    const queued = this.store.listPendingTestRuns()
       .filter(({ phase }) => phase === "queued")
       .sort((left, right) => left.queuedAt.localeCompare(right.queuedAt));
     queued.forEach((run, index) => {
       const position = index + 1;
       if (run.queuePosition === position) return;
-      run.queuePosition = position;
-      this.store.saveTestRun(run);
+      const persisted = this.requireRun(run.id);
+      persisted.queuePosition = position;
+      this.store.saveTestRun(persisted);
     });
   }
 
   private cleanup(runId: string): void {
+    const pendingPersistence = this.logPersistence.get(runId);
+    if (pendingPersistence) clearTimeout(pendingPersistence);
+    this.logPersistence.delete(runId);
     this.environments.delete(runId);
     this.timeouts.delete(runId);
   }
@@ -283,6 +286,23 @@ export class TestJobManager {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
     }
+  }
+
+  private schedulePersistence(run: TestRun): void {
+    if (this.logPersistence.has(run.id)) return;
+    const timeout = setTimeout(() => {
+      this.logPersistence.delete(run.id);
+      this.store.saveTestRun(run);
+    }, LOG_PERSISTENCE_INTERVAL_MS);
+    timeout.unref();
+    this.logPersistence.set(run.id, timeout);
+  }
+
+  private persistNow(run: TestRun): void {
+    const pending = this.logPersistence.get(run.id);
+    if (pending) clearTimeout(pending);
+    this.logPersistence.delete(run.id);
+    this.store.saveTestRun(run);
   }
 
   private notifyOutput(): void {

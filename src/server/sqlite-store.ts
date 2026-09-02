@@ -5,7 +5,7 @@ import { dirname } from "node:path";
 import Database from "better-sqlite3";
 
 import type { LaunchPreset, Project, Reservation, ServerCapacitySettings, TestQueueSettings, TestRun, TestRunPhase, WorktreeStorageHistoryPoint, WorktreeStorageSnapshot } from "@/shared/contracts";
-import type { ProjectRegistration, ReservationRequest, StateStore, WorktreeStorageSample } from "./state-store";
+import type { PendingTestRun, ProjectRegistration, ReservationRequest, StateStore, WorktreeStorageSample } from "./state-store";
 
 type ProjectRow = {
   id: string;
@@ -183,6 +183,7 @@ const schema = `
   );
 
   CREATE INDEX IF NOT EXISTS test_runs_project_history ON test_runs(project_id, queued_at DESC);
+  CREATE INDEX IF NOT EXISTS test_runs_phase_queue ON test_runs(phase, queued_at, id);
   CREATE UNIQUE INDEX IF NOT EXISTS test_runs_actor_idempotency
     ON test_runs(actor, idempotency_key) WHERE idempotency_key IS NOT NULL;
 
@@ -464,6 +465,33 @@ export class SqliteStateStore implements StateStore {
         VALUES ('test_queue.updated', 'local-user', ?, ?)
       `).run(JSON.stringify(settings), now);
     })();
+  }
+
+  countTestRuns(phases: TestRunPhase[], projectId?: string, worktreePath?: string): number {
+    if (phases.length === 0) return 0;
+    const conditions = [`phase IN (${phases.map(() => "?").join(", ")})`];
+    const parameters: string[] = [...phases];
+    if (projectId) {
+      conditions.push("project_id = ?");
+      parameters.push(projectId);
+    }
+    if (worktreePath) {
+      conditions.push("worktree_path = ?");
+      parameters.push(worktreePath);
+    }
+    const row = this.database.prepare(`SELECT COUNT(*) AS count FROM test_runs WHERE ${conditions.join(" AND ")}`)
+      .get(...parameters) as { count: number };
+    return row.count;
+  }
+
+  listPendingTestRuns(): PendingTestRun[] {
+    return this.database.prepare(`
+      SELECT id, project_id AS projectId, worktree_path AS worktreePath, phase,
+             queue_position AS queuePosition, queued_at AS queuedAt
+      FROM test_runs
+      WHERE phase IN ('queued', 'running')
+      ORDER BY queued_at ASC, id ASC
+    `).all() as PendingTestRun[];
   }
 
   listTestRuns(projectId?: string, limit = 50): TestRun[] {
@@ -865,6 +893,7 @@ export class SqliteStateStore implements StateStore {
             idempotency_key TEXT
           );
           CREATE INDEX IF NOT EXISTS test_runs_project_history ON test_runs(project_id, queued_at DESC);
+          CREATE INDEX IF NOT EXISTS test_runs_phase_queue ON test_runs(phase, queued_at, id);
           CREATE UNIQUE INDEX IF NOT EXISTS test_runs_actor_idempotency
             ON test_runs(actor, idempotency_key) WHERE idempotency_key IS NOT NULL;
         `);

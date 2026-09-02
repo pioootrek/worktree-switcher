@@ -90,8 +90,12 @@ produce shell-free executable and argument arrays for the shared queue.
 The queue is FIFO, has a persisted global parallel limit from 1 through 16,
 and runs at most one job in a given worktree. Lowering the limit does not stop
 active jobs. Cancellation signals the complete owned process group and
-escalates only if it does not exit. Controller shutdown cancels active jobs;
-stale queued or running records become `interrupted` during recovery.
+escalates only if it does not exit; the persisted run becomes terminal only
+after process exit is confirmed. Output is written to the rotating file log
+per line, while the bounded SQLite tail is persisted on a short debounce and
+again at completion. Queue counts and scheduling candidates use filtered SQL
+queries that do not hydrate historical log tails. Controller shutdown cancels
+active jobs; stale queued or running records become `interrupted` during recovery.
 
 ## Resource policy
 

@@ -76,14 +76,51 @@ describe("TestJobManager", () => {
 
   it("cancels queued and running jobs and restricts agent cancellation to the author", async () => {
     const { store, project, manager, worktree, command } = fixture();
-    const running = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(2_000), environment: {}, actor: "agent:mcp:one" });
+    const longRunning = command(2_000);
+    longRunning.args = ["-e", "console.log('ready'); setInterval(() => {}, 1000)"];
+    const running = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: longRunning, environment: {}, actor: "agent:mcp:one" });
     const queued = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/b"), command: command(20), environment: {}, actor: "agent:mcp:one" });
-    await vi.waitFor(() => expect(store.getTestRun(running.id)?.phase).toBe("running"));
+    await vi.waitFor(() => expect(store.getTestRun(running.id)?.logs).toContain("ready"));
     expect(() => manager.cancel(running.id, "agent:mcp:other")).toThrow("autor");
     expect(manager.cancel(queued.id, "agent:mcp:one").phase).toBe("cancelled");
-    expect(manager.cancel(running.id, "agent:mcp:one").phase).toBe("cancelled");
+    expect(manager.cancel(running.id, "agent:mcp:one")).toMatchObject({ phase: "running", finishedAt: null });
     await vi.waitFor(() => expect(manager.status().running).toBe(0));
     expect(store.getTestRun(running.id)?.phase).toBe("cancelled");
+    await manager.shutdown();
+    store.close();
+    managers.splice(managers.indexOf(manager), 1);
+  });
+
+  it("keeps cancellation non-terminal until a signal-handling child exits", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    const delayedExit = command(2_000);
+    delayedExit.args = ["-e", "process.on('SIGTERM', () => setTimeout(() => process.exit(0), 200)); console.log('ready'); setInterval(() => {}, 1000)"];
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: delayedExit, environment: {}, actor: "local-user" });
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.logs).toContain("ready"));
+
+    expect(manager.cancel(run.id, "local-user")).toMatchObject({ phase: "running", finishedAt: null });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(store.getTestRun(run.id)).toMatchObject({ phase: "running", finishedAt: null });
+    expect(manager.status().running).toBe(1);
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("cancelled"), { timeout: 2_000 });
+    expect(store.getTestRun(run.id)?.finishedAt).not.toBeNull();
+    await manager.shutdown();
+    store.close();
+    managers.splice(managers.indexOf(manager), 1);
+  });
+
+  it("debounces persisted output while retaining the bounded final tail", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    const save = vi.spyOn(store, "saveTestRun");
+    const chatty = command(20);
+    chatty.args = ["-e", "for (let index = 0; index < 300; index += 1) console.log(`line-${index}`)"];
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: chatty, environment: {}, actor: "local-user" });
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"), { timeout: 2_000 });
+    expect(save.mock.calls.length).toBeLessThan(20);
+    expect(store.getTestRun(run.id)?.logs).toHaveLength(200);
+    expect(store.getTestRun(run.id)?.logs.at(-1)).toBe("line-299");
     await manager.shutdown();
     store.close();
     managers.splice(managers.indexOf(manager), 1);

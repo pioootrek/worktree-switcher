@@ -92,11 +92,10 @@ export class ControlService {
 
   testQueueStatus(): TestQueueStatus {
     if (this.tests) return this.tests.status();
-    const runs = this.store.listTestRuns(undefined, 500);
     return {
       ...this.store.getTestQueueSettings(),
-      running: runs.filter(({ phase }) => phase === "running").length,
-      queued: runs.filter(({ phase }) => phase === "queued").length,
+      running: this.store.countTestRuns(["running"]),
+      queued: this.store.countTestRuns(["queued"]),
     };
   }
 
@@ -113,27 +112,29 @@ export class ControlService {
     actor: OperationActor = { owner: "local-user" },
     idempotencyKey?: string,
   ): Promise<TestRun> {
-    const project = this.requireProject(projectId);
-    const worktrees = await this.git.list(project.repositoryPath);
-    const worktree = this.resolveWorktree(project, worktrees, worktreePath);
-    this.assertReservationAllows(projectId, worktree.path, actor);
-    const command = this.testCommands.resolve(worktree.path, presetId);
-    const run = this.requireTests().enqueue({
-      projectId,
-      worktree,
-      command,
-      environment: project.environment,
-      actor: actor.owner,
-      idempotencyKey,
+    return this.serialized(projectId, async () => {
+      const project = this.requireProject(projectId);
+      const worktrees = await this.git.list(project.repositoryPath);
+      const worktree = this.resolveWorktree(project, worktrees, worktreePath);
+      this.assertReservationAllows(projectId, worktree.path, actor);
+      const command = this.testCommands.resolve(worktree.path, presetId);
+      const run = this.requireTests().enqueue({
+        projectId,
+        worktree,
+        command,
+        environment: project.environment,
+        actor: actor.owner,
+        idempotencyKey,
+      });
+      this.logs.controller("test_run.queued", {
+        runId: run.id,
+        projectId,
+        worktreePath: worktree.path,
+        presetId,
+        actor: actor.owner,
+      });
+      return run;
     });
-    this.logs.controller("test_run.queued", {
-      runId: run.id,
-      projectId,
-      worktreePath: worktree.path,
-      presetId,
-      actor: actor.owner,
-    });
-    return run;
   }
 
   cancelTest(runId: string, actor: OperationActor = { owner: "local-user" }): TestRun {
@@ -185,7 +186,7 @@ export class ControlService {
   async removeProject(projectId: string, actor: OperationActor = { owner: "local-user" }): Promise<Project> {
     return this.serialized(projectId, async () => {
       const project = this.requireProject(projectId);
-      if (this.store.listTestRuns(projectId, 500).some(({ phase }) => phase === "queued" || phase === "running")) {
+      if (this.store.countTestRuns(["queued", "running"], projectId) > 0) {
         throw new Error("Anuluj testy projektu przed jego usunięciem.");
       }
       this.assertReservationAllows(
@@ -531,7 +532,7 @@ export class ControlService {
       if (this.storage?.isBusy(projectId, selected.path)) {
         throw new Error("Poczekaj na zakończenie pomiaru dysku przed usunięciem katalogu .next.");
       }
-      if (this.store.listTestRuns(projectId, 500).some((run) => run.worktreePath === selected.path && (run.phase === "queued" || run.phase === "running"))) {
+      if (this.store.countTestRuns(["queued", "running"], projectId, selected.path) > 0) {
         throw new Error("Poczekaj na zakończenie testów tego worktree przed usunięciem katalogu .next.");
       }
       const result = await this.cacheCleaner.remove(selected.path, cache);

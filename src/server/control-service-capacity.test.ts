@@ -7,8 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Project, RuntimeSnapshot, Worktree } from "@/shared/contracts";
 import { ControlService } from "./control-service";
 import type { GitWorktreeReader } from "./git-worktrees";
+import { nullLogWriter } from "./log-writer";
 import type { ProcessManager } from "./process-manager";
 import { SqliteStateStore } from "./sqlite-store";
+import type { ProjectTestCommandResolver } from "./test-command";
+import { TestJobManager } from "./test-job-manager";
 
 const directories: string[] = [];
 
@@ -83,7 +86,7 @@ function fixture(count = 3, onStart: (project: Project) => Promise<void> = async
       tls: { mode: "off" as const, keyPath: null, certPath: null, caPath: null },
     })),
   };
-  return { service: new ControlService(store, git, processes, undefined, commands), store, projects, runtimes, start, stop, worktrees };
+  return { service: new ControlService(store, git, processes, undefined, commands), store, projects, runtimes, start, stop, worktrees, directory, git, processes, commands };
 }
 
 describe("ControlService server capacity", () => {
@@ -107,6 +110,48 @@ describe("ControlService server capacity", () => {
     await expect(service.removeProject(projects[0].id)).rejects.toThrow("another-user");
     expect(stop).not.toHaveBeenCalled();
     expect(store.getProject(projects[0].id)).not.toBeNull();
+    store.close();
+  });
+
+  it("serializes a concurrent test enqueue before project removal", async () => {
+    const { store, projects, directory, git, processes, commands } = fixture(1);
+    let releaseWorktrees!: () => void;
+    const worktreesReady = new Promise<void>((resolve) => { releaseWorktrees = resolve; });
+    vi.mocked(git.list).mockImplementationOnce(async () => {
+      await worktreesReady;
+      return [{
+        path: projects[0].repositoryPath,
+        head: "abc123456789",
+        shortHead: "abc1234",
+        branch: "main",
+        detached: false,
+        locked: false,
+        prunable: false,
+        dirty: false,
+      }];
+    });
+    const tests = new TestJobManager(store, nullLogWriter);
+    const testCommands = {
+      resolve: vi.fn(() => ({
+        preset: { id: "node:test", name: "test", adapter: "node" as const, timeoutMs: 5_000 },
+        executable: process.execPath,
+        args: ["-e", "setTimeout(() => process.exit(0), 2000)"],
+        cwd: directory,
+      })),
+    } as unknown as ProjectTestCommandResolver;
+    const service = new ControlService(store, git, processes, undefined, commands, undefined, undefined, testCommands, tests);
+
+    const enqueue = service.enqueueTest(projects[0].id, projects[0].repositoryPath, "node:test");
+    await vi.waitFor(() => expect(git.list).toHaveBeenCalledTimes(1));
+    const removal = service.removeProject(projects[0].id);
+    releaseWorktrees();
+    const run = await enqueue;
+
+    await expect(removal).rejects.toThrow("Anuluj testy");
+    expect(store.getProject(projects[0].id)).not.toBeNull();
+    tests.cancel(run.id, "local-user");
+    await vi.waitFor(() => expect(tests.status().running).toBe(0));
+    await tests.shutdown();
     store.close();
   });
 

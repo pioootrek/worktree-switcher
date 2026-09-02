@@ -40,6 +40,17 @@ describe("SqliteStateStore", () => {
     store.setTestQueueSettings({ limit: 3 });
     store.saveTestRun(run, "attempt-1");
     expect(store.getTestQueueSettings()).toEqual({ limit: 3 });
+    expect(store.countTestRuns(["running"])).toBe(1);
+    expect(store.countTestRuns(["queued"], project.id)).toBe(0);
+    expect(store.countTestRuns(["running"], project.id, "/another/worktree")).toBe(0);
+    expect(store.listPendingTestRuns()).toEqual([{
+      id: run.id,
+      projectId: project.id,
+      worktreePath: run.worktreePath,
+      phase: "running",
+      queuePosition: null,
+      queuedAt: run.queuedAt,
+    }]);
     expect(store.findTestRunByIdempotency("agent:mcp:test", "attempt-1")).toEqual(run);
     store.markInterruptedTestRuns();
     expect(store.getTestRun(run.id)).toMatchObject({ phase: "interrupted", queuePosition: null });
