@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   Square,
   Sun,
+  TestTube2,
   UnlockKeyhole,
   Variable,
 } from "lucide-react";
@@ -44,9 +45,10 @@ import { CertificateFilePicker } from "@/components/certificate-file-picker";
 import { WorktreeStoragePanel } from "@/components/worktree-storage-panel";
 import { useI18n } from "@/i18n/provider";
 import { dashboardSummary, type Translate } from "@/i18n/messages";
-import type { ControllerDashboardResponse, DevServerTlsMode, LaunchPreset, McpStatus, Project, ProjectSnapshot, RuntimeFailure, RuntimeMetricsResponse, RuntimePhase, RuntimeResourceMetrics, ServerCapacityStatus } from "@/shared/contracts";
+import type { ControllerDashboardResponse, DevServerTlsMode, LaunchPreset, McpStatus, Project, ProjectSnapshot, RuntimeFailure, RuntimeMetricsResponse, RuntimePhase, RuntimeResourceMetrics, ServerCapacityStatus, TestPreset, TestQueueStatus, TestRun } from "@/shared/contracts";
 
 const EMPTY_CAPACITY: ServerCapacityStatus = { enabled: false, limit: 2, used: 0, available: null, holders: [] };
+const EMPTY_TEST_QUEUE: TestQueueStatus = { limit: 1, running: 0, queued: 0 };
 const EMPTY_RESOURCES: RuntimeResourceMetrics = { status: "idle", currentRssBytes: null, peakRssBytes: null, cpuPercent: null, processCount: null, sampledAt: null, sampleAgeSeconds: null, warningThresholdBytes: null, history: [] };
 
 const EMPTY_MCP_STATUS: McpStatus = {
@@ -68,7 +70,7 @@ async function parseResponse<T>(response: Response, fallback: string): Promise<T
 
 export function Dashboard() {
   const { locale, setLocale, t } = useI18n();
-  const [data, setData] = useState<ControllerDashboardResponse>({ projects: [], capacity: EMPTY_CAPACITY, mcp: EMPTY_MCP_STATUS });
+  const [data, setData] = useState<ControllerDashboardResponse>({ projects: [], capacity: EMPTY_CAPACITY, testQueue: EMPTY_TEST_QUEUE, mcp: EMPTY_MCP_STATUS });
   const [token, setToken] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -82,7 +84,7 @@ export function Dashboard() {
         headers: { "Accept-Language": locale, "X-Worktree-Switcher-Token": accessToken },
       });
       const dashboard = await parseResponse<ControllerDashboardResponse>(response, t("http.error", { status: response.status }));
-      setData({ ...dashboard, capacity: dashboard.capacity ?? EMPTY_CAPACITY, mcp: dashboard.mcp ?? EMPTY_MCP_STATUS });
+      setData({ ...dashboard, capacity: dashboard.capacity ?? EMPTY_CAPACITY, testQueue: dashboard.testQueue ?? EMPTY_TEST_QUEUE, mcp: dashboard.mcp ?? EMPTY_MCP_STATUS });
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -190,6 +192,7 @@ export function Dashboard() {
               {dashboardSummary(locale, runningCount, data.projects.length)}
             </Badge>
             <CapacityDialog status={data.capacity} mutate={mutate} setError={setError} />
+            <TestQueueDialog status={data.testQueue} mutate={mutate} setError={setError} />
             <McpStatusDialog status={data.mcp} />
             <Button
               variant="outline"
@@ -230,6 +233,65 @@ export function Dashboard() {
         )}
       </div>
     </main>
+  );
+}
+
+function TestQueueDialog({
+  status,
+  mutate,
+  setError,
+}: {
+  status: TestQueueStatus;
+  mutate: Mutate;
+  setError: (message: string | null) => void;
+}) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [limit, setLimit] = useState(String(status.limit));
+  const [pending, setPending] = useState(false);
+
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setPending(true);
+    try {
+      await mutate("/api/settings/test-queue", { limit: Number(limit) }, t("tests.queueSaved"));
+      setOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => {
+      if (next) setLimit(String(status.limit));
+      setOpen(next);
+    }}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-2" aria-label={t("tests.openSettings")}>
+          <TestTube2 aria-hidden />{status.running}/{status.limit}
+          {status.queued > 0 ? <Badge variant="secondary">+{status.queued}</Badge> : null}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t("tests.queueTitle")}</DialogTitle>
+          <DialogDescription>{t("tests.queueDescription")}</DialogDescription>
+        </DialogHeader>
+        <form className="space-y-5" onSubmit={(event) => void save(event)}>
+          <div className="space-y-2">
+            <Label htmlFor="test-queue-limit">{t("tests.limit")}</Label>
+            <Input id="test-queue-limit" type="number" min="1" max="16" value={limit} onChange={(event) => setLimit(event.target.value)} required />
+          </div>
+          <p className="rounded-lg border bg-black/15 p-3 text-sm">{t("tests.queueUsage", { running: status.running, queued: status.queued })}</p>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>{t("common.cancel")}</Button>
+            <Button type="submit" disabled={pending}>{pending ? <LoaderCircle className="animate-spin" aria-hidden /> : null}{t("common.save")}</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -443,7 +505,7 @@ function ProjectCard({
   token: string;
 }) {
   const { locale, t } = useI18n();
-  const { project, runtime, reservation, worktrees } = snapshot;
+  const { project, runtime, reservation, worktrees, testPresets, testRuns } = snapshot;
   const resources = runtime.resources ?? EMPTY_RESOURCES;
   const initial = project.selectedWorktreePath ?? worktrees[0]?.path ?? "";
   const [selected, setSelected] = useState(initial);
@@ -589,6 +651,7 @@ function ProjectCard({
           <TabsList>
             <TabsTrigger value="status">{t("project.status")}</TabsTrigger>
             <TabsTrigger value="logs">{t("project.logs")} <span className="text-muted-foreground">{runtime.logs.length}</span></TabsTrigger>
+            <TabsTrigger value="tests"><TestTube2 aria-hidden />{t("tests.tab")}</TabsTrigger>
             <TabsTrigger value="storage"><HardDrive aria-hidden />{t("storage.tab")}</TabsTrigger>
           </TabsList>
           <TabsContent value="status" className="mt-4">
@@ -626,6 +689,18 @@ function ProjectCard({
                 {runtime.logs.length ? runtime.logs.join("\n") : t("project.noLogs")}
               </pre>
             </ScrollArea>
+          </TabsContent>
+          <TabsContent value="tests" className="mt-4">
+            <TestPanel
+              key={selected}
+              projectId={project.id}
+              worktreePath={selected}
+              presets={testPresets.find((entry) => entry.worktreePath === selected)?.presets ?? []}
+              discoveryError={testPresets.find((entry) => entry.worktreePath === selected)?.error ?? null}
+              runs={testRuns}
+              mutate={mutate}
+              setError={setError}
+            />
           </TabsContent>
           <TabsContent value="storage" className="mt-4">
             <WorktreeStoragePanel
@@ -679,6 +754,106 @@ function ProjectCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function TestPanel({
+  projectId,
+  worktreePath,
+  presets,
+  discoveryError,
+  runs,
+  mutate,
+  setError,
+}: {
+  projectId: string;
+  worktreePath: string;
+  presets: TestPreset[];
+  discoveryError: string | null;
+  runs: TestRun[];
+  mutate: Mutate;
+  setError: (message: string | null) => void;
+}) {
+  const { locale, t } = useI18n();
+  const [presetId, setPresetId] = useState(presets[0]?.id ?? "");
+  const effectivePresetId = presets.some((preset) => preset.id === presetId) ? presetId : presets[0]?.id ?? "";
+  const [pending, setPending] = useState(false);
+
+  const run = async () => {
+    setPending(true);
+    try {
+      await mutate(`/api/projects/${projectId}/tests`, { worktreePath, presetId: effectivePresetId }, t("tests.queuedNotice"));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const cancel = async (runId: string) => {
+    try {
+      await mutate(`/api/test-runs/${runId}/cancel`, {}, t("tests.cancelledNotice"));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
+  return (
+    <section className="space-y-4" aria-label={t("tests.tab")}>
+      {discoveryError ? <Alert variant="destructive"><AlertTriangle aria-hidden /><AlertDescription>{discoveryError}</AlertDescription></Alert> : null}
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <div className="space-y-2">
+          <Label htmlFor={`test-preset-${projectId}`}>{t("tests.preset")}</Label>
+          <Select value={effectivePresetId} onValueChange={setPresetId} disabled={presets.length === 0}>
+            <SelectTrigger id={`test-preset-${projectId}`} className="w-full"><SelectValue placeholder={t("tests.noPresets")} /></SelectTrigger>
+            <SelectContent>{presets.map((preset) => <SelectItem key={preset.id} value={preset.id}>{preset.name} · {preset.adapter}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <Button onClick={() => void run()} disabled={pending || !effectivePresetId || !worktreePath}>
+          {pending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Play aria-hidden />}{t("tests.run")}
+        </Button>
+      </div>
+      {presets.length === 0 && !discoveryError ? <p className="text-sm text-muted-foreground">{t("tests.noPresets")}</p> : null}
+      <div>
+        <h3 className="mb-2 text-sm font-medium">{t("tests.history")}</h3>
+        {runs.length === 0 ? <p className="text-sm text-muted-foreground">{t("tests.noRuns")}</p> : (
+          <div className="space-y-2">
+            {runs.map((testRun) => {
+              const active = testRun.phase === "queued" || testRun.phase === "running";
+              return (
+                <div key={testRun.id} className="rounded-md border bg-black/15 p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-medium">{testRun.presetName}</p>
+                      <p className="truncate font-mono text-[11px] text-muted-foreground" title={testRun.worktreePath}>
+                        {testRun.worktreeBranch ?? "detached"} · {testRun.worktreeHead.slice(0, 8)} · {new Date(testRun.queuedAt).toLocaleString(locale === "pl" ? "pl-PL" : "en-US")}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className={testRun.phase === "passed" ? "border-emerald-400/25 text-emerald-300" : testRun.phase === "failed" || testRun.phase === "timed_out" ? "border-red-400/25 text-red-300" : "text-muted-foreground"}>
+                        {testRun.phase === "running" ? <LoaderCircle className="animate-spin" aria-hidden /> : <Activity aria-hidden />}{t(`testPhase.${testRun.phase}`)}
+                      </Badge>
+                      {active ? <Button size="sm" variant="ghost" onClick={() => void cancel(testRun.id)}><Square aria-hidden />{t("tests.cancel")}</Button> : null}
+                    </div>
+                  </div>
+                  {testRun.queuePosition ? <p className="mt-2 text-xs text-muted-foreground">{t("tests.position", { position: testRun.queuePosition })}</p> : null}
+                  {testRun.exitCode !== null ? <p className="mt-2 text-xs text-muted-foreground">{t("tests.exitCode", { code: testRun.exitCode })}</p> : null}
+                  {testRun.error ? <p className="mt-2 text-xs text-destructive">{testRun.error}</p> : null}
+                  {testRun.logs.length > 0 ? (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-xs text-muted-foreground">{t("tests.output")}</summary>
+                      <ScrollArea className="mt-2 h-32 rounded-md border bg-black/35 p-2">
+                        <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-zinc-300">{testRun.logs.join("\n")}</pre>
+                      </ScrollArea>
+                    </details>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 

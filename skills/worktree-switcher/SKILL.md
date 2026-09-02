@@ -1,6 +1,6 @@
 ---
 name: worktree-switcher
-description: Use when a repository's development server is managed by Worktree Switcher, or when the user asks to inspect, claim, start, or switch a registered project through its MCP tools. Do not use for creating, deleting, or pruning Git worktrees.
+description: Use when a repository's development server or test queue is managed by Worktree Switcher, or when the user asks to inspect, claim, start, switch, or test a registered project through its MCP tools. Do not use for creating, deleting, or pruning Git worktrees.
 ---
 
 # Worktree Switcher
@@ -80,6 +80,28 @@ Release does not stop the development server.
 Claims belong to the MCP session that created them. If that session is lost, a
 new session cannot renew or release the old claim. Report the stale claim and
 let it expire, or ask the user to review it in the dashboard.
+
+## Run finite verification through the queue
+
+When `list_test_presets` is available, use it before starting a finite test,
+typecheck, lint, or build command in a registered project. Select the exact
+worktree path returned by `list_worktrees`, then call `run_test` with a stable
+idempotency key that is reused if the request is retried.
+
+Read `get_test_queue` when capacity or waiting time matters. Poll
+`get_test_run` until the run reaches a terminal state and report its preset,
+worktree, commit, result, and relevant output. Use `cancel_test_run` only for a
+run created by the current MCP session. A local dashboard user remains able to
+cancel any run.
+
+Queued tests respect existing project reservations but do not claim, start, or
+switch the development server. If an end-to-end test also needs the managed
+server, claim the project separately and verify that the server and test target
+the same worktree.
+
+Do not bypass an available managed test preset by starting the same command in
+a terminal. If test-queue tools are unavailable, follow the repository's own
+finite verification command and host resource policy.
 
 ## Report the result
 

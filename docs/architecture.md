@@ -1,6 +1,6 @@
 ---
 audience: "contributors implementing the controller and user interface"
-last_reviewed: "2026-08-31"
+last_reviewed: "2026-09-02"
 source_of_truth: "runtime, persistence, configuration, and distribution decisions"
 status: "active"
 ---
@@ -80,6 +80,22 @@ restart, switch, or reservation.
 `autoStart` defaults to false. Project registration is explicit, dependency
 installation is never automatic, and stopping a server does not release its
 reservation.
+
+Finite verification commands use a separate `TestJobManager`; they do not add
+phases to the long-lived development-server state machine. `NodeTestCommandAdapter`
+discovers allowlisted package scripts, while `DjangoTestCommandAdapter` resolves
+`manage.py test` with the interpreter belonging to the exact worktree. Both
+produce shell-free executable and argument arrays for the shared queue.
+
+The queue is FIFO, has a persisted global parallel limit from 1 through 16,
+and runs at most one job in a given worktree. Lowering the limit does not stop
+active jobs. Cancellation signals the complete owned process group and
+escalates only if it does not exit; the persisted run becomes terminal only
+after process exit is confirmed. Output is written to the rotating file log
+per line, while the bounded SQLite tail is persisted on a short debounce and
+again at completion. Queue counts and scheduling candidates use filtered SQL
+queries that do not hydrate historical log tails. Controller shutdown cancels
+active jobs; stale queued or running records become `interrupted` during recovery.
 
 ## Resource policy
 
@@ -178,6 +194,11 @@ the SQLite backup API rather than copying live database/WAL files.
 Bounded worktree disk-usage samples are the one derived-history exception.
 They live in `worktree_storage_samples`, are keyed by project and canonical
 worktree path, and are discarded with their owning project.
+
+Test-run metadata and the last 200 bounded output lines live in `test_runs`.
+Each project retains 50 completed runs; active and queued records are never
+removed by retention. Full rotating output is stored in the state log
+directory rather than SQLite.
 
 Accounts would also require authentication, authorization, ownership,
 and audit semantics; SQLite alone does not make the application multi-user.

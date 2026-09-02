@@ -30,19 +30,20 @@ type PackageJson = {
 };
 
 const PACKAGE_MANAGERS = ["pnpm", "npm", "yarn", "bun"] as const;
+export type NodePackageManager = typeof PACKAGE_MANAGERS[number];
 const PORT_ARGUMENT_PACKAGES = ["vite", "astro", "nuxt", "@angular/cli"];
 
-function isPackageManager(value: string): value is LaunchCommand["executable"] {
+function isPackageManager(value: string): value is NodePackageManager {
   return PACKAGE_MANAGERS.some((manager) => manager === value);
 }
 
-function detectPackageManager(worktreePath: string, packageJson: PackageJson): LaunchCommand["executable"] {
+export function detectPackageManager(worktreePath: string, packageJson: Pick<PackageJson, "packageManager">): NodePackageManager {
   if (typeof packageJson.packageManager === "string") {
     const declared = packageJson.packageManager.split("@", 1)[0];
     if (isPackageManager(declared)) return declared;
   }
 
-  const lockfiles: Array<[LaunchCommand["executable"], string]> = [
+  const lockfiles: Array<[NodePackageManager, string]> = [
     ["pnpm", "pnpm-lock.yaml"],
     ["yarn", "yarn.lock"],
     ["bun", "bun.lock"],

@@ -1,4 +1,4 @@
-import type { DevServerTlsMode, EnvironmentProfile, LaunchPreset, Project, Reservation, ServerCapacitySettings, WorktreeStorageHistoryPoint, WorktreeStorageSnapshot } from "@/shared/contracts";
+import type { DevServerTlsMode, EnvironmentProfile, LaunchPreset, Project, Reservation, ServerCapacitySettings, TestQueueSettings, TestRun, WorktreeStorageHistoryPoint, WorktreeStorageSnapshot } from "@/shared/contracts";
 
 export interface WorktreeStorageSample extends WorktreeStorageHistoryPoint {
   projectId: string;
@@ -27,6 +27,8 @@ export interface ProjectLaunchUpdate {
   args: string[];
 }
 
+export type PendingTestRun = Pick<TestRun, "id" | "projectId" | "worktreePath" | "phase" | "queuePosition" | "queuedAt">;
+
 export interface ReservationRequest {
   projectId: string;
   worktreePath: string;
@@ -52,6 +54,15 @@ export interface StateStore {
   setSelectedWorktree(projectId: string, path: string): void;
   getServerCapacitySettings(): ServerCapacitySettings;
   setServerCapacitySettings(settings: ServerCapacitySettings): void;
+  getTestQueueSettings(): TestQueueSettings;
+  setTestQueueSettings(settings: TestQueueSettings): void;
+  countTestRuns(phases: TestRun["phase"][], projectId?: string, worktreePath?: string): number;
+  listPendingTestRuns(): PendingTestRun[];
+  listTestRuns(projectId?: string, limit?: number): TestRun[];
+  getTestRun(id: string): TestRun | null;
+  findTestRunByIdempotency(actor: string, idempotencyKey: string): TestRun | null;
+  saveTestRun(run: TestRun, idempotencyKey?: string): void;
+  markInterruptedTestRuns(): void;
   getWorktreeStorage(projectId: string, worktreePath: string): WorktreeStorageSnapshot | null;
   saveWorktreeStorage(sample: WorktreeStorageSample): void;
   recordProjectEvent(projectId: string, eventType: string, actor: string, details: unknown): void;

@@ -55,6 +55,19 @@ const exactEnglish = new Map<string, string>([
   ["Na tym porcie działa inny serwer. Worktree Switcher pozostawił go bez zmian.", "Another server is using this port. Worktree Switcher left it unchanged."],
   ["Kontroler nie może uruchomić skonfigurowanej komendy.", "The controller cannot run the configured command."],
   ["Limit serwerów musi być liczbą całkowitą od 1 do 64.", "The server limit must be an integer from 1 to 64."],
+  ["Limit równoległych testów musi być liczbą całkowitą od 1 do 16.", "The parallel test limit must be an integer from 1 to 16."],
+  ["Kolejka testów nie jest dostępna w tym trybie kontrolera.", "The test queue is unavailable in this controller mode."],
+  ["Nie znaleziono uruchomienia testu.", "Test run not found."],
+  ["Tylko autor testu może go anulować.", "Only the test author can cancel it."],
+  ["Klucz idempotencji jest już używany przez inne uruchomienie testu.", "The idempotency key is already used by another test run."],
+  ["Kolejka testów może zawierać najwyżej 100 oczekujących zadań.", "The test queue can contain at most 100 waiting jobs."],
+  ["Kontroler został zatrzymany przed zakończeniem testu.", "The controller stopped before the test finished."],
+  ["Nieobsługiwany adapter testów.", "Unsupported test adapter."],
+  ["Wybrany preset testowy Node.js nie istnieje już w tym worktree.", "The selected Node.js test preset no longer exists in this worktree."],
+  ["Wybrany preset testowy Django nie istnieje już w tym worktree.", "The selected Django test preset no longer exists in this worktree."],
+  ["Nie udało się odczytać package.json podczas wykrywania testów.", "package.json could not be read while discovering tests."],
+  ["Anuluj testy projektu przed jego usunięciem.", "Cancel the project's tests before removing it."],
+  ["Poczekaj na zakończenie testów tego worktree przed usunięciem katalogu .next.", "Wait for this worktree's tests to finish before removing its .next directory."],
   ["Nieprawidłowy katalog pamięci podręcznej.", "Invalid cache directory."],
   ["Katalog .next nie jest zwykłym katalogiem. Nie został usunięty.", "The .next path is not a regular directory and was not removed."],
   ["Zatrzymaj serwer tego worktree przed usunięciem katalogu .next.", "Stop this worktree's server before removing its .next directory."],
@@ -101,5 +114,7 @@ export function localizeServerMessage(message: string, locale: Locale): string {
   if (match) return `Invalid value for environment variable ${match[1]}.`;
   match = message.match(/^Proces działał, ale nie odpowiedział na porcie (\d+) w ciągu (.+) sekund\.$/);
   if (match) return `The process did not respond on port ${match[1]} within ${match[2]} seconds.`;
+  match = message.match(/^Proces testowy zakończył się z kodem (.+)\.$/);
+  if (match) return `The test process exited with code ${match[1]}.`;
   return message;
 }

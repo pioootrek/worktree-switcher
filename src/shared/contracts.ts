@@ -1,6 +1,55 @@
 export type RuntimePhase = "stopped" | "starting" | "running" | "stopping" | "failed";
 export type DevServerTlsMode = "off" | "generated" | "custom";
 export type LaunchPreset = "auto" | "node" | "django";
+export type TestAdapterKind = "node" | "django";
+export type TestRunPhase = "queued" | "running" | "passed" | "failed" | "cancelled" | "timed_out" | "interrupted";
+
+export interface TestPreset {
+  id: string;
+  name: string;
+  adapter: TestAdapterKind;
+  timeoutMs: number;
+}
+
+export interface WorktreeTestPresets {
+  worktreePath: string;
+  presets: TestPreset[];
+  error: string | null;
+}
+
+export interface TestRun {
+  id: string;
+  projectId: string;
+  worktreePath: string;
+  worktreeHead: string;
+  worktreeBranch: string | null;
+  worktreeDirty: boolean;
+  presetId: string;
+  presetName: string;
+  adapter: TestAdapterKind;
+  actor: string;
+  phase: TestRunPhase;
+  queuePosition: number | null;
+  executable: string;
+  args: string[];
+  cwd: string;
+  queuedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  exitCode: number | null;
+  signal: string | null;
+  error: string | null;
+  logs: string[];
+}
+
+export interface TestQueueSettings {
+  limit: number;
+}
+
+export interface TestQueueStatus extends TestQueueSettings {
+  running: number;
+  queued: number;
+}
 
 export interface EnvironmentProfile {
   name: string;
@@ -100,6 +149,8 @@ export interface ProjectSnapshot {
   reservation: Reservation | null;
   worktrees: Worktree[];
   storage: WorktreeStorageSnapshot[];
+  testPresets: WorktreeTestPresets[];
+  testRuns: TestRun[];
   discoveryError?: string;
 }
 
@@ -141,6 +192,7 @@ export interface CacheDeletionResult {
 export interface DashboardResponse {
   projects: ProjectSnapshot[];
   capacity: ServerCapacityStatus;
+  testQueue: TestQueueStatus;
 }
 
 export interface ServerCapacitySettings {

@@ -59,6 +59,14 @@ function agentSnapshot(snapshot: ProjectSnapshot) {
         technicalDetails: snapshot.runtime.failure.technicalDetails,
       } : null,
     },
+    testPresets: snapshot.testPresets.map((entry) => ({
+      ...entry,
+      error: entry.error ? localizeServerMessage(entry.error, "en") : null,
+    })),
+    testRuns: snapshot.testRuns.map((run) => ({
+      ...run,
+      error: run.error ? localizeServerMessage(run.error, "en") : null,
+    })),
   };
 }
 
@@ -168,6 +176,12 @@ export class McpRuntime {
       async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(await english(() => this.service.serverCapacity()), null, 2) }] }),
     );
     server.registerResource(
+      "test-queue",
+      "worktree-switcher://tests/queue",
+      { description: "Global test queue limit and current usage", mimeType: "application/json" },
+      async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(await english(() => this.service.testQueueStatus()), null, 2) }] }),
+    );
+    server.registerResource(
       "project-status",
       new ResourceTemplate("worktree-switcher://projects/{projectId}/status", {
         list: async () => ({ resources: (await projectList()).map((project) => ({
@@ -208,6 +222,11 @@ export class McpRuntime {
       annotations: { readOnlyHint: true, idempotentHint: true },
     }, async () => jsonContent(await english(() => this.service.serverCapacity())));
 
+    server.registerTool("get_test_queue", {
+      description: "Read the global parallel-test limit and current running and queued counts.",
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    }, async () => jsonContent(await english(() => this.service.testQueueStatus())));
+
     server.registerTool("get_project_status", {
       description: "Read the full runtime, reservation, and selected-worktree status of one project.",
       inputSchema: { projectId: z.string().uuid() },
@@ -225,6 +244,40 @@ export class McpRuntime {
       inputSchema: { projectId: z.string().uuid() },
       annotations: { readOnlyHint: true, idempotentHint: true },
     }, async ({ projectId }) => jsonContent((await english(() => this.service.projectSnapshot(projectId))).worktrees));
+
+    server.registerTool("list_test_presets", {
+      description: "List safe test and verification presets discovered in each worktree of one project.",
+      inputSchema: { projectId: z.string().uuid() },
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    }, async ({ projectId }) => jsonContent((await english(() => this.service.projectSnapshot(projectId))).testPresets));
+
+    server.registerTool("run_test", {
+      description: "Queue one discovered test preset for an exact worktree. Runs are globally bounded and serialized per worktree.",
+      inputSchema: {
+        projectId: z.string().uuid(),
+        worktreePath: z.string().min(1).max(4096),
+        presetId: z.string().min(1).max(160),
+        idempotencyKey: z.string().min(1).max(120),
+      },
+      annotations: { destructiveHint: true, idempotentHint: true },
+    }, async ({ projectId, worktreePath, presetId, idempotencyKey }) => jsonContent(await english(() => this.service.enqueueTest(
+      projectId, worktreePath, presetId, actorFor(projectId), idempotencyKey,
+    ))));
+
+    server.registerTool("get_test_run", {
+      description: "Read one queued, active, or completed test run including its bounded output tail.",
+      inputSchema: { runId: z.string().uuid() },
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    }, async ({ runId }) => {
+      const run = await english(() => this.service.testRun(runId));
+      return jsonContent({ ...run, error: run.error ? localizeServerMessage(run.error, "en") : null });
+    });
+
+    server.registerTool("cancel_test_run", {
+      description: "Cancel a queued or active test run created by this MCP session.",
+      inputSchema: { runId: z.string().uuid() },
+      annotations: { destructiveHint: true },
+    }, async ({ runId }) => jsonContent(await english(() => this.service.cancelTest(runId, { owner: owner() }))));
 
     server.registerTool("set_project_environment", {
       description: "Replace a project's literal development-server environment overrides. The server must be stopped; PORT and NODE_ENV are reserved.",

@@ -58,6 +58,8 @@ const snapshot: ProjectSnapshot = {
     history: [],
     error: null,
   }],
+  testPresets: [{ worktreePath: "/code/web", presets: [{ id: "node:test", name: "test", adapter: "node", timeoutMs: 900_000 }], error: null }],
+  testRuns: [],
   worktrees: [{
     path: "/code/web",
     head: "abc",
@@ -88,7 +90,8 @@ describe("MCP loopback server", () => {
       maximumExpiresAt: "2026-08-29T08:00:00.000Z",
     };
     const capacity = { enabled: true, limit: 2, used: 1, available: 1, holders: [{ projectId, projectName: "Web", phase: "running" as const }] };
-    const dashboard = vi.fn(async (): Promise<DashboardResponse> => ({ projects: [snapshot], capacity }));
+    const testQueue = { limit: 1, running: 0, queued: 0 };
+    const dashboard = vi.fn(async (): Promise<DashboardResponse> => ({ projects: [snapshot], capacity, testQueue }));
     const claimProject = vi.fn(async () => ({
       reservation,
       leaseToken: "never-return-this-lease-secret",
@@ -100,10 +103,18 @@ describe("MCP loopback server", () => {
     const saveEnvironmentProfile = vi.fn(async () => snapshot.project);
     const selectEnvironmentProfile = vi.fn(async () => snapshot.project);
     const deleteEnvironmentProfile = vi.fn(() => snapshot.project);
+    const queuedRun = { id: "f70af07d-d065-41a7-8918-c61ca5a2b833", phase: "queued" as const };
+    const enqueueTest = vi.fn(async () => queuedRun);
+    const testRun = vi.fn(() => queuedRun);
+    const cancelTest = vi.fn(() => ({ ...queuedRun, phase: "cancelled" as const }));
     const service = {
       dashboard,
       serverCapacity: vi.fn(() => capacity),
+      testQueueStatus: vi.fn(() => testQueue),
       projectSnapshot: vi.fn(async () => snapshot),
+      enqueueTest,
+      testRun,
+      cancelTest,
       claimProject,
       renewAgentClaim: vi.fn(() => reservation),
       releaseAgentClaim,
@@ -159,9 +170,14 @@ describe("MCP loopback server", () => {
     expect((await client.listTools()).tools.map(({ name }) => name)).toEqual([
       "list_projects",
       "get_server_capacity",
+      "get_test_queue",
       "get_project_status",
       "get_project_storage",
       "list_worktrees",
+      "list_test_presets",
+      "run_test",
+      "get_test_run",
+      "cancel_test_run",
       "set_project_environment",
       "list_environment_profiles",
       "save_environment_profile",
@@ -175,6 +191,24 @@ describe("MCP loopback server", () => {
     const capacityResult = await client.callTool({ name: "get_server_capacity", arguments: {} });
     const capacityText = (capacityResult as { content: Array<{ type: "text"; text: string }> }).content[0].text;
     expect(JSON.parse(capacityText)).toMatchObject({ enabled: true, limit: 2, used: 1, available: 1 });
+
+    const testQueueResult = await client.callTool({ name: "get_test_queue", arguments: {} });
+    const testQueueText = (testQueueResult as { content: Array<{ type: "text"; text: string }> }).content[0].text;
+    expect(JSON.parse(testQueueText)).toEqual(testQueue);
+
+    const testPresetsResult = await client.callTool({ name: "list_test_presets", arguments: { projectId } });
+    expect(JSON.stringify(testPresetsResult)).toContain("node:test");
+    await client.callTool({
+      name: "run_test",
+      arguments: { projectId, worktreePath: "/code/web", presetId: "node:test", idempotencyKey: "test-job-1" },
+    });
+    expect(enqueueTest).toHaveBeenCalledWith(projectId, "/code/web", "node:test", {
+      owner: expect.stringMatching(/^agent:mcp:/), leaseToken: undefined,
+    }, "test-job-1");
+    await client.callTool({ name: "get_test_run", arguments: { runId: queuedRun.id } });
+    expect(testRun).toHaveBeenCalledWith(queuedRun.id);
+    await client.callTool({ name: "cancel_test_run", arguments: { runId: queuedRun.id } });
+    expect(cancelTest).toHaveBeenCalledWith(queuedRun.id, { owner: expect.stringMatching(/^agent:mcp:/) });
 
     const statusResult = await client.callTool({ name: "get_project_status", arguments: { projectId } });
     const statusText = (statusResult as { content: Array<{ type: "text"; text: string }> }).content[0].text;

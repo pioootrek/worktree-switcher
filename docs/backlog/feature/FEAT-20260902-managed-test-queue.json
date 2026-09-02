@@ -1,0 +1,59 @@
+{
+  "area": "process-manager",
+  "created": "2026-09-02",
+  "id": "FEAT-20260902-managed-test-queue",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-dev-server-capacity",
+      "FEAT-20260901-mcp-runtime-operations"
+    ]
+  },
+  "notes": [
+    {
+      "author": "user",
+      "date": "2026-09-02",
+      "text": "Manage tests per worktree through adapters, a queue, and a configurable maximum number of parallel tests. Validate compatibility with the Angular and Django fixture projects under ~/development."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-02",
+      "text": "Implemented the first vertical slice on feat/test-runner-adapters: Node.js and Django discovery adapters, a persisted FIFO queue, a global limit from 1 to 16, one active run per worktree, process-tree cancellation and timeout handling, bounded history and logs, dashboard controls, authenticated HTTP endpoints, and idempotent MCP tools. Real scheduler runs passed against angular-switcher-fixture with pnpm run build and django-switcher-fixture with .venv/bin/python manage.py test. Keep the item open until the rebuilt controller is installed and the browser flow is exercised through the managed service."
+    }
+  ],
+  "priority": "now",
+  "problem": [
+    "Humans and agents can start overlapping test or build processes from different terminals without a shared resource limit, clear worktree attribution, cancellation, or durable results."
+  ],
+  "risk": {
+    "dimensions": [
+      "availability",
+      "perf",
+      "process"
+    ],
+    "level": "medium",
+    "rollback": "Remove the test queue endpoints and dashboard tab while preserving historical rows. Development-server management remains independent."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Discover finite Node.js verification scripts and Django manage.py test through typed adapters resolved against each exact Git-discovered worktree.",
+    "Queue test runs FIFO with a persisted global parallel limit and at most one active process tree per worktree.",
+    "Record project, worktree, commit, branch, dirty state, actor, command, timestamps, result, and bounded output without accepting arbitrary browser or MCP commands.",
+    "Expose queue settings, preset selection, live status, history, output, and cancellation through the dashboard and authenticated HTTP API.",
+    "Expose read, enqueue, status, and owner-only cancellation through MCP with idempotent enqueue requests.",
+    "Terminate owned test process trees on timeout, cancellation, and controller shutdown; recover unfinished persisted records as interrupted."
+  ],
+  "source": "Product discussion on 2026-09-02",
+  "status": "open",
+  "title": "Manage framework-aware tests per worktree",
+  "type": "feature",
+  "validation": [
+    "With limit two, verify two different worktrees run concurrently while a second run for either occupied worktree remains queued.",
+    "Verify lowering the global limit does not terminate active runs and new jobs wait until capacity is available.",
+    "Verify stale presets, arbitrary worktree paths, duplicate MCP retries, foreign-session cancellation, timeouts, and controller recovery are handled safely.",
+    "Run a discovered Angular verification preset and Django manage.py test through the scheduler against the fixture repositories under ~/development.",
+    "Exercise the complete dashboard and MCP flows against the rebuilt managed controller."
+  ],
+  "value": [
+    "Developers and agents share one bounded source of truth for local verification work instead of competing test processes in separate terminals."
+  ]
+}
