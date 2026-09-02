@@ -1,6 +1,6 @@
 ---
 audience: "product owner and contributors discussing agent coordination"
-last_reviewed: "2026-08-29"
+last_reviewed: "2026-09-02"
 source_of_truth: "implemented reservation and local MCP integration design"
 status: "active"
 ---
@@ -106,6 +106,7 @@ Read-only MCP resources:
 ```text
 worktree-switcher://projects
 worktree-switcher://capacity
+worktree-switcher://tests/queue
 worktree-switcher://projects/{projectId}/status
 worktree-switcher://projects/{projectId}/worktrees
 ```
@@ -115,9 +116,14 @@ Initial MCP tools:
 ```text
 list_projects
 get_server_capacity
+get_test_queue
 get_project_status
 get_project_storage
 list_worktrees
+list_test_presets
+run_test
+get_test_run
+cancel_test_run
 set_project_environment
 list_environment_profiles
 save_environment_profile
@@ -161,6 +167,12 @@ Listing and status remain available without acquiring a lease. Mutations that
 would violate an existing reservation return a typed conflict. Arbitrary shell
 commands, arbitrary paths, force release, and indefinite agent locks are never
 exposed as MCP tools.
+
+Test tools select a preset discovered by a typed adapter for an exact current
+worktree. `run_test` requires an idempotency key so transport retries cannot
+queue duplicate processes. A run respects an existing project reservation but
+does not claim or switch the development server. Only its originating MCP
+session or a local dashboard user may cancel it.
 
 ## Security and audit
 

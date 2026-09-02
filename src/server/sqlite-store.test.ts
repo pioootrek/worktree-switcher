@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 
 import { SqliteStateStore } from "./sqlite-store";
+import type { TestRun } from "@/shared/contracts";
 
 const directories: string[] = [];
 
@@ -25,6 +26,26 @@ afterEach(() => {
 });
 
 describe("SqliteStateStore", () => {
+  it("persists test queue settings, run output, and interruption recovery", () => {
+    const store = createStore();
+    const project = store.addProject(projectInput("Tests", "/code/tests", 3219));
+    const run: TestRun = {
+      id: "run-1", projectId: project.id, worktreePath: "/code/tests", worktreeHead: "abc123",
+      worktreeBranch: "main", worktreeDirty: true, presetId: "node:test", presetName: "test",
+      adapter: "node", actor: "agent:mcp:test", phase: "running", queuePosition: null,
+      executable: "pnpm", args: ["run", "test"], cwd: "/code/tests",
+      queuedAt: "2026-09-02T10:00:00.000Z", startedAt: "2026-09-02T10:00:01.000Z",
+      finishedAt: null, exitCode: null, signal: null, error: null, logs: ["starting"],
+    };
+    store.setTestQueueSettings({ limit: 3 });
+    store.saveTestRun(run, "attempt-1");
+    expect(store.getTestQueueSettings()).toEqual({ limit: 3 });
+    expect(store.findTestRunByIdempotency("agent:mcp:test", "attempt-1")).toEqual(run);
+    store.markInterruptedTestRuns();
+    expect(store.getTestRun(run.id)).toMatchObject({ phase: "interrupted", queuePosition: null });
+    store.close();
+  });
+
   it("removes a project, releases its port, and preserves a controller audit event", () => {
     const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-store-remove-"));
     directories.push(directory);

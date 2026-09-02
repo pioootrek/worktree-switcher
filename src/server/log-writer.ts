@@ -6,6 +6,7 @@ const MAX_FILE_BYTES = 5 * 1024 * 1024;
 export interface LogWriter {
   controller(event: string, details?: Record<string, unknown>): void;
   project(projectId: string, line: string): void;
+  test(runId: string, line: string): void;
   close(): Promise<void>;
 }
 
@@ -66,11 +67,13 @@ class RotatingLogFile {
 }
 
 export class FileLogWriter implements LogWriter {
-  private readonly files = new Map<string, RotatingLogFile>();
+  private readonly projectFiles = new Map<string, RotatingLogFile>();
+  private readonly testFiles = new Map<string, RotatingLogFile>();
   private readonly controllerFile: RotatingLogFile;
 
   constructor(private readonly directory: string) {
     mkdirSync(join(directory, "projects"), { recursive: true, mode: 0o700 });
+    mkdirSync(join(directory, "tests"), { recursive: true, mode: 0o700 });
     this.controllerFile = new RotatingLogFile(join(directory, "controller.log"));
     this.controller("controller.started");
   }
@@ -81,22 +84,36 @@ export class FileLogWriter implements LogWriter {
 
   project(projectId: string, line: string): void {
     const safeId = projectId.replaceAll(/[^a-zA-Z0-9_-]/g, "_");
-    let file = this.files.get(safeId);
+    let file = this.projectFiles.get(safeId);
     if (!file) {
       file = new RotatingLogFile(join(this.directory, "projects", `${safeId}.log`));
-      this.files.set(safeId, file);
+      this.projectFiles.set(safeId, file);
+    }
+    file.write(line);
+  }
+
+  test(runId: string, line: string): void {
+    const key = runId.replaceAll(/[^a-zA-Z0-9_-]/g, "_");
+    let file = this.testFiles.get(key);
+    if (!file) {
+      file = new RotatingLogFile(join(this.directory, "tests", `${key}.log`));
+      this.testFiles.set(key, file);
     }
     file.write(line);
   }
 
   async close(): Promise<void> {
     this.controller("controller.stopped");
-    await Promise.all([this.controllerFile.close(), ...[...this.files.values()].map((file) => file.close())]);
+    await Promise.all([
+      this.controllerFile.close(),
+      ...[...this.projectFiles.values(), ...this.testFiles.values()].map((file) => file.close()),
+    ]);
   }
 }
 
 export const nullLogWriter: LogWriter = {
   controller: () => undefined,
   project: () => undefined,
+  test: () => undefined,
   close: async () => undefined,
 };

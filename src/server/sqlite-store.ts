@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 
 import Database from "better-sqlite3";
 
-import type { LaunchPreset, Project, Reservation, ServerCapacitySettings, WorktreeStorageHistoryPoint, WorktreeStorageSnapshot } from "@/shared/contracts";
+import type { LaunchPreset, Project, Reservation, ServerCapacitySettings, TestQueueSettings, TestRun, TestRunPhase, WorktreeStorageHistoryPoint, WorktreeStorageSnapshot } from "@/shared/contracts";
 import type { ProjectRegistration, ReservationRequest, StateStore, WorktreeStorageSample } from "./state-store";
 
 type ProjectRow = {
@@ -53,6 +53,32 @@ type StorageRow = {
   node_modules_bytes: number;
   top_directories_json: string;
   measured_at: string;
+};
+
+type TestRunRow = {
+  id: string;
+  project_id: string;
+  worktree_path: string;
+  worktree_head: string;
+  worktree_branch: string | null;
+  worktree_dirty: number;
+  preset_id: string;
+  preset_name: string;
+  adapter: "node" | "django";
+  actor: string;
+  phase: TestRunPhase;
+  queue_position: number | null;
+  executable: string;
+  args_json: string;
+  cwd: string;
+  queued_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  exit_code: number | null;
+  signal: string | null;
+  error: string | null;
+  logs_json: string;
+  idempotency_key: string | null;
 };
 
 const schema = `
@@ -130,6 +156,36 @@ const schema = `
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS test_runs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    worktree_path TEXT NOT NULL,
+    worktree_head TEXT NOT NULL,
+    worktree_branch TEXT,
+    worktree_dirty INTEGER NOT NULL CHECK(worktree_dirty IN (0, 1)),
+    preset_id TEXT NOT NULL,
+    preset_name TEXT NOT NULL,
+    adapter TEXT NOT NULL CHECK(adapter IN ('node', 'django')),
+    actor TEXT NOT NULL,
+    phase TEXT NOT NULL CHECK(phase IN ('queued', 'running', 'passed', 'failed', 'cancelled', 'timed_out', 'interrupted')),
+    queue_position INTEGER,
+    executable TEXT NOT NULL,
+    args_json TEXT NOT NULL,
+    cwd TEXT NOT NULL,
+    queued_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    exit_code INTEGER,
+    signal TEXT,
+    error TEXT,
+    logs_json TEXT NOT NULL DEFAULT '[]',
+    idempotency_key TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS test_runs_project_history ON test_runs(project_id, queued_at DESC);
+  CREATE UNIQUE INDEX IF NOT EXISTS test_runs_actor_idempotency
+    ON test_runs(actor, idempotency_key) WHERE idempotency_key IS NOT NULL;
+
   INSERT OR IGNORE INTO schema_migrations(version, applied_at)
     VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 `;
@@ -169,6 +225,33 @@ function mapReservation(row: ReservationRow): Reservation {
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     maximumExpiresAt: row.maximum_expires_at,
+  };
+}
+
+function mapTestRun(row: TestRunRow): TestRun {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    worktreePath: row.worktree_path,
+    worktreeHead: row.worktree_head,
+    worktreeBranch: row.worktree_branch,
+    worktreeDirty: row.worktree_dirty === 1,
+    presetId: row.preset_id,
+    presetName: row.preset_name,
+    adapter: row.adapter,
+    actor: row.actor,
+    phase: row.phase,
+    queuePosition: row.queue_position,
+    executable: row.executable,
+    args: JSON.parse(row.args_json) as string[],
+    cwd: row.cwd,
+    queuedAt: row.queued_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    exitCode: row.exit_code,
+    signal: row.signal,
+    error: row.error,
+    logs: JSON.parse(row.logs_json) as string[],
   };
 }
 
@@ -358,6 +441,87 @@ export class SqliteStateStore implements StateStore {
         VALUES ('server_capacity.updated', 'local-user', ?, ?)
       `).run(JSON.stringify(settings), now);
     })();
+  }
+
+  getTestQueueSettings(): TestQueueSettings {
+    const row = this.database.prepare("SELECT value_json FROM controller_settings WHERE key = 'test_queue'")
+      .get() as { value_json: string } | undefined;
+    if (!row) return { limit: 1 };
+    const value = JSON.parse(row.value_json) as Partial<TestQueueSettings>;
+    return { limit: Number.isInteger(value.limit) && value.limit! >= 1 && value.limit! <= 16 ? value.limit! : 1 };
+  }
+
+  setTestQueueSettings(settings: TestQueueSettings): void {
+    this.database.transaction(() => {
+      const now = new Date().toISOString();
+      this.database.prepare(`
+        INSERT INTO controller_settings(key, value_json, updated_at)
+        VALUES ('test_queue', ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+      `).run(JSON.stringify(settings), now);
+      this.database.prepare(`
+        INSERT INTO controller_audit_events(event_type, actor, details_json, created_at)
+        VALUES ('test_queue.updated', 'local-user', ?, ?)
+      `).run(JSON.stringify(settings), now);
+    })();
+  }
+
+  listTestRuns(projectId?: string, limit = 50): TestRun[] {
+    const boundedLimit = Math.max(1, Math.min(500, limit));
+    const rows = projectId
+      ? this.database.prepare("SELECT * FROM test_runs WHERE project_id = ? ORDER BY CASE WHEN phase IN ('queued', 'running') THEN 0 ELSE 1 END, queued_at DESC, id DESC LIMIT ?").all(projectId, boundedLimit)
+      : this.database.prepare("SELECT * FROM test_runs ORDER BY CASE WHEN phase IN ('queued', 'running') THEN 0 ELSE 1 END, queued_at DESC, id DESC LIMIT ?").all(boundedLimit);
+    return (rows as TestRunRow[]).map(mapTestRun);
+  }
+
+  getTestRun(id: string): TestRun | null {
+    const row = this.database.prepare("SELECT * FROM test_runs WHERE id = ?").get(id) as TestRunRow | undefined;
+    return row ? mapTestRun(row) : null;
+  }
+
+  findTestRunByIdempotency(actor: string, idempotencyKey: string): TestRun | null {
+    const row = this.database.prepare("SELECT * FROM test_runs WHERE actor = ? AND idempotency_key = ?")
+      .get(actor, idempotencyKey) as TestRunRow | undefined;
+    return row ? mapTestRun(row) : null;
+  }
+
+  saveTestRun(run: TestRun, idempotencyKey?: string): void {
+    this.database.prepare(`
+      INSERT INTO test_runs (
+        id, project_id, worktree_path, worktree_head, worktree_branch, worktree_dirty,
+        preset_id, preset_name, adapter, actor, phase, queue_position, executable,
+        args_json, cwd, queued_at, started_at, finished_at, exit_code, signal, error,
+        logs_json, idempotency_key
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        phase = excluded.phase, queue_position = excluded.queue_position,
+        started_at = excluded.started_at, finished_at = excluded.finished_at,
+        exit_code = excluded.exit_code, signal = excluded.signal, error = excluded.error,
+        logs_json = excluded.logs_json
+    `).run(
+      run.id, run.projectId, run.worktreePath, run.worktreeHead, run.worktreeBranch,
+      run.worktreeDirty ? 1 : 0, run.presetId, run.presetName, run.adapter, run.actor,
+      run.phase, run.queuePosition, run.executable, JSON.stringify(run.args), run.cwd, run.queuedAt,
+      run.startedAt, run.finishedAt, run.exitCode, run.signal, run.error,
+      JSON.stringify(run.logs), idempotencyKey ?? null,
+    );
+    if (["passed", "failed", "cancelled", "timed_out", "interrupted"].includes(run.phase)) {
+      this.database.prepare(`
+        DELETE FROM test_runs WHERE id IN (
+          SELECT id FROM test_runs WHERE project_id = ? AND phase NOT IN ('queued', 'running')
+          ORDER BY queued_at DESC, id DESC LIMIT -1 OFFSET 50
+        )
+      `).run(run.projectId);
+    }
+  }
+
+  markInterruptedTestRuns(): void {
+    const now = new Date().toISOString();
+    this.database.prepare(`
+      UPDATE test_runs SET phase = 'interrupted', finished_at = ?, queue_position = NULL,
+        error = 'Kontroler został zatrzymany przed zakończeniem testu.'
+      WHERE phase IN ('queued', 'running')
+    `).run(now);
   }
 
   getWorktreeStorage(projectId: string, worktreePath: string): WorktreeStorageSnapshot | null {
@@ -670,6 +834,45 @@ export class SqliteStateStore implements StateStore {
           `).run();
         }
         this.recordMigration(9);
+      })();
+    }
+    if (!this.hasMigration(10)) {
+      this.database.transaction(() => {
+        this.database.exec(`
+          CREATE TABLE IF NOT EXISTS test_runs (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            worktree_path TEXT NOT NULL,
+            worktree_head TEXT NOT NULL,
+            worktree_branch TEXT,
+            worktree_dirty INTEGER NOT NULL CHECK(worktree_dirty IN (0, 1)),
+            preset_id TEXT NOT NULL,
+            preset_name TEXT NOT NULL,
+            adapter TEXT NOT NULL CHECK(adapter IN ('node', 'django')),
+            actor TEXT NOT NULL,
+            phase TEXT NOT NULL CHECK(phase IN ('queued', 'running', 'passed', 'failed', 'cancelled', 'timed_out', 'interrupted')),
+            queue_position INTEGER,
+            executable TEXT NOT NULL,
+            args_json TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            queued_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            exit_code INTEGER,
+            signal TEXT,
+            error TEXT,
+            logs_json TEXT NOT NULL DEFAULT '[]',
+            idempotency_key TEXT
+          );
+          CREATE INDEX IF NOT EXISTS test_runs_project_history ON test_runs(project_id, queued_at DESC);
+          CREATE UNIQUE INDEX IF NOT EXISTS test_runs_actor_idempotency
+            ON test_runs(actor, idempotency_key) WHERE idempotency_key IS NOT NULL;
+        `);
+        this.database.prepare(`
+          INSERT OR IGNORE INTO controller_settings(key, value_json, updated_at)
+          VALUES ('test_queue', ?, ?)
+        `).run(JSON.stringify({ limit: 1 }), new Date().toISOString());
+        this.recordMigration(10);
       })();
     }
   }

@@ -19,7 +19,8 @@ async function fixture() {
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "index.html"), "<!doctype html><title>Switcher</title>");
   const capacity = { enabled: true, limit: 2, used: 0, available: 2, holders: [] };
-  const dashboard = vi.fn(async () => ({ projects: [], capacity }));
+  const testQueue = { limit: 1, running: 0, queued: 0 };
+  const dashboard = vi.fn(async () => ({ projects: [], capacity, testQueue }));
   const addProject = vi.fn(async () => undefined);
   const removeProject = vi.fn(async () => ({ id: "project-1", name: "App" }));
   const setProjectTls = vi.fn(async () => undefined);
@@ -28,6 +29,10 @@ async function fixture() {
   const selectEnvironmentProfile = vi.fn(async () => ({ id: "project-1" }));
   const deleteEnvironmentProfile = vi.fn(() => ({ id: "project-1" }));
   const setServerCapacity = vi.fn(() => capacity);
+  const setTestQueueLimit = vi.fn(() => testQueue);
+  const enqueueTest = vi.fn(async () => ({ id: "run-1", phase: "queued" }));
+  const cancelTest = vi.fn(() => ({ id: "run-1", phase: "cancelled" }));
+  const testRun = vi.fn(() => ({ id: "run-1", phase: "running" }));
   const runtimeMetrics = vi.fn(() => ({ projects: [] }));
   const refreshWorktreeStorage = vi.fn(async () => undefined);
   const deleteWorktreeCache = vi.fn(async () => ({ cache: "next" as const, worktreePath: "/code/web-feature", removed: true }));
@@ -38,7 +43,7 @@ async function fixture() {
     directories: [{ name: "code", path: "/home/test/code" }],
     files: [],
   }));
-  const service = { addProject, dashboard, deleteEnvironmentProfile, deleteWorktreeCache, refreshWorktreeStorage, removeProject, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity } as unknown as ControlService;
+  const service = { addProject, cancelTest, dashboard, deleteEnvironmentProfile, deleteWorktreeCache, enqueueTest, refreshWorktreeStorage, removeProject, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity, setTestQueueLimit, testRun } as unknown as ControlService;
   const controller = createControllerServer({
     service,
     directoryBrowser: { list: listDirectories } as unknown as DirectoryBrowser,
@@ -62,7 +67,7 @@ async function fixture() {
     controller.server.listen(0, "127.0.0.1", resolve);
   });
   const address = controller.server.address() as AddressInfo;
-  return { addProject, base: `http://127.0.0.1:${address.port}`, dashboard, deleteEnvironmentProfile, deleteWorktreeCache, listDirectories, refreshWorktreeStorage, removeProject, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity };
+  return { addProject, base: `http://127.0.0.1:${address.port}`, cancelTest, dashboard, deleteEnvironmentProfile, deleteWorktreeCache, enqueueTest, listDirectories, refreshWorktreeStorage, removeProject, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity, setTestQueueLimit, testRun };
 }
 
 afterEach(async () => {
@@ -89,6 +94,7 @@ describe("controller access boundary", () => {
     expect(await response.json()).toEqual({
       projects: [],
       capacity: { enabled: true, limit: 2, used: 0, available: 2, holders: [] },
+      testQueue: { limit: 1, running: 0, queued: 0 },
       mcp: {
         phase: "running",
         endpoint: "http://127.0.0.1:47832/mcp",
@@ -236,6 +242,26 @@ describe("controller access boundary", () => {
     });
     expect(response.status).toBe(200);
     expect(setServerCapacity).toHaveBeenCalledWith({ enabled: true, limit: 2 });
+  });
+
+  it("updates the test limit and controls test runs", async () => {
+    const { base, cancelTest, enqueueTest, setTestQueueLimit, testRun } = await fixture();
+    const headers = { "Content-Type": "application/json", "X-Worktree-Switcher-Token": "test-access-token" };
+    expect((await fetch(`${base}/api/settings/test-queue`, {
+      method: "POST", headers, body: JSON.stringify({ limit: 3 }),
+    })).status).toBe(200);
+    expect(setTestQueueLimit).toHaveBeenCalledWith(3);
+
+    const queued = await fetch(`${base}/api/projects/project-1/tests`, {
+      method: "POST", headers, body: JSON.stringify({ worktreePath: "/code/web", presetId: "node:test" }),
+    });
+    expect(queued.status).toBe(202);
+    expect(enqueueTest).toHaveBeenCalledWith("project-1", "/code/web", "node:test");
+
+    expect((await fetch(`${base}/api/test-runs/run-1`, { headers })).status).toBe(200);
+    expect(testRun).toHaveBeenCalledWith("run-1");
+    expect((await fetch(`${base}/api/test-runs/run-1/cancel`, { method: "POST", headers, body: "{}" })).status).toBe(200);
+    expect(cancelTest).toHaveBeenCalledWith("run-1");
   });
 
   it("queues a storage refresh for an explicit worktree", async () => {

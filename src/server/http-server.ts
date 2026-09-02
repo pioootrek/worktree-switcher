@@ -96,6 +96,22 @@ function parseCapacitySettings(value: unknown): { enabled: boolean; limit: numbe
   return { enabled: record.enabled, limit: record.limit as number };
 }
 
+function parseTestQueueSettings(value: unknown): { limit: number } {
+  const record = strictRecord(value, ["limit"]);
+  if (!Number.isInteger(record.limit) || (record.limit as number) < 1 || (record.limit as number) > 16) {
+    throw new Error("Limit równoległych testów musi być liczbą całkowitą od 1 do 16.");
+  }
+  return { limit: record.limit as number };
+}
+
+function parseTestRun(value: unknown): { worktreePath: string; presetId: string } {
+  const record = strictRecord(value, ["worktreePath", "presetId"]);
+  return {
+    worktreePath: requiredString(record, "worktreePath", 4096),
+    presetId: requiredString(record, "presetId", 160),
+  };
+}
+
 function parseEnvironment(value: unknown): Record<string, string> {
   const record = strictRecord(value, ["environment"]);
   const environment = record.environment;
@@ -187,6 +203,14 @@ function localizedDashboard(dashboard: DashboardResponse, locale: "pl" | "en"): 
         ...snapshot.runtime,
         error: snapshot.runtime.error ? localizeServerMessage(snapshot.runtime.error, locale) : null,
       },
+      testPresets: snapshot.testPresets.map((entry) => ({
+        ...entry,
+        error: entry.error ? localizeServerMessage(entry.error, locale) : null,
+      })),
+      testRuns: snapshot.testRuns.map((run) => ({
+        ...run,
+        error: run.error ? localizeServerMessage(run.error, locale) : null,
+      })),
     })),
   };
 }
@@ -289,6 +313,36 @@ export function createControllerServer(options: {
           const capacity = options.service.setServerCapacity(parseCapacitySettings(await readJson(request)));
           options.events.publish();
           json(response, 200, { capacity });
+          return;
+        }
+        if (request.method === "POST" && url.pathname === "/api/settings/test-queue") {
+          const testQueue = options.service.setTestQueueLimit(parseTestQueueSettings(await readJson(request)).limit);
+          options.events.publish();
+          json(response, 200, { testQueue });
+          return;
+        }
+        const testRunMatch = url.pathname.match(/^\/api\/test-runs\/([^/]+)$/);
+        if (request.method === "GET" && testRunMatch) {
+          const run = options.service.testRun(decodeURIComponent(testRunMatch[1]));
+          json(response, 200, { run: { ...run, error: run.error ? localizeServerMessage(run.error, locale) : null } });
+          return;
+        }
+        const testCancelMatch = url.pathname.match(/^\/api\/test-runs\/([^/]+)\/cancel$/);
+        if (request.method === "POST" && testCancelMatch) {
+          strictRecord(await readJson(request), []);
+          const run = options.service.cancelTest(decodeURIComponent(testCancelMatch[1]));
+          options.events.publish();
+          json(response, 200, { run });
+          return;
+        }
+        const projectTestsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/tests$/);
+        if (request.method === "POST" && projectTestsMatch) {
+          const input = parseTestRun(await readJson(request));
+          const run = await options.service.enqueueTest(
+            decodeURIComponent(projectTestsMatch[1]), input.worktreePath, input.presetId,
+          );
+          options.events.publish();
+          json(response, 202, { run });
           return;
         }
         const operationMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/operation$/);

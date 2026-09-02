@@ -1,6 +1,6 @@
 ---
 audience: "contributors and coding agents"
-last_reviewed: "2026-09-01"
+last_reviewed: "2026-09-02"
 source_of_truth: "product intent and initial architecture of Worktree Switcher"
 status: "active"
 ---
@@ -23,6 +23,11 @@ the worktrees belonging to registered Git repositories and manages their
 development servers. One persistent control plane serves the dashboard. Every
 registered project has an independent runtime slot, stable port, process state,
 logs, and selected worktree.
+
+The controller also manages finite verification jobs against exact discovered
+worktrees. Test adapters discover safe framework-specific presets, while one
+shared queue enforces a global parallel limit and serializes runs within each
+worktree.
 
 For example, one Switch instance may run all of the following concurrently:
 
@@ -179,6 +184,7 @@ text and an icon so meaning does not depend on color perception.
   agent lease.
 - Preserve a stable configured port per project.
 - Show readiness, failure details, and recent logs.
+- Discover, queue, cancel, and retain results for Node.js and Django test or verification presets per worktree.
 - Install the controller as a persistent user-level service and prevent a
   second controller from taking ownership of the same state.
 - Allow a dirty worktree to run while showing a persistent warning.
@@ -213,6 +219,8 @@ design is in `docs/reservations-and-mcp.md`.
   database access inside the single controller process.
 - Use explicit, shell-free executable and argument arrays with per-project
   ports, environment overrides, health checks, and timeouts.
+- Keep finite test jobs separate from long-lived server state. Bound them with
+  a global queue limit and permit at most one active run per worktree.
 - Build the dashboard from owned shadcn/ui source components using the
   `new-york` Radix variant, Tailwind CSS, and token-based theming.
 - Include visible reservations in MVP. Human locks may be indefinite; agent

@@ -31,6 +31,7 @@ second copy behind your back.
 - Run Next.js development servers over HTTP or development HTTPS.
 - Run the controller in a terminal or as a user service on Linux and macOS.
 - Optionally cap the number of concurrently running managed servers.
+- Queue Node.js and Django verification commands per worktree with a configurable global parallel limit.
 - Monitor aggregate RAM, peak RAM, CPU, and process count for each managed server on Linux.
 - Track disk usage for every worktree, including `.next`, `.next/cache`, and `node_modules`.
 - Use the dashboard in English or Polish. English is the default.
@@ -129,6 +130,27 @@ path or removes `node_modules`.
 Dirty worktrees are allowed. The dashboard warns you but does not block the
 server.
 
+## Managed tests
+
+The **Tests** tab discovers finite verification presets separately for every
+worktree. Node.js projects expose `test`, `test:*`, `check`, `lint`,
+`typecheck`, and `build` package scripts. Django projects expose
+`manage.py test` and resolve the Python interpreter inside the selected
+worktree.
+
+Runs enter one controller-wide FIFO queue. The configured parallel limit
+defaults to one, and no more than one run may execute in the same worktree at
+once. Each run records its worktree path, branch, commit, dirty state, actor,
+command, bounded output tail, exit code, and final state in SQLite. Complete
+logs are written under `logs/tests/`. A graceful controller stop cancels active
+runs; after an unexpected stop, unfinished records are marked as interrupted
+on the next start.
+
+Commands are discovered by typed Node.js and Django adapters and are spawned
+without a shell. The browser and MCP select only a discovered preset and an
+exact Git-discovered worktree; neither accepts arbitrary command text or a
+working directory.
+
 ## How it works
 
 ```mermaid
@@ -139,6 +161,7 @@ flowchart LR
     Controller --> Git[Git worktrees]
     Controller --> SQLite[(SQLite)]
     Controller --> Apps[Development servers]
+    Controller --> Tests[Test process queue]
 ```
 
 Next.js builds the dashboard as static files. At runtime, one Node.js controller
@@ -222,9 +245,14 @@ Available tools:
 | --- | --- |
 | `list_projects` | Lists registered projects and their runtime placement |
 | `get_server_capacity` | Reads the global server limit, usage, and slot holders |
+| `get_test_queue` | Reads the global test limit and current queue usage |
 | `get_project_status` | Reads runtime, claim, and selected-worktree state |
 | `get_project_storage` | Reads cached disk usage and history for project worktrees |
 | `list_worktrees` | Lists worktrees discovered for a project |
+| `list_test_presets` | Lists safe presets discovered for each project worktree |
+| `run_test` | Queues a preset for an exact worktree with an idempotency key |
+| `get_test_run` | Reads one run and its bounded output tail |
+| `cancel_test_run` | Cancels a run created by the current MCP session |
 | `set_project_environment` | Replaces the selected profile's literal variables while the server is stopped |
 | `list_environment_profiles` | Lists named profiles and the selected profile |
 | `save_environment_profile` | Creates or replaces a literal environment profile |
@@ -369,6 +397,7 @@ $XDG_STATE_HOME/worktree-switcher/controller.lock
 $XDG_STATE_HOME/worktree-switcher/service-access.json
 $XDG_STATE_HOME/worktree-switcher/logs/controller.log
 $XDG_STATE_HOME/worktree-switcher/logs/projects/<project-id>.log
+$XDG_STATE_HOME/worktree-switcher/logs/tests/<run-id>.log
 ```
 
 The access record, lock, and token are owner-only files. Logs rotate at 5 MiB

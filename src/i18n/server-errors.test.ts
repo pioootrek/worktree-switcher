@@ -27,5 +27,9 @@ describe("server error localization", () => {
       .toBe("The default profile cannot be deleted.");
     expect(localizeServerMessage("Zmienna PORT jest zarządzana przez kontroler.", "en"))
       .toBe("The PORT variable is managed by the controller.");
+    expect(localizeServerMessage("Limit równoległych testów musi być liczbą całkowitą od 1 do 16.", "en"))
+      .toBe("The parallel test limit must be an integer from 1 to 16.");
+    expect(localizeServerMessage("Nie znaleziono uruchomienia testu.", "en"))
+      .toBe("Test run not found.");
   });
 });

@@ -28,6 +28,7 @@ import { ProcessManager } from "../server/process-manager";
 import { loadOrCreateSecret } from "../server/secret-file";
 import { SqliteStateStore } from "../server/sqlite-store";
 import { WorktreeStorageManager } from "../server/worktree-storage";
+import { TestJobManager } from "../server/test-job-manager";
 
 function option(name: string, args = process.argv): string | undefined {
   const index = args.indexOf(name);
@@ -103,7 +104,8 @@ async function main(): Promise<void> {
     memoryWarningThresholdBytes: memoryWarningMiB === null ? null : Math.round(memoryWarningMiB * 1024 * 1024),
   });
   const storage = new WorktreeStorageManager(store, undefined, events.publish);
-  const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs, undefined, storage);
+  const tests = new TestJobManager(store, logs, events.publish);
+  const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs, undefined, storage, undefined, undefined, tests);
   const accessToken = randomBytes(32).toString("base64url");
   const sessionId = randomBytes(8).toString("hex");
   const mcpSessions = new Set<string>();

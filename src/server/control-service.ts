@@ -1,13 +1,15 @@
 import { createHash, randomBytes } from "node:crypto";
 import { basename, resolve } from "node:path";
 
-import type { CacheDeletionResult, DashboardResponse, Project, ProjectSnapshot, Reservation, RuntimeMetricsResponse, SafeCacheKind, ServerCapacitySettings, ServerCapacityStatus, Worktree } from "@/shared/contracts";
+import type { CacheDeletionResult, DashboardResponse, Project, ProjectSnapshot, Reservation, RuntimeMetricsResponse, SafeCacheKind, ServerCapacitySettings, ServerCapacityStatus, TestQueueStatus, TestRun, Worktree, WorktreeTestPresets } from "@/shared/contracts";
 import type { GitWorktreeReader } from "./git-worktrees";
 import { type LaunchCommandResolver, type NextTlsConfiguration, ProjectLaunchCommandResolver } from "./launch-command";
 import { type LogWriter, nullLogWriter } from "./log-writer";
 import { ProcessManager } from "./process-manager";
 import type { NewProject, ReservationRequest, StateStore } from "./state-store";
 import { AllowlistedWorktreeCacheCleaner, type WorktreeCacheCleaner, type WorktreeStorageManager } from "./worktree-storage";
+import { ProjectTestCommandResolver } from "./test-command";
+import type { TestJobManager } from "./test-job-manager";
 
 const AGENT_LEASE_DEFAULT_SECONDS = 30 * 60;
 const AGENT_LEASE_MAX_SECONDS = 8 * 60 * 60;
@@ -57,11 +59,13 @@ export class ControlService {
     private readonly commands: LaunchCommandResolver = new ProjectLaunchCommandResolver(),
     private readonly storage?: WorktreeStorageManager,
     private readonly cacheCleaner: WorktreeCacheCleaner = new AllowlistedWorktreeCacheCleaner(),
+    private readonly testCommands: ProjectTestCommandResolver = new ProjectTestCommandResolver(),
+    private readonly tests?: TestJobManager,
   ) {}
 
   async dashboard(): Promise<DashboardResponse> {
     const projects = await Promise.all(this.store.listProjects().map((project) => this.snapshot(project, true)));
-    return { projects, capacity: this.capacityStatus(projects) };
+    return { projects, capacity: this.capacityStatus(projects), testQueue: this.testQueueStatus() };
   }
 
   serverCapacity(): ServerCapacityStatus {
@@ -84,6 +88,67 @@ export class ControlService {
     this.store.setServerCapacitySettings(settings);
     this.logs.controller("server_capacity.updated", { ...settings });
     return this.capacityStatus();
+  }
+
+  testQueueStatus(): TestQueueStatus {
+    if (this.tests) return this.tests.status();
+    const runs = this.store.listTestRuns(undefined, 500);
+    return {
+      ...this.store.getTestQueueSettings(),
+      running: runs.filter(({ phase }) => phase === "running").length,
+      queued: runs.filter(({ phase }) => phase === "queued").length,
+    };
+  }
+
+  setTestQueueLimit(limit: number): TestQueueStatus {
+    const status = this.requireTests().setLimit(limit);
+    this.logs.controller("test_queue.updated", { limit });
+    return status;
+  }
+
+  async enqueueTest(
+    projectId: string,
+    worktreePath: string,
+    presetId: string,
+    actor: OperationActor = { owner: "local-user" },
+    idempotencyKey?: string,
+  ): Promise<TestRun> {
+    const project = this.requireProject(projectId);
+    const worktrees = await this.git.list(project.repositoryPath);
+    const worktree = this.resolveWorktree(project, worktrees, worktreePath);
+    this.assertReservationAllows(projectId, worktree.path, actor);
+    const command = this.testCommands.resolve(worktree.path, presetId);
+    const run = this.requireTests().enqueue({
+      projectId,
+      worktree,
+      command,
+      environment: project.environment,
+      actor: actor.owner,
+      idempotencyKey,
+    });
+    this.logs.controller("test_run.queued", {
+      runId: run.id,
+      projectId,
+      worktreePath: worktree.path,
+      presetId,
+      actor: actor.owner,
+    });
+    return run;
+  }
+
+  cancelTest(runId: string, actor: OperationActor = { owner: "local-user" }): TestRun {
+    const run = this.store.getTestRun(runId);
+    if (!run) throw new Error("Nie znaleziono uruchomienia testu.");
+    this.requireProject(run.projectId);
+    const cancelled = this.requireTests().cancel(runId, actor.owner);
+    this.logs.controller("test_run.cancelled", { runId, projectId: run.projectId, actor: actor.owner });
+    return cancelled;
+  }
+
+  testRun(runId: string): TestRun {
+    const run = this.store.getTestRun(runId);
+    if (!run) throw new Error("Nie znaleziono uruchomienia testu.");
+    return run;
   }
 
   async addProject(input: NewProject): Promise<Project> {
@@ -120,6 +185,9 @@ export class ControlService {
   async removeProject(projectId: string, actor: OperationActor = { owner: "local-user" }): Promise<Project> {
     return this.serialized(projectId, async () => {
       const project = this.requireProject(projectId);
+      if (this.store.listTestRuns(projectId, 500).some(({ phase }) => phase === "queued" || phase === "running")) {
+        throw new Error("Anuluj testy projektu przed jego usunięciem.");
+      }
       this.assertReservationAllows(
         projectId,
         this.processes.snapshot(projectId).worktreePath ?? project.selectedWorktreePath,
@@ -463,6 +531,9 @@ export class ControlService {
       if (this.storage?.isBusy(projectId, selected.path)) {
         throw new Error("Poczekaj na zakończenie pomiaru dysku przed usunięciem katalogu .next.");
       }
+      if (this.store.listTestRuns(projectId, 500).some((run) => run.worktreePath === selected.path && (run.phase === "queued" || run.phase === "running"))) {
+        throw new Error("Poczekaj na zakończenie testów tego worktree przed usunięciem katalogu .next.");
+      }
       const result = await this.cacheCleaner.remove(selected.path, cache);
       this.store.recordProjectEvent(projectId, "worktree_cache.delete_succeeded", "local-user", { ...auditDetails, removed: result.removed });
       this.storage?.queue(projectId, selected.path, true);
@@ -478,6 +549,7 @@ export class ControlService {
   }
 
   async shutdown(): Promise<void> {
+    await this.tests?.shutdown();
     await this.processes.stopAll();
     await this.storage?.close();
     this.store.close();
@@ -495,6 +567,14 @@ export class ControlService {
         reservation: this.store.getActiveReservation(project.id),
         worktrees,
         storage: this.storage?.snapshots(project.id, worktreePaths) ?? [],
+        testPresets: worktrees.map((worktree): WorktreeTestPresets => {
+          try {
+            return { worktreePath: worktree.path, presets: this.testCommands.discover(worktree.path), error: null };
+          } catch (error) {
+            return { worktreePath: worktree.path, presets: [], error: error instanceof Error ? error.message : String(error) };
+          }
+        }),
+        testRuns: this.store.listTestRuns(project.id, 20),
       };
     } catch (error) {
       return {
@@ -503,6 +583,8 @@ export class ControlService {
         reservation: this.store.getActiveReservation(project.id),
         worktrees: [],
         storage: [],
+        testPresets: [],
+        testRuns: this.store.listTestRuns(project.id, 20),
         discoveryError: error instanceof Error ? error.message : String(error),
       };
     }
@@ -531,6 +613,11 @@ export class ControlService {
     const project = this.store.getProject(id);
     if (!project) throw new Error("Nie znaleziono projektu.");
     return project;
+  }
+
+  private requireTests(): TestJobManager {
+    if (!this.tests) throw new Error("Kolejka testów nie jest dostępna w tym trybie kontrolera.");
+    return this.tests;
   }
 
   private acquireCapacity(project: Project): void {
