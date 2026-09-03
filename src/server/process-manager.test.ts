@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Project } from "@/shared/contracts";
 import { ProcessManager } from "./process-manager";
@@ -53,6 +53,7 @@ async function waitFor(check: () => boolean, timeoutMs = 2_000): Promise<void> {
 
 afterEach(async () => {
   await Promise.all(managers.splice(0).map((manager) => manager.stopAll()));
+  vi.unstubAllEnvs();
 });
 
 describe("ProcessManager", () => {
@@ -74,6 +75,19 @@ describe("ProcessManager", () => {
     fixture.args = ["-e", "require('node:http').createServer((_,r)=>r.end(process.env.SWITCHER_TEST_VALUE)).listen(Number(process.env.PORT),'127.0.0.1')"];
     await manager.start(fixture, process.cwd());
     expect(await (await fetch(`http://127.0.0.1:${fixture.port}`)).text()).toBe("injected");
+  });
+
+  it("uses development NODE_ENV when the controller runs in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const manager = new ProcessManager();
+    managers.push(manager);
+    const fixture = project(await unusedPort());
+    fixture.environment = { NODE_ENV: "production" };
+    fixture.args = ["-e", "require('node:http').createServer((_,r)=>r.end(process.env.NODE_ENV)).listen(Number(process.env.PORT),'127.0.0.1')"];
+
+    await manager.start(fixture, process.cwd());
+
+    expect(await (await fetch(`http://127.0.0.1:${fixture.port}`)).text()).toBe("development");
   });
 
   it("does not kill an unrelated process occupying the port", async () => {
