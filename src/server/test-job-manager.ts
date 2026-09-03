@@ -102,7 +102,10 @@ export class TestJobManager {
       logs: [],
     };
     this.store.saveTestRun(run, input.idempotencyKey);
-    this.environments.set(run.id, { ...input.environment, ...input.command.environment });
+    this.environments.set(run.id, {
+      ...inheritedRuntimeEnvironment(input.environment),
+      ...(input.command.nodeEnvironment ? { NODE_ENV: input.command.nodeEnvironment } : {}),
+    });
     this.timeouts.set(run.id, input.command.preset.timeoutMs);
     this.write(run, `$ ${run.executable} ${run.args.join(" ")}`);
     this.persistNow(run);

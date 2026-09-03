@@ -44,7 +44,7 @@ describe("TestJobManager", () => {
     const { store, project, manager, worktree, command } = fixture();
     const inspectEnvironment = command(20);
     inspectEnvironment.args = ["-e", "console.log(`NODE_ENV=${process.env.NODE_ENV ?? '<unset>'}`)"];
-    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: inspectEnvironment, environment: {}, actor: "local-user" });
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: inspectEnvironment, environment: { NODE_ENV: "production" }, actor: "local-user" });
 
     await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"), { timeout: 2_000 });
     expect(store.getTestRun(run.id)?.logs).toContain("NODE_ENV=<unset>");
@@ -57,9 +57,9 @@ describe("TestJobManager", () => {
     vi.stubEnv("NODE_ENV", "production");
     const { store, project, manager, worktree, command } = fixture();
     const inspectEnvironment = command(20);
-    inspectEnvironment.environment = { NODE_ENV: "test" };
+    inspectEnvironment.nodeEnvironment = "test";
     inspectEnvironment.args = ["-e", "console.log(`NODE_ENV=${process.env.NODE_ENV ?? '<unset>'}`)"];
-    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: inspectEnvironment, environment: {}, actor: "local-user" });
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: inspectEnvironment, environment: { NODE_ENV: "production" }, actor: "local-user" });
 
     await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"), { timeout: 2_000 });
     expect(store.getTestRun(run.id)?.logs).toContain("NODE_ENV=test");
@@ -72,6 +72,7 @@ describe("TestJobManager", () => {
     const { store, project, manager, worktree, command } = fixture();
     manager.setLimit(2);
     const first = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(1_000), environment: {}, actor: "local-user" });
+    await vi.waitFor(() => expect(store.getTestRun(first.id)?.phase).toBe("running"));
     const second = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(10), environment: {}, actor: "local-user" });
     const third = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/b"), command: command(1_000), environment: {}, actor: "local-user" });
 
@@ -110,8 +111,8 @@ describe("TestJobManager", () => {
     longRunning.preset.timeoutMs = 30_000;
     longRunning.args = ["-e", "console.log('ready'); setInterval(() => {}, 1000)"];
     const running = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: longRunning, environment: {}, actor: "agent:mcp:one" });
-    const queued = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/b"), command: command(20), environment: {}, actor: "agent:mcp:one" });
     await vi.waitFor(() => expect(store.getTestRun(running.id)?.logs).toContain("ready"));
+    const queued = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/b"), command: command(20), environment: {}, actor: "agent:mcp:one" });
     expect(() => manager.cancel(running.id, "agent:mcp:other")).toThrow("autor");
     expect(manager.cancel(queued.id, "agent:mcp:one").phase).toBe("cancelled");
     expect(manager.cancel(running.id, "agent:mcp:one")).toMatchObject({ phase: "running", finishedAt: null });
