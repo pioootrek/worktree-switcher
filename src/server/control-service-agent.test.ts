@@ -251,6 +251,7 @@ describe("ControlService agent claims", () => {
       SWITCHER_TEST_VALUE: "staging",
     });
     await expect(service.setProjectEnvironment(project.id, { PORT: "9000" })).rejects.toThrow("PORT");
+    await expect(service.setProjectEnvironment(project.id, { NODE_ENV: "production" })).rejects.toThrow("NODE_ENV");
     await expect(service.setProjectEnvironment(project.id, { NODE_OPTIONS: "--require=/tmp/payload.js" })).rejects.toThrow("NODE_OPTIONS");
     await expect(service.setProjectEnvironment(project.id, { DYLD_INSERT_LIBRARIES: "/tmp/payload.dylib" })).rejects.toThrow("DYLD_INSERT_LIBRARIES");
     await expect(service.setProjectEnvironment(project.id, { "INVALID-NAME": "value" })).rejects.toThrow("INVALID-NAME");

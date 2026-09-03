@@ -5,6 +5,7 @@ import { networkInterfaces } from "node:os";
 import type { Project, RuntimeFailure, RuntimeResourceMetrics, RuntimeSnapshot } from "@/shared/contracts";
 import { type LogWriter, nullLogWriter } from "./log-writer";
 import { defaultProcessResourceSampler, type ProcessResourceSampler, type RawResourceSample } from "./resource-monitor";
+import { inheritedRuntimeEnvironment } from "./runtime-environment";
 import { portInUseFailure, processExitFailure, spawnFailure, timeoutFailure } from "./runtime-failure";
 
 const MAX_LOG_LINES = 400;
@@ -139,7 +140,12 @@ export class ProcessManager {
 
     const child = spawn(project.executable, project.args, {
       cwd: worktreePath,
-      env: { ...process.env, ...project.environment, PORT: String(project.port) },
+      env: {
+        ...inheritedRuntimeEnvironment(),
+        ...project.environment,
+        PORT: String(project.port),
+        NODE_ENV: "development",
+      },
       detached: process.platform !== "win32",
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],

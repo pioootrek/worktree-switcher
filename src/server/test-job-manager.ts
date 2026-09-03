@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 
 import type { TestQueueStatus, TestRun, Worktree } from "@/shared/contracts";
 import type { LogWriter } from "./log-writer";
+import { inheritedRuntimeEnvironment } from "./runtime-environment";
 import type { StateStore } from "./state-store";
 import type { TestCommand } from "./test-command";
 
@@ -101,7 +102,7 @@ export class TestJobManager {
       logs: [],
     };
     this.store.saveTestRun(run, input.idempotencyKey);
-    this.environments.set(run.id, input.environment);
+    this.environments.set(run.id, { ...input.environment, ...input.command.environment });
     this.timeouts.set(run.id, input.command.preset.timeoutMs);
     this.write(run, `$ ${run.executable} ${run.args.join(" ")}`);
     this.persistNow(run);
@@ -183,7 +184,7 @@ export class TestJobManager {
     try {
       child = spawn(run.executable, run.args, {
         cwd: run.cwd,
-        env: { ...process.env, ...(this.environments.get(run.id) ?? {}) },
+        env: { ...inheritedRuntimeEnvironment(), ...(this.environments.get(run.id) ?? {}) },
         detached: process.platform !== "win32",
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],

@@ -1,6 +1,6 @@
 ---
 audience: "contributors and coding agents"
-last_reviewed: "2026-09-02"
+last_reviewed: "2026-09-03"
 source_of_truth: "product intent and initial architecture of Worktree Switcher"
 status: "active"
 ---
@@ -93,6 +93,9 @@ and Django processes. The selected profile persists across worktree switches;
 changing an active profile requires a controlled restart. Controller and runtime
 loader variables such as `PORT`, `NODE_ENV`, `PATH`, `NODE_OPTIONS`, dynamic
 loader paths, and Python import paths cannot be overridden, and audit events record variable names without values.
+The controller's own `NODE_ENV` is never inherited by managed children. Development
+servers run with `NODE_ENV=development`; finite test jobs leave it unset unless a
+trusted test adapter explicitly selects a value.
 Secrets, environment files, relative working directories, PATH prefixes, and
 required runtime directories remain part of the broader profile backlog.
 

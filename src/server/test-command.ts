@@ -9,6 +9,7 @@ export interface TestCommand {
   executable: string;
   args: string[];
   cwd: string;
+  environment?: Record<string, string>;
 }
 
 export interface TestCommandAdapter {

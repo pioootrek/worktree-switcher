@@ -16,6 +16,7 @@ const managers: TestJobManager[] = [];
 afterEach(async () => {
   await Promise.all(managers.splice(0).map((manager) => manager.shutdown()));
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  vi.unstubAllEnvs();
 });
 
 function fixture() {
@@ -38,12 +39,41 @@ function fixture() {
 }
 
 describe("TestJobManager", () => {
+  it("does not inherit production NODE_ENV from the controller", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const { store, project, manager, worktree, command } = fixture();
+    const inspectEnvironment = command(20);
+    inspectEnvironment.args = ["-e", "console.log(`NODE_ENV=${process.env.NODE_ENV ?? '<unset>'}`)"];
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: inspectEnvironment, environment: {}, actor: "local-user" });
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"), { timeout: 2_000 });
+    expect(store.getTestRun(run.id)?.logs).toContain("NODE_ENV=<unset>");
+    await manager.shutdown();
+    store.close();
+    managers.splice(managers.indexOf(manager), 1);
+  });
+
+  it("allows a trusted test command adapter to set NODE_ENV explicitly", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const { store, project, manager, worktree, command } = fixture();
+    const inspectEnvironment = command(20);
+    inspectEnvironment.environment = { NODE_ENV: "test" };
+    inspectEnvironment.args = ["-e", "console.log(`NODE_ENV=${process.env.NODE_ENV ?? '<unset>'}`)"];
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: inspectEnvironment, environment: {}, actor: "local-user" });
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"), { timeout: 2_000 });
+    expect(store.getTestRun(run.id)?.logs).toContain("NODE_ENV=test");
+    await manager.shutdown();
+    store.close();
+    managers.splice(managers.indexOf(manager), 1);
+  });
+
   it("honors the global limit and runs at most one test per worktree", async () => {
     const { store, project, manager, worktree, command } = fixture();
     manager.setLimit(2);
-    const first = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(250), environment: {}, actor: "local-user" });
+    const first = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(1_000), environment: {}, actor: "local-user" });
     const second = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(10), environment: {}, actor: "local-user" });
-    const third = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/b"), command: command(250), environment: {}, actor: "local-user" });
+    const third = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/b"), command: command(1_000), environment: {}, actor: "local-user" });
 
     await vi.waitFor(() => expect(manager.status()).toMatchObject({ running: 2, queued: 1 }));
     expect(store.getTestRun(first.id)?.phase).toBe("running");
