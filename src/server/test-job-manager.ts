@@ -187,7 +187,8 @@ export class TestJobManager {
     try {
       child = spawn(run.executable, run.args, {
         cwd: run.cwd,
-        env: { ...inheritedRuntimeEnvironment(), ...(this.environments.get(run.id) ?? {}) },
+        // Next.js declares ProcessEnv.NODE_ENV as required, but Node child processes permit it to be omitted.
+        env: { ...inheritedRuntimeEnvironment(), ...(this.environments.get(run.id) ?? {}) } as NodeJS.ProcessEnv,
         detached: process.platform !== "win32",
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],

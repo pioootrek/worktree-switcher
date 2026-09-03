@@ -82,6 +82,7 @@ describe("ProcessManager", () => {
     const manager = new ProcessManager();
     managers.push(manager);
     const fixture = project(await unusedPort());
+    fixture.environment = { NODE_ENV: "production" };
     fixture.args = ["-e", "require('node:http').createServer((_,r)=>r.end(process.env.NODE_ENV)).listen(Number(process.env.PORT),'127.0.0.1')"];
 
     await manager.start(fixture, process.cwd());
