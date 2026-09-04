@@ -99,6 +99,14 @@ switch the development server. If an end-to-end test also needs the managed
 server, claim the project separately and verify that the server and test target
 the same worktree.
 
+A test process does not inherit the environment of the selected development
+server profile or of the controller. It receives a fixed system allowlist, the
+variables its test profile declares, and controller-owned metadata such as the
+managed server URL. Read `list_test_environment_profiles` when a preset needs
+flags, fixtures, or a database guard, and report a missing variable instead of
+running the command in a terminal to work around it. Only change a profile or
+its preset assignment when the user asks for that change.
+
 Do not bypass an available managed test preset by starting the same command in
 a terminal. If test-queue tools are unavailable, follow the repository's own
 finite verification command and host resource policy.

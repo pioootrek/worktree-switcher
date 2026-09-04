@@ -325,6 +325,49 @@ export class McpRuntime {
       project: await english(() => this.service.deleteEnvironmentProfile(projectId, name, actorFor(projectId))),
     }));
 
+    server.registerTool("list_test_environment_profiles", {
+      description: "List a project's test environment profiles, their policy, and the profile assigned to each test preset. Variable names are returned without values.",
+      inputSchema: { projectId: z.string().uuid() },
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    }, async ({ projectId }) => jsonContent(await english(() => this.service.testEnvironmentProfiles(projectId))));
+
+    server.registerTool("save_test_environment_profile", {
+      description: "Create or replace a test environment profile. Test processes start from a fixed system allowlist; a profile only adds its own variables. Inheriting a development-server profile requires naming that profile explicitly.",
+      inputSchema: {
+        projectId: z.string().uuid(),
+        name: z.string().min(1).max(40),
+        environment: z.record(z.string(), z.string()),
+        mode: z.enum(["clean", "inherit-server-profile"]).optional(),
+        serverProfile: z.string().min(1).max(40).nullable().optional(),
+        nodeEnv: z.enum(["development", "production", "test"]).nullable().optional(),
+        requiredVariables: z.array(z.string().min(1).max(128)).optional(),
+      },
+      annotations: { destructiveHint: true, idempotentHint: true },
+    }, async ({ projectId, name, environment, mode, serverProfile, nodeEnv, requiredVariables }) => {
+      await english(() => this.service.saveTestEnvironmentProfile(
+        projectId, { name, environment, mode, serverProfile, nodeEnv, requiredVariables }, actorFor(projectId),
+      ));
+      return jsonContent(await english(() => this.service.testEnvironmentProfiles(projectId)));
+    });
+
+    server.registerTool("delete_test_environment_profile", {
+      description: "Delete a test environment profile that is neither built in nor assigned to a preset.",
+      inputSchema: { projectId: z.string().uuid(), name: z.string().min(1).max(40) },
+      annotations: { destructiveHint: true, idempotentHint: true },
+    }, async ({ projectId, name }) => {
+      await english(() => this.service.deleteTestEnvironmentProfile(projectId, name, actorFor(projectId)));
+      return jsonContent(await english(() => this.service.testEnvironmentProfiles(projectId)));
+    });
+
+    server.registerTool("assign_test_preset_profile", {
+      description: "Assign a test environment profile to one discovered preset, or clear the assignment to fall back to the built-in default.",
+      inputSchema: { projectId: z.string().uuid(), presetId: z.string().min(1).max(160), name: z.string().min(1).max(40).nullable() },
+      annotations: { destructiveHint: true, idempotentHint: true },
+    }, async ({ projectId, presetId, name }) => {
+      await english(() => this.service.assignTestPresetProfile(projectId, presetId, name, actorFor(projectId)));
+      return jsonContent(await english(() => this.service.testEnvironmentProfiles(projectId)));
+    });
+
     server.registerTool("claim_project", {
       description: "Acquire an expiring agent claim and atomically move/start the project server on a discovered worktree. The claim remains held if startup fails.",
       inputSchema: {

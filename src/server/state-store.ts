@@ -1,4 +1,4 @@
-import type { DevServerTlsMode, EnvironmentProfile, LaunchPreset, Project, Reservation, ServerCapacitySettings, TestQueueSettings, TestRun, WorktreeStorageHistoryPoint, WorktreeStorageSnapshot } from "@/shared/contracts";
+import type { DevServerTlsMode, EnvironmentProfile, LaunchPreset, Project, Reservation, ServerCapacitySettings, TestEnvironmentProfile, TestQueueSettings, TestRun, WorktreeStorageHistoryPoint, WorktreeStorageSnapshot } from "@/shared/contracts";
 
 export interface WorktreeStorageSample extends WorktreeStorageHistoryPoint {
   projectId: string;
@@ -51,6 +51,9 @@ export interface StateStore {
   saveProjectEnvironmentProfile(projectId: string, profile: EnvironmentProfile, actor: string): void;
   deleteProjectEnvironmentProfile(projectId: string, profileName: string, actor: string): void;
   selectProjectEnvironmentProfile(projectId: string, profileName: string, actor: string): void;
+  saveProjectTestEnvironmentProfile(projectId: string, profile: TestEnvironmentProfile, actor: string): void;
+  deleteProjectTestEnvironmentProfile(projectId: string, profileName: string, actor: string): void;
+  assignProjectTestPresetProfile(projectId: string, presetId: string, profileName: string | null, actor: string): void;
   setSelectedWorktree(projectId: string, path: string): void;
   getServerCapacitySettings(): ServerCapacitySettings;
   setServerCapacitySettings(settings: ServerCapacitySettings): void;

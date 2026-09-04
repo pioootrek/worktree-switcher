@@ -26,6 +26,8 @@ function project(port: number): Project {
     environment: {},
     environmentProfiles: [{ name: "default", environment: {} }],
     selectedEnvironmentProfile: "default",
+    testEnvironmentProfiles: [],
+    testPresetProfiles: {},
     healthcheckPath: "/",
     startupTimeoutMs: 5000,
     selectedWorktreePath: process.cwd(),

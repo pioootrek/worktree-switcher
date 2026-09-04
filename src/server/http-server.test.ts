@@ -28,6 +28,10 @@ async function fixture() {
   const saveEnvironmentProfile = vi.fn(async () => ({ id: "project-1" }));
   const selectEnvironmentProfile = vi.fn(async () => ({ id: "project-1" }));
   const deleteEnvironmentProfile = vi.fn(() => ({ id: "project-1" }));
+  const testEnvironmentProfiles = vi.fn(() => ({ profiles: [], presetProfiles: {}, systemVariableNames: ["PATH"] }));
+  const saveTestEnvironmentProfile = vi.fn(async () => ({ id: "project-1" }));
+  const deleteTestEnvironmentProfile = vi.fn(async () => ({ id: "project-1" }));
+  const assignTestPresetProfile = vi.fn(async () => ({ id: "project-1" }));
   const setServerCapacity = vi.fn(() => capacity);
   const setTestQueueLimit = vi.fn(() => testQueue);
   const enqueueTest = vi.fn(async () => ({ id: "run-1", phase: "queued" }));
@@ -43,7 +47,7 @@ async function fixture() {
     directories: [{ name: "code", path: "/home/test/code" }],
     files: [],
   }));
-  const service = { addProject, cancelTest, dashboard, deleteEnvironmentProfile, deleteWorktreeCache, enqueueTest, refreshWorktreeStorage, removeProject, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity, setTestQueueLimit, testRun } as unknown as ControlService;
+  const service = { addProject, assignTestPresetProfile, cancelTest, dashboard, deleteEnvironmentProfile, deleteTestEnvironmentProfile, saveTestEnvironmentProfile, testEnvironmentProfiles, deleteWorktreeCache, enqueueTest, refreshWorktreeStorage, removeProject, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity, setTestQueueLimit, testRun } as unknown as ControlService;
   const controller = createControllerServer({
     service,
     directoryBrowser: { list: listDirectories } as unknown as DirectoryBrowser,
@@ -67,7 +71,7 @@ async function fixture() {
     controller.server.listen(0, "127.0.0.1", resolve);
   });
   const address = controller.server.address() as AddressInfo;
-  return { addProject, base: `http://127.0.0.1:${address.port}`, cancelTest, dashboard, deleteEnvironmentProfile, deleteWorktreeCache, enqueueTest, listDirectories, refreshWorktreeStorage, removeProject, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity, setTestQueueLimit, testRun };
+  return { addProject, assignTestPresetProfile, base: `http://127.0.0.1:${address.port}`, cancelTest, deleteTestEnvironmentProfile, saveTestEnvironmentProfile, testEnvironmentProfiles, dashboard, deleteEnvironmentProfile, deleteWorktreeCache, enqueueTest, listDirectories, refreshWorktreeStorage, removeProject, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity, setTestQueueLimit, testRun };
 }
 
 afterEach(async () => {
@@ -262,6 +266,40 @@ describe("controller access boundary", () => {
     expect(testRun).toHaveBeenCalledWith("run-1");
     expect((await fetch(`${base}/api/test-runs/run-1/cancel`, { method: "POST", headers, body: "{}" })).status).toBe(200);
     expect(cancelTest).toHaveBeenCalledWith("run-1");
+  });
+
+  it("manages test environment profiles and preset assignments", async () => {
+    const { base, assignTestPresetProfile, saveTestEnvironmentProfile, testEnvironmentProfiles } = await fixture();
+    const headers = { "Content-Type": "application/json", "X-Worktree-Switcher-Token": "test-access-token" };
+
+    const listed = await fetch(`${base}/api/projects/project-1/test-environment-profiles`, { headers });
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toEqual({ profiles: [], presetProfiles: {}, systemVariableNames: ["PATH"] });
+    expect(testEnvironmentProfiles).toHaveBeenCalledWith("project-1");
+
+    const saved = await fetch(`${base}/api/projects/project-1/test-environment-profiles`, {
+      method: "POST", headers, body: JSON.stringify({ name: "e2e", environment: { E2E_RESET_DB_CONFIRM: "yes" }, mode: "inherit-server-profile", serverProfile: "qa-shots", nodeEnv: null, requiredVariables: ["PLAYWRIGHT_E2E"] }),
+    });
+    expect(saved.status).toBe(200);
+    expect(saveTestEnvironmentProfile).toHaveBeenCalledWith("project-1", {
+      name: "e2e",
+      environment: { E2E_RESET_DB_CONFIRM: "yes" },
+      mode: "inherit-server-profile",
+      serverProfile: "qa-shots",
+      nodeEnv: null,
+      requiredVariables: ["PLAYWRIGHT_E2E"],
+    });
+
+    const assigned = await fetch(`${base}/api/projects/project-1/test-preset-profiles`, {
+      method: "POST", headers, body: JSON.stringify({ presetId: "node:test", name: "e2e" }),
+    });
+    expect(assigned.status).toBe(200);
+    expect(assignTestPresetProfile).toHaveBeenCalledWith("project-1", "node:test", "e2e");
+
+    const rejected = await fetch(`${base}/api/projects/project-1/test-environment-profiles`, {
+      method: "POST", headers, body: JSON.stringify({ name: "e2e", environment: {}, mode: "wrong" }),
+    });
+    expect(rejected.status).toBe(400);
   });
 
   it("queues a storage refresh for an explicit worktree", async () => {

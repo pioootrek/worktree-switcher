@@ -3,8 +3,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 
 import type { TestQueueStatus, TestRun, Worktree } from "@/shared/contracts";
 import type { LogWriter } from "./log-writer";
-import { inheritedRuntimeEnvironment } from "./runtime-environment";
 import type { StateStore } from "./state-store";
+import type { ResolvedTestEnvironment } from "./test-environment";
 import type { TestCommand } from "./test-command";
 
 const MAX_LOG_LINES = 200;
@@ -25,7 +25,7 @@ export interface EnqueueTestInput {
   projectId: string;
   worktree: Worktree;
   command: TestCommand;
-  environment: Record<string, string>;
+  environment: ResolvedTestEnvironment;
   actor: string;
   idempotencyKey?: string;
 }
@@ -100,12 +100,13 @@ export class TestJobManager {
       signal: null,
       error: null,
       logs: [],
+      environmentMode: input.environment.mode,
+      environmentProfile: input.environment.profile,
+      inheritedServerProfile: input.environment.inheritedServerProfile,
+      environmentVariableNames: input.environment.variableNames,
     };
     this.store.saveTestRun(run, input.idempotencyKey);
-    this.environments.set(run.id, {
-      ...inheritedRuntimeEnvironment(input.environment),
-      ...(input.command.nodeEnvironment ? { NODE_ENV: input.command.nodeEnvironment } : {}),
-    });
+    this.environments.set(run.id, input.environment.environment);
     this.timeouts.set(run.id, input.command.preset.timeoutMs);
     this.write(run, `$ ${run.executable} ${run.args.join(" ")}`);
     this.persistNow(run);
@@ -187,8 +188,10 @@ export class TestJobManager {
     try {
       child = spawn(run.executable, run.args, {
         cwd: run.cwd,
-        // Next.js declares ProcessEnv.NODE_ENV as required, but Node child processes permit it to be omitted.
-        env: { ...inheritedRuntimeEnvironment(), ...(this.environments.get(run.id) ?? {}) } as NodeJS.ProcessEnv,
+        // The resolved policy is the complete environment: nothing of the controller's own
+        // process environment reaches a test unless its profile asked for it. Next.js declares
+        // ProcessEnv.NODE_ENV as required, but Node child processes permit it to be omitted.
+        env: (this.environments.get(run.id) ?? {}) as NodeJS.ProcessEnv,
         detached: process.platform !== "win32",
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
