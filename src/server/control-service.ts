@@ -50,6 +50,13 @@ function redactTestProfile(profile: TestEnvironmentProfile): RedactedTestEnviron
   return { ...rest, variableNames: Object.keys(environment).sort((left, right) => left.localeCompare(right)) };
 }
 
+function redactProject(project: Project): ProjectSnapshot["project"] {
+  return {
+    ...project,
+    testEnvironmentProfiles: project.testEnvironmentProfiles.map(redactTestProfile),
+  };
+}
+
 function leaseTokenHash(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
@@ -384,6 +391,10 @@ export class ControlService {
       if (profileName === "default") throw new Error("Profilu default nie można usunąć.");
       if (project.selectedEnvironmentProfile === profileName) throw new Error("Nie można usunąć aktywnego profilu środowiska.");
       if (!project.environmentProfiles.some((profile) => profile.name === profileName)) throw new Error("Nie znaleziono profilu środowiska.");
+      const testProfiles = project.testEnvironmentProfiles
+        .filter((profile) => profile.policy.mode === "inherit-server-profile" && profile.policy.serverProfile === profileName)
+        .map((profile) => profile.name);
+      if (testProfiles.length > 0) throw new Error(`Profil środowiska jest używany przez profile testowe: ${testProfiles.join(", ")}.`);
       this.store.deleteProjectEnvironmentProfile(projectId, profileName, actor.owner);
       this.logs.controller("project.environment_profile_deleted", { projectId, profileName, actor: actor.owner });
       return this.requireProject(projectId);
@@ -399,7 +410,7 @@ export class ControlService {
     return {
       profiles: project.testEnvironmentProfiles.map(redactTestProfile),
       presetProfiles: project.testPresetProfiles,
-      systemVariableNames: [...SYSTEM_ENVIRONMENT_ALLOWLIST],
+      systemVariableNames: [...SYSTEM_ENVIRONMENT_ALLOWLIST, "LC_*"],
     };
   }
 
@@ -412,6 +423,9 @@ export class ControlService {
       const project = this.requireProject(projectId);
       this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
       const profile = this.validateTestProfile(project, input);
+      if (BUILT_IN_TEST_PROFILES.some((candidate) => candidate.name === profile.name)) {
+        throw new Error("Wbudowanego profilu testowego nie można zastąpić.");
+      }
       this.store.saveProjectTestEnvironmentProfile(projectId, profile, actor.owner);
       this.logs.controller("project.test_profile_saved", {
         projectId,
@@ -675,7 +689,7 @@ export class ControlService {
       const worktreePaths = worktrees.map(({ path }) => path);
       if (scheduleStorage) this.storage?.ensureFresh(project.id, worktreePaths);
       return {
-        project,
+        project: redactProject(project),
         runtime: this.processes.snapshot(project.id),
         reservation: this.store.getActiveReservation(project.id),
         worktrees,
@@ -693,7 +707,7 @@ export class ControlService {
       };
     } catch (error) {
       return {
-        project,
+        project: redactProject(project),
         runtime: this.processes.snapshot(project.id),
         reservation: this.store.getActiveReservation(project.id),
         worktrees: [],
@@ -750,7 +764,7 @@ export class ControlService {
 
   private capacityStatus(snapshots?: ProjectSnapshot[]): ServerCapacityStatus {
     const settings = this.store.getServerCapacitySettings();
-    const projects: Array<Pick<ProjectSnapshot, "project" | "runtime">> = snapshots
+    const projects: Array<{ project: Pick<Project, "id" | "name">; runtime: ProjectSnapshot["runtime"] }> = snapshots
       ?? this.store.listProjects().map((project) => ({
         project,
         runtime: this.processes.snapshot(project.id),

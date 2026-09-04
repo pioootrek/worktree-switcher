@@ -45,7 +45,7 @@ import { CertificateFilePicker } from "@/components/certificate-file-picker";
 import { WorktreeStoragePanel } from "@/components/worktree-storage-panel";
 import { useI18n } from "@/i18n/provider";
 import { dashboardSummary, type Translate } from "@/i18n/messages";
-import type { ControllerDashboardResponse, DevServerTlsMode, DiscoveredTestPreset, LaunchPreset, McpStatus, Project, ProjectSnapshot, RuntimeFailure, RuntimeMetricsResponse, RuntimePhase, RuntimeResourceMetrics, ServerCapacityStatus, TestEnvironmentProfile, TestQueueStatus, TestRun } from "@/shared/contracts";
+import type { ControllerDashboardResponse, DevServerTlsMode, DiscoveredTestPreset, LaunchPreset, McpStatus, ProjectSnapshot, ProjectView, RedactedTestEnvironmentProfile, RuntimeFailure, RuntimeMetricsResponse, RuntimePhase, RuntimeResourceMetrics, ServerCapacityStatus, TestQueueStatus, TestRun } from "@/shared/contracts";
 
 const EMPTY_CAPACITY: ServerCapacityStatus = { enabled: false, limit: 2, used: 0, available: null, holders: [] };
 const EMPTY_TEST_QUEUE: TestQueueStatus = { limit: 1, running: 0, queued: 0 };
@@ -445,7 +445,7 @@ function McpStatusDialog({ status }: { status: McpStatus }) {
   );
 }
 
-function localizedFailure(project: Project, failure: RuntimeFailure, t: Translate) {
+function localizedFailure(project: ProjectView, failure: RuntimeFailure, t: Translate) {
   const values = { port: project.port, executable: project.executable };
   switch (failure.code) {
     case "port_in_use":
@@ -770,7 +770,7 @@ function TestPanel({
 }: {
   projectId: string;
   worktreePath: string;
-  profiles: TestEnvironmentProfile[];
+  profiles: RedactedTestEnvironmentProfile[];
   presets: DiscoveredTestPreset[];
   discoveryError: string | null;
   runs: TestRun[];
@@ -900,7 +900,7 @@ function EnvironmentSettingsDialog({
   mutate,
   setError,
 }: {
-  project: Project;
+  project: ProjectView;
   phase: RuntimePhase;
   mutate: Mutate;
   setError: (message: string | null) => void;
@@ -1056,7 +1056,7 @@ function TlsSettingsDialog({
   mutate,
   setError,
 }: {
-  project: Project;
+  project: ProjectView;
   phase: RuntimePhase;
   token: string;
   mutate: Mutate;

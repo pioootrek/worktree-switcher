@@ -154,6 +154,51 @@ describe("resolveTestEnvironment", () => {
 });
 
 describe("test runs against a selected server profile", () => {
+  it("keeps test profile values out of dashboard and project snapshots", async () => {
+    const { project, service } = fixture();
+    await service.saveTestEnvironmentProfile(project.id, {
+      name: "e2e",
+      environment: { DATABASE_PASSWORD: "top-secret" },
+    });
+
+    const dashboard = await service.dashboard();
+    const status = await service.projectSnapshot(project.id);
+
+    expect(dashboard.projects[0].project.testEnvironmentProfiles).toContainEqual(expect.objectContaining({
+      name: "e2e",
+      variableNames: ["DATABASE_PASSWORD"],
+    }));
+    expect(JSON.stringify(dashboard)).not.toContain("top-secret");
+    expect(JSON.stringify(status)).not.toContain("top-secret");
+  });
+
+  it("protects built-in and assigned test profiles from mutation or deletion", async () => {
+    const { project, service } = fixture();
+    await expect(service.saveTestEnvironmentProfile(project.id, {
+      name: "unit", environment: {}, nodeEnv: null,
+    })).rejects.toThrow("nie można zastąpić");
+    await expect(service.deleteTestEnvironmentProfile(project.id, "unit")).rejects.toThrow("nie można usunąć");
+
+    await service.saveTestEnvironmentProfile(project.id, { name: "custom", environment: {} });
+    await service.assignTestPresetProfile(project.id, "node:test", "custom");
+    await expect(service.deleteTestEnvironmentProfile(project.id, "custom")).rejects.toThrow("node:test");
+  });
+
+  it("protects server profiles referenced by inheriting test profiles", async () => {
+    const { project, service, store } = fixture();
+    await service.saveTestEnvironmentProfile(project.id, {
+      name: "e2e", environment: {}, mode: "inherit-server-profile", serverProfile: "qa-shots",
+    });
+    store.selectProjectEnvironmentProfile(project.id, "default", "local-user");
+
+    await expect(service.deleteEnvironmentProfile(project.id, "qa-shots")).rejects.toThrow("e2e");
+  });
+
+  it("reports the locale wildcard alongside fixed system variable names", () => {
+    const { project, service } = fixture();
+    expect(service.testEnvironmentProfiles(project.id).systemVariableNames).toContain("LC_*");
+  });
+
   it("runs the default unit preset without the selected server profile or controller variables", async () => {
     vi.stubEnv("WINPATH_CONTROLLER_SECRET", "leaked");
     const { store, project, service } = fixture();

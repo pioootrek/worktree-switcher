@@ -28,7 +28,13 @@ const snapshot: ProjectSnapshot = {
     environment: {},
     environmentProfiles: [{ name: "default", environment: {} }],
     selectedEnvironmentProfile: "default",
-    testEnvironmentProfiles: [],
+    testEnvironmentProfiles: [{
+      name: "e2e",
+      policy: { mode: "clean", serverProfile: null },
+      nodeEnv: "test",
+      requiredVariables: [],
+      variableNames: ["DATABASE_PASSWORD"],
+    }],
     testPresetProfiles: {},
     healthcheckPath: "/",
     startupTimeoutMs: 45_000,
@@ -244,6 +250,8 @@ describe("MCP loopback server", () => {
 
     const statusResult = await client.callTool({ name: "get_project_status", arguments: { projectId } });
     const statusText = (statusResult as { content: Array<{ type: "text"; text: string }> }).content[0].text;
+    expect(statusText).toContain("DATABASE_PASSWORD");
+    expect(statusText).not.toContain("top-secret");
     expect(JSON.parse(statusText).runtime.resources).toMatchObject({
       status: "available",
       currentRssBytes: 128_000_000,

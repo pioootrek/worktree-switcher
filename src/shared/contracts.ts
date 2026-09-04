@@ -108,6 +108,11 @@ export interface Project {
   updatedAt: string;
 }
 
+/** A project safe to return through REST/MCP snapshots. */
+export interface ProjectView extends Omit<Project, "testEnvironmentProfiles"> {
+  testEnvironmentProfiles: RedactedTestEnvironmentProfile[];
+}
+
 export interface Worktree {
   path: string;
   head: string;
@@ -174,7 +179,7 @@ export interface RuntimeFailure {
 }
 
 export interface ProjectSnapshot {
-  project: Project;
+  project: ProjectView;
   runtime: RuntimeSnapshot;
   reservation: Reservation | null;
   worktrees: Worktree[];
