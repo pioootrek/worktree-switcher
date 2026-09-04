@@ -156,10 +156,11 @@ describe("resolveTestEnvironment", () => {
 describe("test runs against a selected server profile", () => {
   it("keeps test profile values out of dashboard and project snapshots", async () => {
     const { project, service } = fixture();
-    await service.saveTestEnvironmentProfile(project.id, {
+    const saved = await service.saveTestEnvironmentProfile(project.id, {
       name: "e2e",
       environment: { DATABASE_PASSWORD: "top-secret" },
     });
+    const assigned = await service.assignTestPresetProfile(project.id, "node:test", "e2e");
 
     const dashboard = await service.dashboard();
     const status = await service.projectSnapshot(project.id);
@@ -168,6 +169,8 @@ describe("test runs against a selected server profile", () => {
       name: "e2e",
       variableNames: ["DATABASE_PASSWORD"],
     }));
+    expect(JSON.stringify(saved)).not.toContain("top-secret");
+    expect(JSON.stringify(assigned)).not.toContain("top-secret");
     expect(JSON.stringify(dashboard)).not.toContain("top-secret");
     expect(JSON.stringify(status)).not.toContain("top-secret");
   });

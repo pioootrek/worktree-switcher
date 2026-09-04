@@ -29,9 +29,13 @@ async function fixture() {
   const selectEnvironmentProfile = vi.fn(async () => ({ id: "project-1" }));
   const deleteEnvironmentProfile = vi.fn(() => ({ id: "project-1" }));
   const testEnvironmentProfiles = vi.fn(() => ({ profiles: [], presetProfiles: {}, systemVariableNames: ["PATH"] }));
-  const saveTestEnvironmentProfile = vi.fn(async () => ({ id: "project-1" }));
-  const deleteTestEnvironmentProfile = vi.fn(async () => ({ id: "project-1" }));
-  const assignTestPresetProfile = vi.fn(async () => ({ id: "project-1" }));
+  const redactedTestProject = {
+    id: "project-1",
+    testEnvironmentProfiles: [{ name: "e2e", variableNames: ["E2E_RESET_DB_CONFIRM"] }],
+  };
+  const saveTestEnvironmentProfile = vi.fn(async () => redactedTestProject);
+  const deleteTestEnvironmentProfile = vi.fn(async () => redactedTestProject);
+  const assignTestPresetProfile = vi.fn(async () => redactedTestProject);
   const setServerCapacity = vi.fn(() => capacity);
   const setTestQueueLimit = vi.fn(() => testQueue);
   const enqueueTest = vi.fn(async () => ({ id: "run-1", phase: "queued" }));
@@ -281,6 +285,7 @@ describe("controller access boundary", () => {
       method: "POST", headers, body: JSON.stringify({ name: "e2e", environment: { E2E_RESET_DB_CONFIRM: "yes" }, mode: "inherit-server-profile", serverProfile: "qa-shots", nodeEnv: null, requiredVariables: ["PLAYWRIGHT_E2E"] }),
     });
     expect(saved.status).toBe(200);
+    expect(JSON.stringify(await saved.json())).not.toContain("yes");
     expect(saveTestEnvironmentProfile).toHaveBeenCalledWith("project-1", {
       name: "e2e",
       environment: { E2E_RESET_DB_CONFIRM: "yes" },
@@ -294,6 +299,7 @@ describe("controller access boundary", () => {
       method: "POST", headers, body: JSON.stringify({ presetId: "node:test", name: "e2e" }),
     });
     expect(assigned.status).toBe(200);
+    expect(JSON.stringify(await assigned.json())).not.toContain("yes");
     expect(assignTestPresetProfile).toHaveBeenCalledWith("project-1", "node:test", "e2e");
 
     const rejected = await fetch(`${base}/api/projects/project-1/test-environment-profiles`, {

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { basename, resolve } from "node:path";
 
-import type { CacheDeletionResult, DashboardResponse, Project, ProjectSnapshot, RedactedTestEnvironmentProfile, Reservation, RuntimeMetricsResponse, SafeCacheKind, ServerCapacitySettings, ServerCapacityStatus, TestEnvironmentProfile, TestPreset, TestQueueStatus, TestRun, Worktree, WorktreeTestPresets } from "@/shared/contracts";
+import type { CacheDeletionResult, DashboardResponse, Project, ProjectSnapshot, ProjectView, RedactedTestEnvironmentProfile, Reservation, RuntimeMetricsResponse, SafeCacheKind, ServerCapacitySettings, ServerCapacityStatus, TestEnvironmentProfile, TestPreset, TestQueueStatus, TestRun, Worktree, WorktreeTestPresets } from "@/shared/contracts";
 import type { GitWorktreeReader } from "./git-worktrees";
 import { type LaunchCommandResolver, type NextTlsConfiguration, ProjectLaunchCommandResolver } from "./launch-command";
 import { type LogWriter, nullLogWriter } from "./log-writer";
@@ -418,7 +418,7 @@ export class ControlService {
     projectId: string,
     input: { name: string; environment: Record<string, string>; mode?: TestEnvironmentProfile["policy"]["mode"]; serverProfile?: string | null; nodeEnv?: TestEnvironmentProfile["nodeEnv"]; requiredVariables?: string[] },
     actor: OperationActor = { owner: "local-user" },
-  ): Promise<Project> {
+  ): Promise<ProjectView> {
     return this.serialized(projectId, async () => {
       const project = this.requireProject(projectId);
       this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
@@ -435,11 +435,11 @@ export class ControlService {
         variableNames: Object.keys(profile.environment),
         actor: actor.owner,
       });
-      return this.requireProject(projectId);
+      return redactProject(this.requireProject(projectId));
     });
   }
 
-  async deleteTestEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }): Promise<Project> {
+  async deleteTestEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }): Promise<ProjectView> {
     return this.serialized(projectId, async () => {
       const project = this.requireProject(projectId);
       this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
@@ -450,11 +450,11 @@ export class ControlService {
       if (assigned.length > 0) throw new Error(`Profil testowy jest przypisany do presetów: ${assigned.join(", ")}.`);
       this.store.deleteProjectTestEnvironmentProfile(projectId, profileName, actor.owner);
       this.logs.controller("project.test_profile_deleted", { projectId, profileName, actor: actor.owner });
-      return this.requireProject(projectId);
+      return redactProject(this.requireProject(projectId));
     });
   }
 
-  async assignTestPresetProfile(projectId: string, presetId: string, name: string | null, actor: OperationActor = { owner: "local-user" }): Promise<Project> {
+  async assignTestPresetProfile(projectId: string, presetId: string, name: string | null, actor: OperationActor = { owner: "local-user" }): Promise<ProjectView> {
     return this.serialized(projectId, async () => {
       const project = this.requireProject(projectId);
       this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
@@ -465,7 +465,7 @@ export class ControlService {
       }
       this.store.assignProjectTestPresetProfile(projectId, presetId.trim(), profileName, actor.owner);
       this.logs.controller("project.test_preset_profile_assigned", { projectId, presetId, profileName, actor: actor.owner });
-      return this.requireProject(projectId);
+      return redactProject(this.requireProject(projectId));
     });
   }
 

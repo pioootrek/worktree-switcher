@@ -132,16 +132,6 @@
       "type": "feature"
     },
     {
-      "area": "process-manager",
-      "id": "FIX-20260904-test-environment-isolation",
-      "path": "fix/FIX-20260904-test-environment-isolation.json",
-      "priority": "next",
-      "risk_level": "medium",
-      "status": "open",
-      "title": "Isolate test environments from development-server profiles",
-      "type": "fix"
-    },
-    {
       "area": "core",
       "id": "RWK-20260829-idle-memory-budget",
       "path": "rework/RWK-20260829-idle-memory-budget.json",
