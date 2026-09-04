@@ -1,0 +1,64 @@
+{
+  "area": "process-manager",
+  "created": "2026-09-04",
+  "id": "FIX-20260904-test-environment-isolation",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-launch-environment-profiles",
+      "FEAT-20260902-managed-test-queue"
+    ]
+  },
+  "notes": [
+    {
+      "author": "user",
+      "date": "2026-09-04",
+      "text": "WinPath reported 64 false failures across 8 suites because run_test inherited the selected qa-shots server profile (PLAYWRIGHT_E2E, provider fixtures, frozen QA clock). The same suites passed 115/115 in a clean process. Proposal: separate server profiles from test profiles, make clean the default, and report the applied policy without values."
+    },
+    {
+      "author": "agent:claude",
+      "date": "2026-09-04",
+      "text": "Confirmed two independent leaks on feat/test-runner-adapters: control-service passed project.environment (the materialized selected server profile) into every run, and test-job-manager merged the controller's own process.env minus NODE_ENV at spawn time. TestCommand.nodeEnvironment existed but no adapter set it, so test runs had no NODE_ENV at all."
+    },
+    {
+      "author": "agent:claude",
+      "date": "2026-09-04",
+      "text": "Implemented on feat/test-environment-isolation. Ambient inheritance is not reachable through any code path: a profile either starts from the system allowlist or names the server profile it inherits, so a run never depends on which profile is currently selected for the development server. Dashboard support covers assignment and applied-policy display; profile creation is available through REST and MCP."
+    }
+  ],
+  "priority": "next",
+  "problem": [
+    "A queued test preset inherited the environment of whichever profile was selected for the managed development server, plus the controller's own process environment. Test results therefore depended on unrelated dashboard state, and server-side flags, fixtures, and secrets reached unit test processes."
+  ],
+  "risk": {
+    "dimensions": [
+      "data-exposure",
+      "process"
+    ],
+    "level": "medium",
+    "rollback": "Assign a test profile whose policy is inherit-server-profile to restore the previous behaviour for an individual preset. The stored policy of past runs remains readable."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Separate test environment profiles from development-server environment profiles, stored per project and surfaced through the service layer, REST, MCP, and the dashboard.",
+    "Start every test process from a fixed, versioned allowlist of system variables and add only what its profile declares; the controller's own environment never reaches a test.",
+    "Require an explicit server profile name for inheritance so a run can never depend on the currently selected server profile.",
+    "Derive NODE_ENV from the profile rather than the controller, defaulting detected unit scripts to NODE_ENV=test and leaving build, lint, and typecheck presets without a runtime mode.",
+    "Inject controller-owned metadata such as the managed server URL and port so browser suites do not need the server profile.",
+    "Fail before spawning when a profile declares required variables that the resolved environment does not define.",
+    "Persist the applied policy on every run and report mode, profile, inherited server profile, and variable names without values through logs, audit records, REST, and MCP."
+  ],
+  "source": "WinPath false-failure report on 2026-09-04",
+  "status": "open",
+  "title": "Isolate test environments from development-server profiles",
+  "type": "fix",
+  "validation": [
+    "A regression fixture reproducing the WinPath qa-shots profile asserts the exact environment key set of the spawned child, not only the absence of individual flags.",
+    "The same preset produces an identical environment before and after a different server profile is selected.",
+    "A profile that explicitly names a server profile receives its variables and records the inheritance.",
+    "A controller-only variable stubbed into process.env never reaches the child process.",
+    "MCP and REST return profile variable names without values, and get_test_run reports the stored policy."
+  ],
+  "value": [
+    "Test results become a property of the preset and its profile instead of unrelated dashboard state, and server secrets stop reaching unit test processes."
+  ]
+}

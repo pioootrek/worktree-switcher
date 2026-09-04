@@ -1,6 +1,6 @@
 ---
 audience: "product owner and contributors discussing agent coordination"
-last_reviewed: "2026-09-02"
+last_reviewed: "2026-09-04"
 source_of_truth: "implemented reservation and local MCP integration design"
 status: "active"
 ---
@@ -129,6 +129,10 @@ list_environment_profiles
 save_environment_profile
 select_environment_profile
 delete_environment_profile
+list_test_environment_profiles
+save_test_environment_profile
+delete_test_environment_profile
+assign_test_preset_profile
 claim_project
 renew_project_claim
 release_project_claim
@@ -173,6 +177,18 @@ worktree. `run_test` requires an idempotency key so transport retries cannot
 queue duplicate processes. A run respects an existing project reservation but
 does not claim or switch the development server. Only its originating MCP
 session or a local dashboard user may cancel it.
+
+Test environments are separate from development-server profiles. A test
+process starts from a fixed allowlist of system variables and receives only
+what its test profile declares, plus controller-owned metadata such as the
+managed server URL and port. Neither the controller's own environment nor the
+profile selected for the development server reaches a test run. Inheriting a
+server profile is possible but requires naming that profile explicitly, so a
+result never depends on which profile happens to be selected. `NODE_ENV` comes
+from the profile: detected unit scripts default to `test`, while build, lint,
+and typecheck presets run without a runtime mode. Test-profile tools return
+variable names without values, and `get_test_run` reports the policy that was
+applied to a finished run.
 
 ## Security and audit
 

@@ -9,6 +9,17 @@ import type { Worktree } from "@/shared/contracts";
 import { nullLogWriter } from "./log-writer";
 import { SqliteStateStore } from "./sqlite-store";
 import { TestJobManager } from "./test-job-manager";
+import type { ResolvedTestEnvironment } from "./test-environment";
+
+function resolved(environment: Record<string, string> = {}): ResolvedTestEnvironment {
+  return {
+    environment,
+    mode: "clean",
+    profile: "unit",
+    inheritedServerProfile: null,
+    variableNames: Object.keys(environment).sort(),
+  };
+}
 
 const directories: string[] = [];
 const managers: TestJobManager[] = [];
@@ -44,7 +55,7 @@ describe("TestJobManager", () => {
     const { store, project, manager, worktree, command } = fixture();
     const inspectEnvironment = command(20);
     inspectEnvironment.args = ["-e", "console.log(`NODE_ENV=${process.env.NODE_ENV ?? '<unset>'}`)"];
-    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: inspectEnvironment, environment: { NODE_ENV: "production" }, actor: "local-user" });
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: inspectEnvironment, environment: resolved({ PATH: process.env.PATH ?? "" }), actor: "local-user" });
 
     await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"), { timeout: 2_000 });
     expect(store.getTestRun(run.id)?.logs).toContain("NODE_ENV=<unset>");
@@ -53,13 +64,12 @@ describe("TestJobManager", () => {
     managers.splice(managers.indexOf(manager), 1);
   });
 
-  it("allows a trusted test command adapter to set NODE_ENV explicitly", async () => {
+  it("applies NODE_ENV from the resolved test environment policy", async () => {
     vi.stubEnv("NODE_ENV", "production");
     const { store, project, manager, worktree, command } = fixture();
     const inspectEnvironment = command(20);
-    inspectEnvironment.nodeEnvironment = "test";
     inspectEnvironment.args = ["-e", "console.log(`NODE_ENV=${process.env.NODE_ENV ?? '<unset>'}`)"];
-    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: inspectEnvironment, environment: { NODE_ENV: "production" }, actor: "local-user" });
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: inspectEnvironment, environment: resolved({ NODE_ENV: "test" }), actor: "local-user" });
 
     await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"), { timeout: 2_000 });
     expect(store.getTestRun(run.id)?.logs).toContain("NODE_ENV=test");
@@ -71,10 +81,10 @@ describe("TestJobManager", () => {
   it("honors the global limit and runs at most one test per worktree", async () => {
     const { store, project, manager, worktree, command } = fixture();
     manager.setLimit(2);
-    const first = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(1_000), environment: {}, actor: "local-user" });
+    const first = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(1_000), environment: resolved(), actor: "local-user" });
     await vi.waitFor(() => expect(store.getTestRun(first.id)?.phase).toBe("running"));
-    const second = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(10), environment: {}, actor: "local-user" });
-    const third = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/b"), command: command(1_000), environment: {}, actor: "local-user" });
+    const second = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(10), environment: resolved(), actor: "local-user" });
+    const third = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/b"), command: command(1_000), environment: resolved(), actor: "local-user" });
 
     await vi.waitFor(() => expect(manager.status()).toMatchObject({ running: 2, queued: 1 }));
     expect(store.getTestRun(first.id)?.phase).toBe("running");
@@ -89,12 +99,12 @@ describe("TestJobManager", () => {
   it("does not stop active runs when the global limit is lowered", async () => {
     const { store, project, manager, worktree, command } = fixture();
     manager.setLimit(2);
-    const first = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(250), environment: {}, actor: "local-user" });
-    const second = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/b"), command: command(250), environment: {}, actor: "local-user" });
+    const first = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(250), environment: resolved(), actor: "local-user" });
+    const second = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/b"), command: command(250), environment: resolved(), actor: "local-user" });
 
     await vi.waitFor(() => expect(manager.status()).toMatchObject({ running: 2, queued: 0 }));
     manager.setLimit(1);
-    const third = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/c"), command: command(10), environment: {}, actor: "local-user" });
+    const third = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/c"), command: command(10), environment: resolved(), actor: "local-user" });
 
     expect(store.getTestRun(first.id)?.phase).toBe("running");
     expect(store.getTestRun(second.id)?.phase).toBe("running");
@@ -110,9 +120,9 @@ describe("TestJobManager", () => {
     const longRunning = command(2_000);
     longRunning.preset.timeoutMs = 30_000;
     longRunning.args = ["-e", "console.log('ready'); setInterval(() => {}, 1000)"];
-    const running = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: longRunning, environment: {}, actor: "agent:mcp:one" });
+    const running = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: longRunning, environment: resolved(), actor: "agent:mcp:one" });
     await vi.waitFor(() => expect(store.getTestRun(running.id)?.logs).toContain("ready"));
-    const queued = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/b"), command: command(20), environment: {}, actor: "agent:mcp:one" });
+    const queued = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/b"), command: command(20), environment: resolved(), actor: "agent:mcp:one" });
     expect(() => manager.cancel(running.id, "agent:mcp:other")).toThrow("autor");
     expect(manager.cancel(queued.id, "agent:mcp:one").phase).toBe("cancelled");
     expect(manager.cancel(running.id, "agent:mcp:one")).toMatchObject({ phase: "running", finishedAt: null });
@@ -127,7 +137,7 @@ describe("TestJobManager", () => {
     const { store, project, manager, worktree, command } = fixture();
     const delayedExit = command(2_000);
     delayedExit.args = ["-e", "process.on('SIGTERM', () => setTimeout(() => process.exit(0), 200)); console.log('ready'); setInterval(() => {}, 1000)"];
-    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: delayedExit, environment: {}, actor: "local-user" });
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: delayedExit, environment: resolved(), actor: "local-user" });
     await vi.waitFor(() => expect(store.getTestRun(run.id)?.logs).toContain("ready"));
 
     expect(manager.cancel(run.id, "local-user")).toMatchObject({ phase: "running", finishedAt: null });
@@ -147,7 +157,7 @@ describe("TestJobManager", () => {
     const save = vi.spyOn(store, "saveTestRun");
     const chatty = command(20);
     chatty.args = ["-e", "for (let index = 0; index < 300; index += 1) console.log(`line-${index}`)"];
-    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: chatty, environment: {}, actor: "local-user" });
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: chatty, environment: resolved(), actor: "local-user" });
 
     await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"), { timeout: 2_000 });
     expect(save.mock.calls.length).toBeLessThan(20);
@@ -160,7 +170,7 @@ describe("TestJobManager", () => {
 
   it("deduplicates agent retries by actor and idempotency key", async () => {
     const { store, project, manager, worktree, command } = fixture();
-    const input = { projectId: project.id, worktree: worktree("/tmp/a"), command: command(20), environment: {}, actor: "agent:mcp:one", idempotencyKey: "attempt-1" };
+    const input = { projectId: project.id, worktree: worktree("/tmp/a"), command: command(20), environment: resolved(), actor: "agent:mcp:one", idempotencyKey: "attempt-1" };
     const first = manager.enqueue(input);
     expect(manager.enqueue(input).id).toBe(first.id);
     expect(() => manager.enqueue({ ...input, command: { ...input.command, preset: { ...input.command.preset, id: "node:build" } } })).toThrow("idempotencji");
@@ -174,7 +184,7 @@ describe("TestJobManager", () => {
     const { store, project, manager, worktree, command } = fixture();
     const slow = command(2_000);
     slow.preset.timeoutMs = 30;
-    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: slow, environment: {}, actor: "local-user" });
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: slow, environment: resolved(), actor: "local-user" });
     await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("timed_out"), { timeout: 2_000 });
     await manager.shutdown();
     store.close();

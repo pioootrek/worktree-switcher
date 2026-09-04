@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 
 import Database from "better-sqlite3";
 
-import type { LaunchPreset, Project, Reservation, ServerCapacitySettings, TestQueueSettings, TestRun, TestRunPhase, WorktreeStorageHistoryPoint, WorktreeStorageSnapshot } from "@/shared/contracts";
+import type { LaunchPreset, Project, Reservation, ServerCapacitySettings, TestEnvironmentMode, TestEnvironmentProfile, TestQueueSettings, TestRun, TestRunPhase, WorktreeStorageHistoryPoint, WorktreeStorageSnapshot } from "@/shared/contracts";
 import type { PendingTestRun, ProjectRegistration, ReservationRequest, StateStore, WorktreeStorageSample } from "./state-store";
 
 type ProjectRow = {
@@ -22,6 +22,8 @@ type ProjectRow = {
   environment_json: string;
   environment_profiles_json: string;
   selected_environment_profile: string;
+  test_environment_profiles_json: string;
+  test_preset_profiles_json: string;
   healthcheck_path: string;
   startup_timeout_ms: number;
   selected_worktree_path: string | null;
@@ -79,7 +81,17 @@ type TestRunRow = {
   error: string | null;
   logs_json: string;
   idempotency_key: string | null;
+  environment_mode: TestEnvironmentMode;
+  environment_profile: string;
+  inherited_server_profile: string | null;
+  environment_variable_names_json: string;
 };
+
+/** Built-in test profiles every project starts with; see `test-environment.ts`. */
+const DEFAULT_TEST_PROFILES_JSON = JSON.stringify([
+  { name: "unit", policy: { mode: "clean", serverProfile: null }, environment: {}, nodeEnv: "test", requiredVariables: [] },
+  { name: "tooling", policy: { mode: "clean", serverProfile: null }, environment: {}, nodeEnv: null, requiredVariables: [] },
+]);
 
 const schema = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -102,6 +114,8 @@ const schema = `
     environment_json TEXT NOT NULL DEFAULT '{}',
     environment_profiles_json TEXT NOT NULL DEFAULT '[{"name":"default","environment":{}}]',
     selected_environment_profile TEXT NOT NULL DEFAULT 'default',
+    test_environment_profiles_json TEXT NOT NULL DEFAULT '${DEFAULT_TEST_PROFILES_JSON}',
+    test_preset_profiles_json TEXT NOT NULL DEFAULT '{}',
     healthcheck_path TEXT NOT NULL,
     startup_timeout_ms INTEGER NOT NULL,
     selected_worktree_path TEXT,
@@ -179,7 +193,11 @@ const schema = `
     signal TEXT,
     error TEXT,
     logs_json TEXT NOT NULL DEFAULT '[]',
-    idempotency_key TEXT
+    idempotency_key TEXT,
+    environment_mode TEXT NOT NULL DEFAULT 'clean' CHECK(environment_mode IN ('clean', 'inherit-server-profile')),
+    environment_profile TEXT NOT NULL DEFAULT 'unit',
+    inherited_server_profile TEXT,
+    environment_variable_names_json TEXT NOT NULL DEFAULT '[]'
   );
 
   CREATE INDEX IF NOT EXISTS test_runs_project_history ON test_runs(project_id, queued_at DESC);
@@ -207,6 +225,8 @@ function mapProject(row: ProjectRow): Project {
     environment: JSON.parse(row.environment_json) as Record<string, string>,
     environmentProfiles: JSON.parse(row.environment_profiles_json) as Project["environmentProfiles"],
     selectedEnvironmentProfile: row.selected_environment_profile,
+    testEnvironmentProfiles: JSON.parse(row.test_environment_profiles_json) as Project["testEnvironmentProfiles"],
+    testPresetProfiles: JSON.parse(row.test_preset_profiles_json) as Project["testPresetProfiles"],
     healthcheckPath: row.healthcheck_path,
     startupTimeoutMs: row.startup_timeout_ms,
     selectedWorktreePath: row.selected_worktree_path,
@@ -253,6 +273,10 @@ function mapTestRun(row: TestRunRow): TestRun {
     signal: row.signal,
     error: row.error,
     logs: JSON.parse(row.logs_json) as string[],
+    environmentMode: row.environment_mode,
+    environmentProfile: row.environment_profile,
+    inheritedServerProfile: row.inherited_server_profile,
+    environmentVariableNames: JSON.parse(row.environment_variable_names_json) as string[],
   };
 }
 
@@ -384,6 +408,58 @@ export class SqliteStateStore implements StateStore {
     const profile = project.environmentProfiles.find(({ name }) => name === profileName);
     if (!profile) throw new Error("Nie znaleziono profilu środowiska.");
     this.persistEnvironmentProfiles(projectId, project.environmentProfiles, profileName, profile.environment, actor, "project.environment_profile_selected", profileName, Object.keys(profile.environment));
+  }
+
+  saveProjectTestEnvironmentProfile(projectId: string, profile: TestEnvironmentProfile, actor: string): void {
+    const project = this.requireProjectRow(projectId);
+    const profiles = [...project.testEnvironmentProfiles.filter(({ name }) => name !== profile.name), profile]
+      .sort((left, right) => left.name.localeCompare(right.name));
+    this.persistTestEnvironment(projectId, profiles, project.testPresetProfiles, actor, "project.test_profile_saved", {
+      profileName: profile.name,
+      mode: profile.policy.mode,
+      serverProfile: profile.policy.serverProfile,
+      nodeEnv: profile.nodeEnv,
+      variableNames: Object.keys(profile.environment).sort(),
+    });
+  }
+
+  deleteProjectTestEnvironmentProfile(projectId: string, profileName: string, actor: string): void {
+    const project = this.requireProjectRow(projectId);
+    const profiles = project.testEnvironmentProfiles.filter(({ name }) => name !== profileName);
+    this.persistTestEnvironment(projectId, profiles, project.testPresetProfiles, actor, "project.test_profile_deleted", { profileName });
+  }
+
+  assignProjectTestPresetProfile(projectId: string, presetId: string, profileName: string | null, actor: string): void {
+    const project = this.requireProjectRow(projectId);
+    const assignments = { ...project.testPresetProfiles };
+    if (profileName) assignments[presetId] = profileName;
+    else delete assignments[presetId];
+    this.persistTestEnvironment(projectId, project.testEnvironmentProfiles, assignments, actor, "project.test_preset_profile_assigned", { presetId, profileName });
+  }
+
+  private persistTestEnvironment(
+    projectId: string,
+    profiles: TestEnvironmentProfile[],
+    presetProfiles: Record<string, string>,
+    actor: string,
+    eventType: string,
+    details: Record<string, unknown>,
+  ): void {
+    const now = new Date().toISOString();
+    this.database.transaction(() => {
+      const result = this.database.prepare(`
+        UPDATE projects SET test_environment_profiles_json = ?, test_preset_profiles_json = ?, updated_at = ?
+        WHERE id = ?
+      `).run(JSON.stringify(profiles), JSON.stringify(presetProfiles), now, projectId);
+      if (result.changes === 0) throw new Error("Nie znaleziono projektu.");
+      this.audit(projectId, eventType, actor, details);
+    })();
+  }
+
+  private requireProjectRow(projectId: string): Project {
+    const project = this.getProject(projectId);
+    if (!project) throw new Error("Nie znaleziono projektu.");
+    return project;
   }
 
   private persistEnvironmentProfiles(
@@ -519,8 +595,9 @@ export class SqliteStateStore implements StateStore {
         id, project_id, worktree_path, worktree_head, worktree_branch, worktree_dirty,
         preset_id, preset_name, adapter, actor, phase, queue_position, executable,
         args_json, cwd, queued_at, started_at, finished_at, exit_code, signal, error,
-        logs_json, idempotency_key
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        logs_json, idempotency_key, environment_mode, environment_profile,
+        inherited_server_profile, environment_variable_names_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         phase = excluded.phase, queue_position = excluded.queue_position,
         started_at = excluded.started_at, finished_at = excluded.finished_at,
@@ -531,7 +608,8 @@ export class SqliteStateStore implements StateStore {
       run.worktreeDirty ? 1 : 0, run.presetId, run.presetName, run.adapter, run.actor,
       run.phase, run.queuePosition, run.executable, JSON.stringify(run.args), run.cwd, run.queuedAt,
       run.startedAt, run.finishedAt, run.exitCode, run.signal, run.error,
-      JSON.stringify(run.logs), idempotencyKey ?? null,
+      JSON.stringify(run.logs), idempotencyKey ?? null, run.environmentMode, run.environmentProfile,
+      run.inheritedServerProfile, JSON.stringify(run.environmentVariableNames),
     );
     if (["passed", "failed", "cancelled", "timed_out", "interrupted"].includes(run.phase)) {
       this.database.prepare(`
@@ -902,6 +980,26 @@ export class SqliteStateStore implements StateStore {
           VALUES ('test_queue', ?, ?)
         `).run(JSON.stringify({ limit: 1 }), new Date().toISOString());
         this.recordMigration(10);
+      })();
+    }
+    if (!this.hasMigration(11)) {
+      this.database.transaction(() => {
+        const projectColumns = new Set((this.database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).map(({ name }) => name));
+        if (!projectColumns.has("test_environment_profiles_json")) {
+          this.database.exec(`ALTER TABLE projects ADD COLUMN test_environment_profiles_json TEXT NOT NULL DEFAULT '${DEFAULT_TEST_PROFILES_JSON}'`);
+        }
+        if (!projectColumns.has("test_preset_profiles_json")) {
+          this.database.exec("ALTER TABLE projects ADD COLUMN test_preset_profiles_json TEXT NOT NULL DEFAULT '{}'");
+        }
+        const runColumns = new Set((this.database.prepare("PRAGMA table_info(test_runs)").all() as Array<{ name: string }>).map(({ name }) => name));
+        if (!runColumns.has("environment_mode")) {
+          // Historical runs predate the policy, so they are recorded as the inheriting behaviour they actually had.
+          this.database.exec("ALTER TABLE test_runs ADD COLUMN environment_mode TEXT NOT NULL DEFAULT 'inherit-server-profile'");
+          this.database.exec("ALTER TABLE test_runs ADD COLUMN environment_profile TEXT NOT NULL DEFAULT 'legacy'");
+          this.database.exec("ALTER TABLE test_runs ADD COLUMN inherited_server_profile TEXT");
+          this.database.exec("ALTER TABLE test_runs ADD COLUMN environment_variable_names_json TEXT NOT NULL DEFAULT '[]'");
+        }
+        this.recordMigration(11);
       })();
     }
   }

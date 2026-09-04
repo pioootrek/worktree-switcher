@@ -36,6 +36,8 @@ describe("SqliteStateStore", () => {
       executable: "pnpm", args: ["run", "test"], cwd: "/code/tests",
       queuedAt: "2026-09-02T10:00:00.000Z", startedAt: "2026-09-02T10:00:01.000Z",
       finishedAt: null, exitCode: null, signal: null, error: null, logs: ["starting"],
+      environmentMode: "clean", environmentProfile: "unit", inheritedServerProfile: null,
+      environmentVariableNames: ["NODE_ENV", "PATH"],
     };
     store.setTestQueueSettings({ limit: 3 });
     store.saveTestRun(run, "attempt-1");

@@ -9,7 +9,6 @@ export interface TestCommand {
   executable: string;
   args: string[];
   cwd: string;
-  nodeEnvironment?: "development" | "production" | "test";
 }
 
 export interface TestCommandAdapter {

@@ -28,6 +28,14 @@ const snapshot: ProjectSnapshot = {
     environment: {},
     environmentProfiles: [{ name: "default", environment: {} }],
     selectedEnvironmentProfile: "default",
+    testEnvironmentProfiles: [{
+      name: "e2e",
+      policy: { mode: "clean", serverProfile: null },
+      nodeEnv: "test",
+      requiredVariables: [],
+      variableNames: ["DATABASE_PASSWORD"],
+    }],
+    testPresetProfiles: {},
     healthcheckPath: "/",
     startupTimeoutMs: 45_000,
     selectedWorktreePath: "/code/web",
@@ -58,7 +66,7 @@ const snapshot: ProjectSnapshot = {
     history: [],
     error: null,
   }],
-  testPresets: [{ worktreePath: "/code/web", presets: [{ id: "node:test", name: "test", adapter: "node", timeoutMs: 900_000 }], error: null }],
+  testPresets: [{ worktreePath: "/code/web", presets: [{ id: "node:test", name: "test", adapter: "node", timeoutMs: 900_000, profile: "unit" }], error: null }],
   testRuns: [],
   worktrees: [{
     path: "/code/web",
@@ -103,6 +111,13 @@ describe("MCP loopback server", () => {
     const saveEnvironmentProfile = vi.fn(async () => snapshot.project);
     const selectEnvironmentProfile = vi.fn(async () => snapshot.project);
     const deleteEnvironmentProfile = vi.fn(() => snapshot.project);
+    const testEnvironmentProfiles = vi.fn(() => ({
+      profiles: [{ name: "e2e", policy: { mode: "inherit-server-profile" as const, serverProfile: "qa-shots" }, nodeEnv: null, requiredVariables: [], variableNames: ["E2E_RESET_DB_CONFIRM"] }],
+      presetProfiles: { "node:test": "e2e" },
+      systemVariableNames: ["PATH"],
+    }));
+    const saveTestEnvironmentProfile = vi.fn(async () => snapshot.project);
+    const assignTestPresetProfile = vi.fn(async () => snapshot.project);
     const queuedRun = { id: "f70af07d-d065-41a7-8918-c61ca5a2b833", phase: "queued" as const };
     const enqueueTest = vi.fn(async () => queuedRun);
     const testRun = vi.fn(() => queuedRun);
@@ -122,6 +137,9 @@ describe("MCP loopback server", () => {
       saveEnvironmentProfile,
       selectEnvironmentProfile,
       deleteEnvironmentProfile,
+      testEnvironmentProfiles,
+      saveTestEnvironmentProfile,
+      assignTestPresetProfile,
     } as unknown as ControlService;
     const controller = createMcpControllerServer({ service, port: 0, accessToken: "mcp-test-token-with-enough-entropy" });
     controllers.push(controller);
@@ -183,6 +201,10 @@ describe("MCP loopback server", () => {
       "save_environment_profile",
       "select_environment_profile",
       "delete_environment_profile",
+      "list_test_environment_profiles",
+      "save_test_environment_profile",
+      "delete_test_environment_profile",
+      "assign_test_preset_profile",
       "claim_project",
       "renew_project_claim",
       "release_project_claim",
@@ -210,8 +232,26 @@ describe("MCP loopback server", () => {
     await client.callTool({ name: "cancel_test_run", arguments: { runId: queuedRun.id } });
     expect(cancelTest).toHaveBeenCalledWith(queuedRun.id, { owner: expect.stringMatching(/^agent:mcp:/) });
 
+    const profilesResult = await client.callTool({ name: "list_test_environment_profiles", arguments: { projectId } });
+    const profilesText = (profilesResult as { content: Array<{ type: "text"; text: string }> }).content[0].text;
+    expect(profilesText).toContain("E2E_RESET_DB_CONFIRM");
+    expect(profilesText).not.toContain("winpath_test");
+    await client.callTool({
+      name: "save_test_environment_profile",
+      arguments: { projectId, name: "e2e", environment: { E2E_RESET_DB_CONFIRM: "winpath_test" }, mode: "inherit-server-profile", serverProfile: "qa-shots" },
+    });
+    expect(saveTestEnvironmentProfile).toHaveBeenCalledWith(projectId, expect.objectContaining({
+      name: "e2e", mode: "inherit-server-profile", serverProfile: "qa-shots",
+    }), expect.objectContaining({ owner: expect.stringMatching(/^agent:mcp:/) }));
+    await client.callTool({ name: "assign_test_preset_profile", arguments: { projectId, presetId: "node:test", name: null } });
+    expect(assignTestPresetProfile).toHaveBeenCalledWith(projectId, "node:test", null, expect.objectContaining({
+      owner: expect.stringMatching(/^agent:mcp:/),
+    }));
+
     const statusResult = await client.callTool({ name: "get_project_status", arguments: { projectId } });
     const statusText = (statusResult as { content: Array<{ type: "text"; text: string }> }).content[0].text;
+    expect(statusText).toContain("DATABASE_PASSWORD");
+    expect(statusText).not.toContain("top-secret");
     expect(JSON.parse(statusText).runtime.resources).toMatchObject({
       status: "available",
       currentRssBytes: 128_000_000,

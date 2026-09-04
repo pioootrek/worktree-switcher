@@ -45,7 +45,7 @@ import { CertificateFilePicker } from "@/components/certificate-file-picker";
 import { WorktreeStoragePanel } from "@/components/worktree-storage-panel";
 import { useI18n } from "@/i18n/provider";
 import { dashboardSummary, type Translate } from "@/i18n/messages";
-import type { ControllerDashboardResponse, DevServerTlsMode, LaunchPreset, McpStatus, Project, ProjectSnapshot, RuntimeFailure, RuntimeMetricsResponse, RuntimePhase, RuntimeResourceMetrics, ServerCapacityStatus, TestPreset, TestQueueStatus, TestRun } from "@/shared/contracts";
+import type { ControllerDashboardResponse, DevServerTlsMode, DiscoveredTestPreset, LaunchPreset, McpStatus, ProjectSnapshot, ProjectView, RedactedTestEnvironmentProfile, RuntimeFailure, RuntimeMetricsResponse, RuntimePhase, RuntimeResourceMetrics, ServerCapacityStatus, TestQueueStatus, TestRun } from "@/shared/contracts";
 
 const EMPTY_CAPACITY: ServerCapacityStatus = { enabled: false, limit: 2, used: 0, available: null, holders: [] };
 const EMPTY_TEST_QUEUE: TestQueueStatus = { limit: 1, running: 0, queued: 0 };
@@ -445,7 +445,7 @@ function McpStatusDialog({ status }: { status: McpStatus }) {
   );
 }
 
-function localizedFailure(project: Project, failure: RuntimeFailure, t: Translate) {
+function localizedFailure(project: ProjectView, failure: RuntimeFailure, t: Translate) {
   const values = { port: project.port, executable: project.executable };
   switch (failure.code) {
     case "port_in_use":
@@ -695,6 +695,7 @@ function ProjectCard({
               key={selected}
               projectId={project.id}
               worktreePath={selected}
+              profiles={project.testEnvironmentProfiles}
               presets={testPresets.find((entry) => entry.worktreePath === selected)?.presets ?? []}
               discoveryError={testPresets.find((entry) => entry.worktreePath === selected)?.error ?? null}
               runs={testRuns}
@@ -760,6 +761,7 @@ function ProjectCard({
 function TestPanel({
   projectId,
   worktreePath,
+  profiles,
   presets,
   discoveryError,
   runs,
@@ -768,7 +770,8 @@ function TestPanel({
 }: {
   projectId: string;
   worktreePath: string;
-  presets: TestPreset[];
+  profiles: RedactedTestEnvironmentProfile[];
+  presets: DiscoveredTestPreset[];
   discoveryError: string | null;
   runs: TestRun[];
   mutate: Mutate;
@@ -778,6 +781,16 @@ function TestPanel({
   const [presetId, setPresetId] = useState(presets[0]?.id ?? "");
   const effectivePresetId = presets.some((preset) => preset.id === presetId) ? presetId : presets[0]?.id ?? "";
   const [pending, setPending] = useState(false);
+  const selectedPreset = presets.find((preset) => preset.id === effectivePresetId) ?? null;
+  const selectedProfile = profiles.find((profile) => profile.name === selectedPreset?.profile) ?? null;
+
+  const assignProfile = async (name: string) => {
+    try {
+      await mutate(`/api/projects/${projectId}/test-preset-profiles`, { presetId: effectivePresetId, name }, t("testProfile.assigned", { profile: name }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
 
   const run = async () => {
     setPending(true);
@@ -813,6 +826,25 @@ function TestPanel({
           {pending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Play aria-hidden />}{t("tests.run")}
         </Button>
       </div>
+      {selectedPreset ? (
+        <div className="space-y-2 rounded-md border bg-black/15 p-3">
+          <Label htmlFor={`test-profile-${projectId}`}>{t("testProfile.label")}</Label>
+          <Select value={selectedPreset.profile} onValueChange={(value) => void assignProfile(value)} disabled={profiles.length === 0}>
+            <SelectTrigger id={`test-profile-${projectId}`} className="w-full sm:w-72"><SelectValue /></SelectTrigger>
+            <SelectContent>{profiles.map((profile) => <SelectItem key={profile.name} value={profile.name}>{profile.name}</SelectItem>)}</SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {selectedProfile?.policy.mode === "inherit-server-profile"
+              ? t("testProfile.inherits", { profile: selectedProfile.policy.serverProfile ?? "" })
+              : t("testProfile.clean")}
+            {" · "}
+            {t("testProfile.nodeEnv", { value: selectedProfile?.nodeEnv ?? "—" })}
+            {selectedProfile && selectedProfile.requiredVariables.length > 0
+              ? ` · ${t("testProfile.required", { names: selectedProfile.requiredVariables.join(", ") })}`
+              : ""}
+          </p>
+        </div>
+      ) : null}
       {presets.length === 0 && !discoveryError ? <p className="text-sm text-muted-foreground">{t("tests.noPresets")}</p> : null}
       <div>
         <h3 className="mb-2 text-sm font-medium">{t("tests.history")}</h3>
@@ -836,6 +868,11 @@ function TestPanel({
                       {active ? <Button size="sm" variant="ghost" onClick={() => void cancel(testRun.id)}><Square aria-hidden />{t("tests.cancel")}</Button> : null}
                     </div>
                   </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {t("testProfile.applied", { profile: testRun.environmentProfile })}
+                    {testRun.inheritedServerProfile ? ` · ${t("testProfile.inherits", { profile: testRun.inheritedServerProfile })}` : ""}
+                    {testRun.environmentVariableNames.length > 0 ? ` · ${testRun.environmentVariableNames.join(", ")}` : ""}
+                  </p>
                   {testRun.queuePosition ? <p className="mt-2 text-xs text-muted-foreground">{t("tests.position", { position: testRun.queuePosition })}</p> : null}
                   {testRun.exitCode !== null ? <p className="mt-2 text-xs text-muted-foreground">{t("tests.exitCode", { code: testRun.exitCode })}</p> : null}
                   {testRun.error ? <p className="mt-2 text-xs text-destructive">{testRun.error}</p> : null}
@@ -863,7 +900,7 @@ function EnvironmentSettingsDialog({
   mutate,
   setError,
 }: {
-  project: Project;
+  project: ProjectView;
   phase: RuntimePhase;
   mutate: Mutate;
   setError: (message: string | null) => void;
@@ -1019,7 +1056,7 @@ function TlsSettingsDialog({
   mutate,
   setError,
 }: {
-  project: Project;
+  project: ProjectView;
   phase: RuntimePhase;
   token: string;
   mutate: Mutate;

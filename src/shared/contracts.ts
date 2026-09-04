@@ -11,10 +11,34 @@ export interface TestPreset {
   timeoutMs: number;
 }
 
+/** A discovered preset together with the test environment profile that would be applied. */
+export interface DiscoveredTestPreset extends TestPreset {
+  profile: string;
+}
+
 export interface WorktreeTestPresets {
   worktreePath: string;
-  presets: TestPreset[];
+  presets: DiscoveredTestPreset[];
   error: string | null;
+}
+
+export type TestEnvironmentMode = "clean" | "inherit-server-profile";
+
+export interface TestEnvironmentPolicy {
+  mode: TestEnvironmentMode;
+  serverProfile: string | null;
+}
+
+export interface TestEnvironmentProfile {
+  name: string;
+  policy: TestEnvironmentPolicy;
+  environment: Record<string, string>;
+  nodeEnv: "development" | "production" | "test" | null;
+  requiredVariables: string[];
+}
+
+export interface RedactedTestEnvironmentProfile extends Omit<TestEnvironmentProfile, "environment"> {
+  variableNames: string[];
 }
 
 export interface TestRun {
@@ -40,6 +64,10 @@ export interface TestRun {
   signal: string | null;
   error: string | null;
   logs: string[];
+  environmentMode: TestEnvironmentMode;
+  environmentProfile: string;
+  inheritedServerProfile: string | null;
+  environmentVariableNames: string[];
 }
 
 export interface TestQueueSettings {
@@ -71,11 +99,18 @@ export interface Project {
   environment: Record<string, string>;
   environmentProfiles: EnvironmentProfile[];
   selectedEnvironmentProfile: string;
+  testEnvironmentProfiles: TestEnvironmentProfile[];
+  testPresetProfiles: Record<string, string>;
   healthcheckPath: string;
   startupTimeoutMs: number;
   selectedWorktreePath: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A project safe to return through REST/MCP snapshots. */
+export interface ProjectView extends Omit<Project, "testEnvironmentProfiles"> {
+  testEnvironmentProfiles: RedactedTestEnvironmentProfile[];
 }
 
 export interface Worktree {
@@ -144,7 +179,7 @@ export interface RuntimeFailure {
 }
 
 export interface ProjectSnapshot {
-  project: Project;
+  project: ProjectView;
   runtime: RuntimeSnapshot;
   reservation: Reservation | null;
   worktrees: Worktree[];

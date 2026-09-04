@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { basename, resolve } from "node:path";
 
-import type { CacheDeletionResult, DashboardResponse, Project, ProjectSnapshot, Reservation, RuntimeMetricsResponse, SafeCacheKind, ServerCapacitySettings, ServerCapacityStatus, TestQueueStatus, TestRun, Worktree, WorktreeTestPresets } from "@/shared/contracts";
+import type { CacheDeletionResult, DashboardResponse, Project, ProjectSnapshot, RedactedTestEnvironmentProfile, Reservation, RuntimeMetricsResponse, SafeCacheKind, ServerCapacitySettings, ServerCapacityStatus, TestEnvironmentProfile, TestPreset, TestQueueStatus, TestRun, Worktree, WorktreeTestPresets } from "@/shared/contracts";
 import type { GitWorktreeReader } from "./git-worktrees";
 import { type LaunchCommandResolver, type NextTlsConfiguration, ProjectLaunchCommandResolver } from "./launch-command";
 import { type LogWriter, nullLogWriter } from "./log-writer";
@@ -9,6 +9,7 @@ import { ProcessManager } from "./process-manager";
 import type { NewProject, ReservationRequest, StateStore } from "./state-store";
 import { AllowlistedWorktreeCacheCleaner, type WorktreeCacheCleaner, type WorktreeStorageManager } from "./worktree-storage";
 import { ProjectTestCommandResolver } from "./test-command";
+import { BUILT_IN_TEST_PROFILES, defaultTestProfileName, resolveTestEnvironment, SYSTEM_ENVIRONMENT_ALLOWLIST } from "./test-environment";
 import type { TestJobManager } from "./test-job-manager";
 
 const AGENT_LEASE_DEFAULT_SECONDS = 30 * 60;
@@ -41,6 +42,19 @@ export interface AgentClaimResult {
   leaseToken: string;
   snapshot: ProjectSnapshot;
   operationError: string | null;
+}
+
+/** Test profiles are surfaced by variable name only; values never leave the controller. */
+function redactTestProfile(profile: TestEnvironmentProfile): RedactedTestEnvironmentProfile {
+  const { environment, ...rest } = profile;
+  return { ...rest, variableNames: Object.keys(environment).sort((left, right) => left.localeCompare(right)) };
+}
+
+function redactProject(project: Project): ProjectSnapshot["project"] {
+  return {
+    ...project,
+    testEnvironmentProfiles: project.testEnvironmentProfiles.map(redactTestProfile),
+  };
 }
 
 function leaseTokenHash(token: string): string {
@@ -118,11 +132,16 @@ export class ControlService {
       const worktree = this.resolveWorktree(project, worktrees, worktreePath);
       this.assertReservationAllows(projectId, worktree.path, actor);
       const command = this.testCommands.resolve(worktree.path, presetId);
+      const environment = resolveTestEnvironment({
+        project,
+        worktree,
+        profile: this.testProfileFor(project, command.preset),
+      });
       const run = this.requireTests().enqueue({
         projectId,
         worktree,
         command,
-        environment: project.environment,
+        environment,
         actor: actor.owner,
         idempotencyKey,
       });
@@ -132,6 +151,10 @@ export class ControlService {
         worktreePath: worktree.path,
         presetId,
         actor: actor.owner,
+        environmentMode: environment.mode,
+        environmentProfile: environment.profile,
+        inheritedServerProfile: environment.inheritedServerProfile,
+        variableNames: environment.variableNames,
       });
       return run;
     });
@@ -368,10 +391,113 @@ export class ControlService {
       if (profileName === "default") throw new Error("Profilu default nie można usunąć.");
       if (project.selectedEnvironmentProfile === profileName) throw new Error("Nie można usunąć aktywnego profilu środowiska.");
       if (!project.environmentProfiles.some((profile) => profile.name === profileName)) throw new Error("Nie znaleziono profilu środowiska.");
+      const testProfiles = project.testEnvironmentProfiles
+        .filter((profile) => profile.policy.mode === "inherit-server-profile" && profile.policy.serverProfile === profileName)
+        .map((profile) => profile.name);
+      if (testProfiles.length > 0) throw new Error(`Profil środowiska jest używany przez profile testowe: ${testProfiles.join(", ")}.`);
       this.store.deleteProjectEnvironmentProfile(projectId, profileName, actor.owner);
       this.logs.controller("project.environment_profile_deleted", { projectId, profileName, actor: actor.owner });
       return this.requireProject(projectId);
     });
+  }
+
+  testEnvironmentProfiles(projectId: string): {
+    profiles: RedactedTestEnvironmentProfile[];
+    presetProfiles: Record<string, string>;
+    systemVariableNames: string[];
+  } {
+    const project = this.requireProject(projectId);
+    return {
+      profiles: project.testEnvironmentProfiles.map(redactTestProfile),
+      presetProfiles: project.testPresetProfiles,
+      systemVariableNames: [...SYSTEM_ENVIRONMENT_ALLOWLIST, "LC_*"],
+    };
+  }
+
+  async saveTestEnvironmentProfile(
+    projectId: string,
+    input: { name: string; environment: Record<string, string>; mode?: TestEnvironmentProfile["policy"]["mode"]; serverProfile?: string | null; nodeEnv?: TestEnvironmentProfile["nodeEnv"]; requiredVariables?: string[] },
+    actor: OperationActor = { owner: "local-user" },
+  ): Promise<Project> {
+    return this.serialized(projectId, async () => {
+      const project = this.requireProject(projectId);
+      this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
+      const profile = this.validateTestProfile(project, input);
+      if (BUILT_IN_TEST_PROFILES.some((candidate) => candidate.name === profile.name)) {
+        throw new Error("Wbudowanego profilu testowego nie można zastąpić.");
+      }
+      this.store.saveProjectTestEnvironmentProfile(projectId, profile, actor.owner);
+      this.logs.controller("project.test_profile_saved", {
+        projectId,
+        profileName: profile.name,
+        mode: profile.policy.mode,
+        inheritedServerProfile: profile.policy.serverProfile,
+        variableNames: Object.keys(profile.environment),
+        actor: actor.owner,
+      });
+      return this.requireProject(projectId);
+    });
+  }
+
+  async deleteTestEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }): Promise<Project> {
+    return this.serialized(projectId, async () => {
+      const project = this.requireProject(projectId);
+      this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
+      const profileName = this.validateProfileName(name);
+      if (BUILT_IN_TEST_PROFILES.some((profile) => profile.name === profileName)) throw new Error("Wbudowanego profilu testowego nie można usunąć.");
+      if (!project.testEnvironmentProfiles.some((profile) => profile.name === profileName)) throw new Error("Nie znaleziono profilu testowego.");
+      const assigned = Object.entries(project.testPresetProfiles).filter(([, assignment]) => assignment === profileName).map(([presetId]) => presetId);
+      if (assigned.length > 0) throw new Error(`Profil testowy jest przypisany do presetów: ${assigned.join(", ")}.`);
+      this.store.deleteProjectTestEnvironmentProfile(projectId, profileName, actor.owner);
+      this.logs.controller("project.test_profile_deleted", { projectId, profileName, actor: actor.owner });
+      return this.requireProject(projectId);
+    });
+  }
+
+  async assignTestPresetProfile(projectId: string, presetId: string, name: string | null, actor: OperationActor = { owner: "local-user" }): Promise<Project> {
+    return this.serialized(projectId, async () => {
+      const project = this.requireProject(projectId);
+      this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
+      if (!presetId.trim() || presetId.length > 160) throw new Error("Nieprawidłowy identyfikator presetu testowego.");
+      const profileName = name === null ? null : this.validateProfileName(name);
+      if (profileName && !project.testEnvironmentProfiles.some((profile) => profile.name === profileName)) {
+        throw new Error("Nie znaleziono profilu testowego.");
+      }
+      this.store.assignProjectTestPresetProfile(projectId, presetId.trim(), profileName, actor.owner);
+      this.logs.controller("project.test_preset_profile_assigned", { projectId, presetId, profileName, actor: actor.owner });
+      return this.requireProject(projectId);
+    });
+  }
+
+  private testProfileFor(project: Project, preset: TestPreset): TestEnvironmentProfile {
+    const assigned = project.testPresetProfiles[preset.id];
+    const name = assigned ?? defaultTestProfileName(preset);
+    const profile = project.testEnvironmentProfiles.find((candidate) => candidate.name === name)
+      ?? BUILT_IN_TEST_PROFILES.find((candidate) => candidate.name === name);
+    if (!profile) throw new Error(`Preset ${preset.id} wskazuje nieistniejący profil testowy ${name}.`);
+    return profile;
+  }
+
+  private validateTestProfile(
+    project: Project,
+    input: { name: string; environment: Record<string, string>; mode?: TestEnvironmentProfile["policy"]["mode"]; serverProfile?: string | null; nodeEnv?: TestEnvironmentProfile["nodeEnv"]; requiredVariables?: string[] },
+  ): TestEnvironmentProfile {
+    const name = this.validateProfileName(input.name);
+    const environment = this.validateEnvironment(input.environment);
+    const mode = input.mode ?? "clean";
+    if (mode !== "clean" && mode !== "inherit-server-profile") throw new Error("Nieprawidłowy tryb środowiska testowego.");
+    const serverProfile = mode === "inherit-server-profile" ? (input.serverProfile ?? "").trim() : null;
+    if (mode === "inherit-server-profile") {
+      if (!serverProfile) throw new Error("Dziedziczenie środowiska serwera wymaga jawnej nazwy profilu serwera.");
+      if (!project.environmentProfiles.some((profile) => profile.name === serverProfile)) throw new Error("Nie znaleziono profilu środowiska serwera.");
+    }
+    const nodeEnv = input.nodeEnv ?? null;
+    if (nodeEnv !== null && !["development", "production", "test"].includes(nodeEnv)) throw new Error("Nieprawidłowa wartość NODE_ENV profilu testowego.");
+    const requiredVariables = [...new Set(input.requiredVariables ?? [])];
+    for (const variable of requiredVariables) {
+      if (!ENVIRONMENT_NAME.test(variable) || variable.length > 128) throw new Error(`Nieprawidłowa nazwa zmiennej wymaganej: ${variable}.`);
+    }
+    return { name, policy: { mode, serverProfile }, environment, nodeEnv, requiredVariables: requiredVariables.sort() };
   }
 
   private validateEnvironment(environment: Record<string, string>): Record<string, string> {
@@ -563,14 +689,16 @@ export class ControlService {
       const worktreePaths = worktrees.map(({ path }) => path);
       if (scheduleStorage) this.storage?.ensureFresh(project.id, worktreePaths);
       return {
-        project,
+        project: redactProject(project),
         runtime: this.processes.snapshot(project.id),
         reservation: this.store.getActiveReservation(project.id),
         worktrees,
         storage: this.storage?.snapshots(project.id, worktreePaths) ?? [],
         testPresets: worktrees.map((worktree): WorktreeTestPresets => {
           try {
-            return { worktreePath: worktree.path, presets: this.testCommands.discover(worktree.path), error: null };
+            const presets = this.testCommands.discover(worktree.path)
+              .map((preset) => ({ ...preset, profile: this.testProfileFor(project, preset).name }));
+            return { worktreePath: worktree.path, presets, error: null };
           } catch (error) {
             return { worktreePath: worktree.path, presets: [], error: error instanceof Error ? error.message : String(error) };
           }
@@ -579,7 +707,7 @@ export class ControlService {
       };
     } catch (error) {
       return {
-        project,
+        project: redactProject(project),
         runtime: this.processes.snapshot(project.id),
         reservation: this.store.getActiveReservation(project.id),
         worktrees: [],
@@ -636,7 +764,7 @@ export class ControlService {
 
   private capacityStatus(snapshots?: ProjectSnapshot[]): ServerCapacityStatus {
     const settings = this.store.getServerCapacitySettings();
-    const projects: Array<Pick<ProjectSnapshot, "project" | "runtime">> = snapshots
+    const projects: Array<{ project: Pick<Project, "id" | "name">; runtime: ProjectSnapshot["runtime"] }> = snapshots
       ?? this.store.listProjects().map((project) => ({
         project,
         runtime: this.processes.snapshot(project.id),

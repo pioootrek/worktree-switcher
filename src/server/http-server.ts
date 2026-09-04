@@ -3,7 +3,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
 
-import type { DashboardResponse, LaunchPreset, McpStatus } from "@/shared/contracts";
+import type { DashboardResponse, LaunchPreset, McpStatus, TestEnvironmentMode, TestEnvironmentProfile } from "@/shared/contracts";
 import { ControlService } from "./control-service";
 import { localeFrom } from "../i18n/messages";
 import { localizeServerMessage } from "../i18n/server-errors";
@@ -125,6 +125,44 @@ function parseEnvironmentProfile(value: unknown): { name: string; environment: R
   if (!environment || typeof environment !== "object" || Array.isArray(environment)) throw new Error("Nieprawidłowe pole environment.");
   if (record.restart !== undefined && typeof record.restart !== "boolean") throw new Error("Nieprawidłowe pole restart.");
   return { name: requiredString(record, "name", 40), environment: environment as Record<string, string>, restart: record.restart === true };
+}
+
+interface TestProfileInput {
+  name: string;
+  environment: Record<string, string>;
+  mode: TestEnvironmentMode;
+  serverProfile: string | null;
+  nodeEnv: TestEnvironmentProfile["nodeEnv"];
+  requiredVariables: string[];
+}
+
+function parseTestEnvironmentProfile(value: unknown): TestProfileInput {
+  const record = strictRecord(value, ["name", "environment", "mode", "serverProfile", "nodeEnv", "requiredVariables"]);
+  const environment = record.environment;
+  if (!environment || typeof environment !== "object" || Array.isArray(environment)) throw new Error("Nieprawidłowe pole environment.");
+  const mode = record.mode === undefined ? "clean" : record.mode;
+  if (mode !== "clean" && mode !== "inherit-server-profile") throw new Error("Nieprawidłowe pole mode.");
+  const nodeEnv = record.nodeEnv === undefined || record.nodeEnv === null ? null : record.nodeEnv;
+  if (nodeEnv !== null && !["development", "production", "test"].includes(nodeEnv as string)) throw new Error("Nieprawidłowe pole nodeEnv.");
+  const requiredVariables = record.requiredVariables === undefined ? [] : record.requiredVariables;
+  if (!Array.isArray(requiredVariables) || requiredVariables.some((entry) => typeof entry !== "string")) throw new Error("Nieprawidłowe pole requiredVariables.");
+  const serverProfile = record.serverProfile === undefined || record.serverProfile === null ? null : record.serverProfile;
+  if (serverProfile !== null && typeof serverProfile !== "string") throw new Error("Nieprawidłowe pole serverProfile.");
+  return {
+    name: requiredString(record, "name", 40),
+    environment: environment as Record<string, string>,
+    mode,
+    serverProfile,
+    nodeEnv: nodeEnv as TestEnvironmentProfile["nodeEnv"],
+    requiredVariables: requiredVariables as string[],
+  };
+}
+
+function parseTestPresetProfile(value: unknown): { presetId: string; name: string | null } {
+  const record = strictRecord(value, ["presetId", "name"]);
+  const name = record.name === undefined || record.name === null ? null : record.name;
+  if (name !== null && typeof name !== "string") throw new Error("Nieprawidłowe pole name.");
+  return { presetId: requiredString(record, "presetId", 160), name: name as string | null };
 }
 
 function parseProfileSelection(value: unknown): { name: string; restart: boolean } {
@@ -395,6 +433,35 @@ export function createControllerServer(options: {
           const input = parseProfileSelection(await readJson(request));
           const project = await options.service.selectEnvironmentProfile(
             decodeURIComponent(profileSelectionMatch[1]), input.name, { owner: "local-user" }, input.restart,
+          );
+          options.events.publish();
+          json(response, 200, { project });
+          return;
+        }
+        const testProfilesMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/test-environment-profiles$/);
+        if (request.method === "GET" && testProfilesMatch) {
+          json(response, 200, options.service.testEnvironmentProfiles(decodeURIComponent(testProfilesMatch[1])));
+          return;
+        }
+        if (request.method === "POST" && testProfilesMatch) {
+          const input = parseTestEnvironmentProfile(await readJson(request));
+          const project = await options.service.saveTestEnvironmentProfile(decodeURIComponent(testProfilesMatch[1]), input);
+          options.events.publish();
+          json(response, 200, { project });
+          return;
+        }
+        if (request.method === "DELETE" && testProfilesMatch) {
+          const input = parseProfileSelection(await readJson(request));
+          const project = await options.service.deleteTestEnvironmentProfile(decodeURIComponent(testProfilesMatch[1]), input.name);
+          options.events.publish();
+          json(response, 200, { project });
+          return;
+        }
+        const testPresetProfileMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/test-preset-profiles$/);
+        if (request.method === "POST" && testPresetProfileMatch) {
+          const input = parseTestPresetProfile(await readJson(request));
+          const project = await options.service.assignTestPresetProfile(
+            decodeURIComponent(testPresetProfileMatch[1]), input.presetId, input.name,
           );
           options.events.publish();
           json(response, 200, { project });
