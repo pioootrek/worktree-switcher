@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -64,7 +64,7 @@ function fixture() {
   }, "local-user");
   store.selectProjectEnvironmentProfile(project.id, "qa-shots", "local-user");
   const git = { list: vi.fn(async () => [worktreeOf(directory)]), canonicalRepositoryPath: vi.fn(async (path: string) => path) } as unknown as GitWorktreeReader;
-  const processes = { snapshot: () => stoppedRuntime() } as unknown as ProcessManager;
+  const processes = { snapshot: () => stoppedRuntime(), stop: vi.fn(async () => {}) } as unknown as ProcessManager;
   const testCommands = {
     resolve: vi.fn(() => ({
       preset: { id: "node:test", name: "test", adapter: "node" as const, timeoutMs: 10_000 },
@@ -77,7 +77,7 @@ function fixture() {
   const tests = new TestJobManager(store, nullLogWriter);
   managers.push(tests);
   const service = new ControlService(store, git, processes, undefined, undefined, undefined, undefined, testCommands, tests);
-  return { directory, project: store.getProject(project.id)!, store, service, tests };
+  return { directory, git, project: store.getProject(project.id)!, store, service, tests };
 }
 
 async function childEnvironment(store: SqliteStateStore, runId: string): Promise<{ names: string[]; nodeEnv: string | null }> {
@@ -173,6 +173,33 @@ describe("test runs against a selected server profile", () => {
     expect(JSON.stringify(assigned)).not.toContain("top-secret");
     expect(JSON.stringify(dashboard)).not.toContain("top-secret");
     expect(JSON.stringify(status)).not.toContain("top-secret");
+  });
+
+  it("keeps test profile values out of every project mutation result", async () => {
+    const { git, project, service } = fixture();
+    await service.saveTestEnvironmentProfile(project.id, {
+      name: "e2e",
+      environment: { DATABASE_PASSWORD: "top-secret" },
+    });
+
+    const otherDirectory = mkdtempSync(join(tmpdir(), "worktree-switcher-test-env-other-"));
+    directories.push(otherDirectory);
+    writeFileSync(join(otherDirectory, "package.json"), JSON.stringify({ name: "other", scripts: { dev: "node server.js" } }));
+    (git.list as ReturnType<typeof vi.fn>).mockResolvedValueOnce([worktreeOf(otherDirectory)]);
+    const added = await service.addProject({
+      name: "Other", repositoryPath: otherDirectory, port: 3401, launchPreset: "auto",
+    });
+    const environmentSet = await service.setProjectEnvironment(project.id, { APP_FLAG: "1" });
+    const profileSaved = await service.saveEnvironmentProfile(project.id, "staging", { APP_FLAG: "1" });
+    const profileSelected = await service.selectEnvironmentProfile(project.id, "staging");
+    await service.selectEnvironmentProfile(project.id, "qa-shots");
+    const profileDeleted = await service.deleteEnvironmentProfile(project.id, "staging");
+    const removed = await service.removeProject(added.id);
+
+    for (const result of [environmentSet, profileSaved, profileSelected, profileDeleted, removed]) {
+      expect(JSON.stringify(result)).not.toContain("top-secret");
+    }
+    expect(removed.id).toBe(added.id);
   });
 
   it("protects built-in and assigned test profiles from mutation or deletion", async () => {

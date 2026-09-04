@@ -175,7 +175,7 @@ export class ControlService {
     return run;
   }
 
-  async addProject(input: NewProject): Promise<Project> {
+  async addProject(input: NewProject): Promise<ProjectView> {
     if (!input.name.trim()) throw new Error("Nazwa projektu jest wymagana.");
     if (!Number.isInteger(input.port) || input.port < 1024 || input.port > 65535) {
       throw new Error("Port musi być liczbą od 1024 do 65535.");
@@ -203,10 +203,10 @@ export class ControlService {
       args: command.args,
       portMethod: command.portMethod,
     });
-    return this.requireProject(project.id);
+    return redactProject(this.requireProject(project.id));
   }
 
-  async removeProject(projectId: string, actor: OperationActor = { owner: "local-user" }): Promise<Project> {
+  async removeProject(projectId: string, actor: OperationActor = { owner: "local-user" }): Promise<ProjectView> {
     return this.serialized(projectId, async () => {
       const project = this.requireProject(projectId);
       if (this.store.countTestRuns(["queued", "running"], projectId) > 0) {
@@ -225,7 +225,7 @@ export class ControlService {
         port: project.port,
         actor: actor.owner,
       });
-      return project;
+      return redactProject(project);
     });
   }
 
@@ -324,7 +324,7 @@ export class ControlService {
     });
   }
 
-  async setProjectEnvironment(projectId: string, environment: Record<string, string>, actor: OperationActor = { owner: "local-user" }): Promise<Project> {
+  async setProjectEnvironment(projectId: string, environment: Record<string, string>, actor: OperationActor = { owner: "local-user" }): Promise<ProjectView> {
     return this.serialized(projectId, async () => {
       const project = this.requireProject(projectId);
       this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
@@ -335,11 +335,11 @@ export class ControlService {
       const normalized = this.validateEnvironment(environment);
       this.store.updateProjectEnvironment(project.id, normalized, actor.owner);
       this.logs.controller("project.environment_updated", { projectId, variableNames: Object.keys(normalized), actor: actor.owner });
-      return this.requireProject(projectId);
+      return redactProject(this.requireProject(projectId));
     });
   }
 
-  async saveEnvironmentProfile(projectId: string, name: string, environment: Record<string, string>, actor: OperationActor = { owner: "local-user" }, restart = false): Promise<Project> {
+  async saveEnvironmentProfile(projectId: string, name: string, environment: Record<string, string>, actor: OperationActor = { owner: "local-user" }, restart = false): Promise<ProjectView> {
     return this.serialized(projectId, async () => {
       const project = this.requireProject(projectId);
       this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
@@ -357,17 +357,17 @@ export class ControlService {
       } finally {
         if (active && changesActiveProfile) this.pendingStarts.delete(projectId);
       }
-      return this.requireProject(projectId);
+      return redactProject(this.requireProject(projectId));
     });
   }
 
-  async selectEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }, restart = false): Promise<Project> {
+  async selectEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }, restart = false): Promise<ProjectView> {
     return this.serialized(projectId, async () => {
       const project = this.requireProject(projectId);
       this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
       const profileName = this.validateProfileName(name);
       if (!project.environmentProfiles.some((profile) => profile.name === profileName)) throw new Error("Nie znaleziono profilu środowiska.");
-      if (project.selectedEnvironmentProfile === profileName) return project;
+      if (project.selectedEnvironmentProfile === profileName) return redactProject(project);
       const active = this.isProjectActive(projectId);
       if (active && !restart) throw new Error("Zatrzymaj serwer lub wybierz profil z restartem.");
       if (active) this.acquireCapacity(project);
@@ -379,11 +379,11 @@ export class ControlService {
       } finally {
         if (active) this.pendingStarts.delete(projectId);
       }
-      return this.requireProject(projectId);
+      return redactProject(this.requireProject(projectId));
     });
   }
 
-  async deleteEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }): Promise<Project> {
+  async deleteEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }): Promise<ProjectView> {
     return this.serialized(projectId, async () => {
       const project = this.requireProject(projectId);
       this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
@@ -397,7 +397,7 @@ export class ControlService {
       if (testProfiles.length > 0) throw new Error(`Profil środowiska jest używany przez profile testowe: ${testProfiles.join(", ")}.`);
       this.store.deleteProjectEnvironmentProfile(projectId, profileName, actor.owner);
       this.logs.controller("project.environment_profile_deleted", { projectId, profileName, actor: actor.owner });
-      return this.requireProject(projectId);
+      return redactProject(this.requireProject(projectId));
     });
   }
 
