@@ -38,6 +38,28 @@ For example, one Switch instance may run all of the following concurrently:
 Switching the frontend worktree must not interrupt the backend or documentation
 servers.
 
+The planned extension for shared human/agent memory, discussions, and backlog
+is described in [Shared project memory plan](shared-project-memory-plan.md).
+It reuses Switcher's infrastructure while keeping knowledge independent of
+runtime ownership. This is a planned module, not current functionality; the
+existing repository-backed backlog remains in use until an explicit migration.
+The subsequent [agent coordination plan](agent-fleet-coordination-plan.md)
+adds assignments, messages, and evidence across sessions. Together these are
+a planned operations-hub direction, not an implemented autonomous fleet or a
+decision to rename the product.
+
+The first remote-execution experiment is
+[verification of pushed commits on customer-owned workers](remote-verification-plan.md).
+An existing LLM client or human requests a configured check for an exact SHA
+and receives its result. It follows urgent runtime reliability work and
+precedes autonomous fleet execution; a full forum or paid SaaS is not required.
+This is planned work, not a currently supported remote endpoint.
+
+The [environment runtime plan](environment-runtime-plan.md) incorporates the
+owner's Secret Runtime proposal through scoped worker-side credential delivery.
+Its original documents are retained as reference; a standalone vault and its
+proposed technology stack are not adopted as current Switcher architecture.
+
 ## Initial architecture
 
 The control plane lives outside the repositories it manages. Next.js builds the

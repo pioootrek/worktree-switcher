@@ -1,0 +1,67 @@
+{
+  "area": "process-manager",
+  "created": "2026-09-05",
+  "id": "FEAT-20260905-remote-commit-verification",
+  "links": {
+    "prs": [],
+    "related_ids": [
+      "FEAT-20260902-managed-test-queue",
+      "FIX-20260905-test-run-source-attribution",
+      "FIX-20260905-owned-process-tree-stop",
+      "FIX-20260905-test-log-lifecycle",
+      "FEAT-20260905-shared-project-memory",
+      "FEAT-20260905-agent-fleet-coordination",
+      "FEAT-20260829-launch-environment-profiles"
+    ]
+  },
+  "notes": [
+    {
+      "author": "human:pioootrek",
+      "date": "2026-09-05",
+      "text": "Owner wants a human or existing LLM client to commit/push and request build/tests on a remote worker, then retrieve evidence without manual SSH or copying logs. Prioritize this concrete remote-work experiment before autonomous fleet execution; commercial hosting and a complete forum are not prerequisites."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Linked docs/environment-runtime-plan.md and imported Secret Runtime v2 source note. Remote requests select an authorized profile; worker-side secret resolution is a separate access boundary. Secret-free remote checks do not wait for a vault, while credentialed runs require explicit trusted-code and grant policy."
+    }
+  ],
+  "priority": "next",
+  "problem": [
+    "Local or remote LLM conversations lack a convenient way to request heavy verification on a prepared customer-owned machine and bring trustworthy results back into the workflow.",
+    "Branch movement, disconnected workers, and retries can make remotely reported verification ambiguous unless execution targets and attempts are durable."
+  ],
+  "risk": {
+    "dimensions": [
+      "auth-rbac",
+      "availability",
+      "data-exposure",
+      "external-integration"
+    ],
+    "level": "high",
+    "rollback": "Keep remote dispatch opt-in and independent of existing local verification. Disable new submissions, reconcile or explicitly cancel accepted attempts, preserve logs/run metadata, and revoke worker credentials without claiming disconnected processes have stopped."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Implement docs/remote-verification-plan.md in bounded slices after urgent reliability repairs; begin with one trusted project and owner-controlled worker.",
+    "Extend existing queue/process abstractions to fetch an authorized exact commit into a separate run workspace and execute configured build/unit-test/lint/typecheck presets. Record actual SHA, preset/environment fingerprint, and setup/execution outcomes.",
+    "Provide scoped outbound worker connectivity and shared submission/status contracts for MCP, CLI, and web. Keep workers authoritative over local limits and credentials; accept no arbitrary remote shell commands or paths.",
+    "Persist idempotent submissions, explicit attempts, disconnect/restart reconciliation, and cancellation evidence without automatic redispatch of uncertain work.",
+    "Keep SaaS optional, execution customer-owned, and browser suites, autonomous agent launch, and operator-hosted untrusted execution deferred."
+  ],
+  "source": "Owner discussion on 2026-09-05; docs/remote-verification-plan.md",
+  "status": "open",
+  "title": "Run verification of pushed commits on customer-owned remote workers",
+  "type": "feature",
+  "validation": [
+    "Fixture repositories prove exact SHA execution despite branch advancement, and reject missing or unauthorized source/presets without branch fallback.",
+    "Verify duplicate submit, disconnect/restart, uncertain attempts, stale reports, descendant cancellation, capacity, setup failures, cache separation, bounded output, and cleanup preserving unrelated workspaces.",
+    "Run a real owner workflow: existing LLM client submits a failing pushed commit, reads remote evidence, then submits a corrected revision with separately attributable results.",
+    "Verify credential revocation, output access scopes, recoverable run metadata, and honest artifact expiry without exposing secrets.",
+    "Remote finite verification does not move an active development worktree or bypass local runtime reservations/resource policies."
+  ],
+  "value": [
+    "The owner can work with an LLM from a lightweight device while a prepared worker performs expensive checks.",
+    "Trustworthy reusable remote execution is proven before investing in autonomous fleets or commercial hosted runners."
+  ]
+}

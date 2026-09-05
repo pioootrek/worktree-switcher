@@ -122,6 +122,26 @@
       "type": "feature"
     },
     {
+      "area": "process-manager",
+      "id": "FEAT-20260905-remote-commit-verification",
+      "path": "feature/FEAT-20260905-remote-commit-verification.json",
+      "priority": "next",
+      "risk_level": "high",
+      "status": "open",
+      "title": "Run verification of pushed commits on customer-owned remote workers",
+      "type": "feature"
+    },
+    {
+      "area": "product",
+      "id": "FEAT-20260905-shared-project-memory",
+      "path": "feature/FEAT-20260905-shared-project-memory.json",
+      "priority": "next",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Add shared project memory, discussions, and backlog for humans and agents",
+      "type": "feature"
+    },
+    {
       "area": "core",
       "id": "FIX-20260905-cache-lifecycle-serialization",
       "path": "fix/FIX-20260905-cache-lifecycle-serialization.json",
@@ -220,9 +240,54 @@
       "status": "open",
       "title": "Finish packaged service lifecycle validation on supported platforms",
       "type": "feature"
+    },
+    {
+      "area": "product",
+      "id": "FEAT-20260905-agent-fleet-coordination",
+      "path": "feature/FEAT-20260905-agent-fleet-coordination.json",
+      "priority": "later",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Coordinate agent assignments, messages, handoffs, and owner oversight",
+      "type": "feature"
     }
   ],
   "notes": [
+    {
+      "author": "agent:codex",
+      "created": "2026-09-05",
+      "files": [
+        "integration-context.md",
+        "source-checksums.json",
+        "source/LLM_OPS_REGISTRATION.example.json",
+        "source/LLM_WORKER_SETUP.md",
+        "source/README.md",
+        "source/docs/backlog/config.json",
+        "source/docs/backlog/feature/FEAT-20260903-expiry-audit.json",
+        "source/docs/backlog/feature/FEAT-20260903-local-runtime.json",
+        "source/docs/backlog/feature/FEAT-20260903-mcp.json",
+        "source/docs/backlog/feature/FEAT-20260903-provider-rotation.json",
+        "source/docs/backlog/feature/FEAT-20260903-secure-core.json",
+        "source/docs/backlog/feature/FEAT-20260903-sync-state.json",
+        "source/docs/product/architecture.md",
+        "source/docs/product/competition.md",
+        "source/docs/product/mvp.md",
+        "source/docs/product/open-questions.md",
+        "source/docs/product/security.md",
+        "source/docs/product/vision.md"
+      ],
+      "id": "NOTE-20260905-secret-runtime-proposal",
+      "path": "notes/NOTE-20260905-secret-runtime-proposal",
+      "status": "active",
+      "tags": [
+        "environment",
+        "secrets",
+        "runtime",
+        "remote-verification",
+        "source-proposal"
+      ],
+      "title": "Secret Runtime v2 source proposal and Switcher integration context"
+    },
     {
       "author": "agent:claude",
       "created": "2026-08-29",
