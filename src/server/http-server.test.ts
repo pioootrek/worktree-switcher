@@ -29,9 +29,13 @@ async function fixture() {
   const selectEnvironmentProfile = vi.fn(async () => ({ id: "project-1" }));
   const deleteEnvironmentProfile = vi.fn(() => ({ id: "project-1" }));
   const testEnvironmentProfiles = vi.fn(() => ({ profiles: [], presetProfiles: {}, systemVariableNames: ["PATH"] }));
-  const saveTestEnvironmentProfile = vi.fn(async () => ({ id: "project-1" }));
-  const deleteTestEnvironmentProfile = vi.fn(async () => ({ id: "project-1" }));
-  const assignTestPresetProfile = vi.fn(async () => ({ id: "project-1" }));
+  const redactedTestProject = {
+    id: "project-1",
+    testEnvironmentProfiles: [{ name: "e2e", variableNames: ["E2E_RESET_DB_CONFIRM"] }],
+  };
+  const saveTestEnvironmentProfile = vi.fn(async () => redactedTestProject);
+  const deleteTestEnvironmentProfile = vi.fn(async () => redactedTestProject);
+  const assignTestPresetProfile = vi.fn(async () => redactedTestProject);
   const setServerCapacity = vi.fn(() => capacity);
   const setTestQueueLimit = vi.fn(() => testQueue);
   const enqueueTest = vi.fn(async () => ({ id: "run-1", phase: "queued" }));

@@ -3,7 +3,7 @@ import { createServer } from "node:net";
 import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import type { DashboardResponse, LaunchPreset, Project } from "../shared/contracts";
+import type { DashboardResponse, LaunchPreset, ProjectView } from "../shared/contracts";
 import { localizeServerMessage } from "../i18n/server-errors";
 import { type Locale, translate } from "../i18n/messages";
 import { ControlService } from "../server/control-service";
@@ -20,8 +20,8 @@ const execFileAsync = promisify(execFile);
 export interface ProjectGateway {
   readonly mode: "controller" | "offline";
   dashboard(): Promise<DashboardResponse>;
-  addProject(input: { name: string; repositoryPath: string; port: number; launchPreset: LaunchPreset }): Promise<Project>;
-  removeProject(projectId: string): Promise<Project>;
+  addProject(input: { name: string; repositoryPath: string; port: number; launchPreset: LaunchPreset }): Promise<ProjectView>;
+  removeProject(projectId: string): Promise<ProjectView>;
   close(): Promise<void>;
 }
 
@@ -198,11 +198,11 @@ class OfflineProjectGateway implements ProjectGateway {
     return this.service.dashboard();
   }
 
-  addProject(input: { name: string; repositoryPath: string; port: number; launchPreset: LaunchPreset }): Promise<Project> {
+  addProject(input: { name: string; repositoryPath: string; port: number; launchPreset: LaunchPreset }): Promise<ProjectView> {
     return this.service.addProject(input);
   }
 
-  removeProject(projectId: string): Promise<Project> {
+  removeProject(projectId: string): Promise<ProjectView> {
     return this.service.removeProject(projectId);
   }
 
@@ -234,13 +234,13 @@ class ControllerProjectGateway implements ProjectGateway {
     return this.request<DashboardResponse>("/api/dashboard");
   }
 
-  async addProject(input: { name: string; repositoryPath: string; port: number; launchPreset: LaunchPreset }): Promise<Project> {
-    const result = await this.request<{ project: Project }>("/api/projects", { method: "POST", body: JSON.stringify(input) });
+  async addProject(input: { name: string; repositoryPath: string; port: number; launchPreset: LaunchPreset }): Promise<ProjectView> {
+    const result = await this.request<{ project: ProjectView }>("/api/projects", { method: "POST", body: JSON.stringify(input) });
     return result.project;
   }
 
-  async removeProject(projectId: string): Promise<Project> {
-    const result = await this.request<{ project: Project }>(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+  async removeProject(projectId: string): Promise<ProjectView> {
+    const result = await this.request<{ project: ProjectView }>(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
     return result.project;
   }
 

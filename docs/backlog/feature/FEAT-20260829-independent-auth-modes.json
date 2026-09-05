@@ -6,7 +6,8 @@
     "related_ids": [
       "FEAT-20260829-controller-https",
       "FEAT-20260829-local-web-accounts",
-      "FEAT-20260829-scoped-mcp-agent-tokens"
+      "FEAT-20260829-scoped-mcp-agent-tokens",
+      "NOTE-20260829-readiness-assessment"
     ]
   },
   "notes": [
@@ -14,9 +15,14 @@
       "author": "user",
       "date": "2026-08-29",
       "text": "Make authentication independently switchable from the GUI for the Web dashboard and MCP."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Reprioritized under the 2026-09-05 owner-first, reusable-experiment direction. Revisit for a concrete workflow that needs independent modes. Avoid adding an authentication state machine solely to support hypothetical deployment variants."
     }
   ],
-  "priority": "next",
+  "priority": "later",
   "problem": [
     "Web pairing-token authentication and MCP bearer authentication are always enabled and configured outside the dashboard. Operators cannot independently choose the appropriate authentication mode, see its effective exposure, or safely enable and disable each boundary from one control surface."
   ],
@@ -43,6 +49,9 @@
   "source": "Product discussion on 2026-08-29",
   "status": "open",
   "title": "Control Web and MCP authentication independently",
+  "trigger": [
+    "Revisit for a concrete workflow that needs independent modes. Avoid adding an authentication state machine solely to support hypothetical deployment variants."
+  ],
   "type": "feature",
   "validation": [
     "Switch Web independently among pairing-token, local-accounts, and disabled while MCP remains unchanged, then switch MCP authentication without changing Web mode.",

@@ -6,7 +6,8 @@
     "related_ids": [
       "FEAT-20260829-controller-https",
       "FEAT-20260829-independent-auth-modes",
-      "FEAT-20260829-scoped-mcp-agent-tokens"
+      "FEAT-20260829-scoped-mcp-agent-tokens",
+      "NOTE-20260829-readiness-assessment"
     ]
   },
   "notes": [
@@ -19,9 +20,14 @@
       "author": "agent:codex",
       "date": "2026-08-29",
       "text": "Keep the local model deliberately small: no public registration, email delivery, social login, organizations, or remote identity provider. Account recovery is an explicit local CLI operation."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Reprioritized under the 2026-09-05 owner-first, reusable-experiment direction. Revisit when the owner actually needs separate human identities or account recovery. The prior request remains recorded; personal use and reusable trials do not require a new account system."
     }
   ],
-  "priority": "next",
+  "priority": "later",
   "problem": [
     "The browser currently relies on one ephemeral controller pairing token. It cannot identify individual human users, preserve ordinary login sessions, revoke one person's access, or recover access through a controlled local administrator workflow."
   ],
@@ -49,6 +55,9 @@
   "source": "Product discussion on 2026-08-29",
   "status": "open",
   "title": "Add simple local accounts for the web dashboard",
+  "trigger": [
+    "Revisit when the owner actually needs separate human identities or account recovery. The prior request remains recorded; personal use and reusable trials do not require a new account system."
+  ],
   "type": "feature",
   "validation": [
     "Bootstrap the first admin from the CLI, log in through the dashboard, create a user, and verify role restrictions across project operations, security settings, and credential issuance.",

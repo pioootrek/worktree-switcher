@@ -1,0 +1,49 @@
+{
+  "area": "process-manager",
+  "created": "2026-09-05",
+  "id": "FIX-20260905-test-log-lifecycle",
+  "links": {
+    "related_ids": [
+      "FEAT-20260902-managed-test-queue",
+      "NOTE-20260829-readiness-assessment"
+    ]
+  },
+  "notes": [
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Reproduced against d4a2c8d: 12 completed TestJobManager jobs, queue {limit:1,running:0,queued:0}, and 12 open test-log descriptors. Fixture state and files were removed. Source: src/server/log-writer.ts:69-110 and src/server/test-job-manager.ts:239-247. Missing disk retention is established by inspection of SqliteStateStore.saveTestRun and FileLogWriter, not a disk-growth benchmark."
+    }
+  ],
+  "priority": "now",
+  "problem": [
+    "FileLogWriter retains a WriteStream in testFiles for every run until controller shutdown. Finishing a test does not close or remove it.",
+    "SQLite keeps a bounded completed-run history, but deleting historical run records does not remove their corresponding log files. Per-file rotation does not bound total test-log storage."
+  ],
+  "risk": {
+    "dimensions": [
+      "availability",
+      "perf"
+    ],
+    "level": "medium",
+    "rollback": "Disable new retention deletion if its ownership checks fail while keeping per-run log closure. Preserve active/retained logs; already expired logs cannot be reconstructed after deletion."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Add an explicit per-run log finalization path and call it exactly once on success, failure, cancellation, timeout, and spawn error. Flush final output, close the descriptor, and remove the writer from memory.",
+    "Align completed test-log retention with retained run history, including rotated files, without deleting active or queued output. Define cleanup after project removal and interrupted-controller recovery.",
+    "Keep any cleanup restricted to controller-owned log names under the configured log root. Surface write/close failures without turning a failed verification into a success."
+  ],
+  "source": "Repository assessment and owner direction on 2026-09-05",
+  "status": "open",
+  "title": "Close completed test logs and bound their retained resources",
+  "type": "fix",
+  "validation": [
+    "Run a sequence of short jobs in an isolated controller state directory. Open test-log descriptors and writer entries must return to a bounded baseline after completion; Linux can verify /proc/self/fd.",
+    "Exceed the configured completed-run retention and verify obsolete logs and rotated copies are removed while retained and active run output remains readable.",
+    "Verify final output survives finish/close races, repeated finalization is harmless, and shutdown does not reopen completed log streams."
+  ],
+  "value": [
+    "The persistent controller can run for weeks without accumulating one open file and retained log set per verification."
+  ]
+}

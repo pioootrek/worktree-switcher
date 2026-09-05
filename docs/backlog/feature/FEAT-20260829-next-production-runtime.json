@@ -4,9 +4,10 @@
   "id": "FEAT-20260829-next-production-runtime",
   "links": {
     "related_ids": [
+      "FEAT-20260829-launch-environment-profiles",
       "FEAT-20260829-multi-project-worktree-switching",
       "FEAT-20260829-reset-next-build-cache",
-      "FEAT-20260829-launch-environment-profiles"
+      "NOTE-20260829-readiness-assessment"
     ]
   },
   "notes": [
@@ -14,9 +15,14 @@
       "author": "user",
       "date": "2026-08-29",
       "text": "Allow a managed Next.js project to be served in production mode when development-server behavior is not representative."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Reprioritized under the 2026-09-05 owner-first, reusable-experiment direction. Revisit when a reproducible production-only debugging need recurs. Queue existing build presets meanwhile; do not introduce another build scheduler or bypass managed finite verification."
     }
   ],
-  "priority": "next",
+  "priority": "later",
   "problem": [
     "Some defects and performance characteristics appear only in a Next.js production build. Worktree Switcher currently manages only the dev script, so users must leave the control plane to build and serve the selected worktree manually."
   ],
@@ -40,6 +46,9 @@
   "source": "Product discussion on 2026-08-29",
   "status": "open",
   "title": "Build and serve managed Next.js projects in production mode",
+  "trigger": [
+    "Revisit when a reproducible production-only debugging need recurs. Queue existing build presets meanwhile; do not introduce another build scheduler or bypass managed finite verification."
+  ],
   "type": "feature",
   "validation": [
     "Build and start a Next.js worktree in production mode and verify it serves on the project's stable port with NODE_ENV controlled by the runtime profile.",

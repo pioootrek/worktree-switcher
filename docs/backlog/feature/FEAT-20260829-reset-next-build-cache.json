@@ -5,7 +5,9 @@
   "links": {
     "related_ids": [
       "FEAT-20260829-multi-project-worktree-switching",
-      "FEAT-20260829-next-production-runtime"
+      "FEAT-20260829-next-production-runtime",
+      "FIX-20260905-cache-lifecycle-serialization",
+      "NOTE-20260829-readiness-assessment"
     ]
   },
   "notes": [
@@ -18,11 +20,16 @@
       "author": "agent:codex",
       "date": "2026-08-30",
       "text": "The authenticated dashboard now implements reset-now for an explicitly selected Git-discovered worktree. It accepts only the allowlisted Next.js cache kind, refuses active, reserved, scanning, non-Next.js, or symlinked targets, records success/no-op/failure in the project audit trail, and refreshes storage metrics. CLI, MCP authority design, and one-shot reset-before-start remain open scope."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Kept the implemented reset-now behavior distinct from optional convenience features. The race fix is next and must not wait for CLI, token scopes, or a before-start feature."
     }
   ],
-  "priority": "next",
+  "priority": "later",
   "problem": [
-    "A stale Next.js .next directory can cause misleading development or build failures. Today the operator must leave Worktree Switcher, identify the exact selected worktree, stop its server, and delete the cache manually."
+    "Authenticated dashboard reset-now already exists. Optional CLI access and one-shot reset-before-start are not implemented; the existing deletion race is tracked as a separate correctness fix."
   ],
   "risk": {
     "dimensions": [
@@ -30,18 +37,17 @@
       "process"
     ],
     "level": "medium",
-    "rollback": "Remove the maintenance action and leave cache cleanup as a manual operation. The implementation must never delete outside the selected Git-discovered worktree."
+    "rollback": "Remove only the new CLI/before-start convenience entry point while retaining the corrected dashboard reset-now path. Never compensate for a failed operation by deleting outside the selected worktree."
   },
   "schema_version": 1,
   "scope": [
-    "Add a Next.js-only reset-cache action in the service layer, dashboard, CLI, and MCP where destructive operations are allowed by the relevant authority model.",
-    "Resolve the selected worktree from current Git discovery, derive exactly its .next directory, and reject symlink or canonical-path escape before deletion.",
-    "Require the managed process to be stopped; offer reset now and an optional one-shot reset before the next start without deleting source files or package-manager caches.",
-    "Show a destructive confirmation to humans and record actor, project, worktree, path, outcome, and reason in the audit trail without exposing unrelated filesystem contents."
+    "After FIX-20260905-cache-lifecycle-serialization, add the smallest explicit CLI or one-shot before-start operation justified by a repeated recovery workflow.",
+    "Preserve Next.js-only allowlisting, current Git-derived paths, symlink rejection, stopped/unreserved/idle checks, and actor-attributed audit records.",
+    "Treat destructive MCP access as a separate authority decision; do not bundle it into ordinary status/claim tools or automatically clear cache on every start."
   ],
   "source": "Product discussion on 2026-08-29",
   "status": "open",
-  "title": "Reset a selected worktree's Next.js cache safely",
+  "title": "Extend existing cache reset with explicit CLI or before-start use",
   "type": "feature",
   "validation": [
     "Verify reset removes only <selected-worktree>/.next and refuses while its managed server is running.",

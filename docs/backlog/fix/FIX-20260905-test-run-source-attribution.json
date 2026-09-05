@@ -1,0 +1,48 @@
+{
+  "area": "process-manager",
+  "created": "2026-09-05",
+  "id": "FIX-20260905-test-run-source-attribution",
+  "links": {
+    "related_ids": [
+      "FEAT-20260902-managed-test-queue",
+      "NOTE-20260829-readiness-assessment"
+    ]
+  },
+  "notes": [
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Static finding at d4a2c8d: src/server/test-job-manager.ts enqueue copies input.worktree.head/branch/dirty; start only updates phase/timestamps before spawning run.cwd. A queue/source-change reproduction remains required by this item."
+    }
+  ],
+  "priority": "next",
+  "problem": [
+    "TestRun stores HEAD, branch, and dirty state at enqueue time, then starts later from a mutable working directory without rechecking those fields. A passed run can therefore appear to validate an earlier commit that was never executed."
+  ],
+  "risk": {
+    "dimensions": [
+      "process",
+      "data-migration"
+    ],
+    "level": "medium",
+    "rollback": "Retain newly recorded source evidence and keep legacy/unknown provenance explicit when reverting presentation or scheduling changes. Do not destructively down-migrate run history or turn uncertain results into qualified passes."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Record distinct enqueue and execution source state, including HEAD and dirty-state evidence. Revalidate the Git-discovered worktree immediately before starting.",
+    "Detect source changes while a run waits or executes. Choose and document a conservative stale/changed result that never silently certifies the requested revision.",
+    "Expose source uncertainty compactly in HTTP, MCP, and the dashboard. A clean Git index or a dirty boolean alone is not proof of immutable contents; do not promise full reproducibility or add worktree creation to this fix."
+  ],
+  "source": "Repository assessment and owner direction on 2026-09-05",
+  "status": "open",
+  "title": "Report the source state actually used by queued verification",
+  "type": "fix",
+  "validation": [
+    "Block the queue, enqueue revision A, change the worktree to B, then release the queue. Verify the record cannot claim an unqualified pass for A.",
+    "Change tracked or relevant untracked inputs without changing HEAD and verify the recorded uncertainty; cover removed/prunable worktrees before launch.",
+    "Verify unchanged source keeps the normal fast path and existing runs migrate without inventing execution-time metadata."
+  ],
+  "value": [
+    "Agents can reuse verification evidence without rerunning tests merely to discover which code was checked."
+  ]
+}

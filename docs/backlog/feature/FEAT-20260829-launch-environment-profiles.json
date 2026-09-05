@@ -6,7 +6,8 @@
     "related_ids": [
       "FEAT-20260829-multi-project-worktree-switching",
       "FEAT-20260829-next-production-runtime",
-      "FEAT-20260829-scoped-mcp-agent-tokens"
+      "FEAT-20260829-scoped-mcp-agent-tokens",
+      "NOTE-20260829-readiness-assessment"
     ]
   },
   "notes": [
@@ -29,11 +30,16 @@
       "author": "agent:codex",
       "date": "2026-08-31",
       "text": "Implemented validated literal per-project environment overrides and named profiles. Existing values migrate into default; dashboard users can create, copy, edit, select, delete, and save-and-restart profiles, while MCP exposes list, save, select, and delete operations. Selection persists across Node.js and Django worktree switches. PORT and NODE_ENV remain reserved, and audits record names without values. Secret references, environment files, working directories, PATH prefixes, required directories, scoped MCP capabilities, and CLI support remain open."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Corrected the outdated claim that only PORT is supported. The 2026-08-31 note records working literals and named profiles. Remaining enhancements should save time on a real workflow and have a generic fixture; this is not a mandate to build every profile option at once."
     }
   ],
   "priority": "next",
   "problem": [
-    "Real development servers often need launch-time feature flags, fixture modes, database guards, or test profiles. Worktree Switcher currently supplies only its own port handling, so projects such as WinPath cannot reproduce an E2E-specific runtime without being started manually."
+    "Validated literal profiles and MCP profile operations exist. Remaining gaps include monorepo working directories, referenced secrets/environment files, required directories, and CLI access; these should be introduced as independently useful slices."
   ],
   "risk": {
     "dimensions": [
@@ -41,31 +47,26 @@
       "process"
     ],
     "level": "medium",
-    "rollback": "Disable custom profiles and fall back to the detected default launch environment. Stored secret references must remain removable without revealing their values."
+    "rollback": "Revert only the added profile capability and preserve existing literal profiles and selected configuration. Do not silently launch with a different environment when a new path or secret reference cannot be resolved."
   },
   "schema_version": 1,
   "scope": [
-    "Add named per-project launch profiles containing validated environment-variable overrides, initially shared by development and optionally scoped separately to production mode.",
-    "Support non-secret literal values and secret references resolved from the controller host environment by variable name; do not store secret values in SQLite or return them through HTTP, MCP, audit events, status, errors, or logs.",
-    "Allow a profile to select a relative working directory inside the current Git-discovered worktree, which supports applications located in a monorepo subdirectory without accepting an arbitrary child-process cwd.",
-    "Allow ordered environment-file references and PATH prefixes. Environment files inside the worktree may be selected by relative path; additional host directories require an explicitly trusted root created by a human and cannot be introduced by an ordinary agent token.",
-    "Allow profiles to declare required runtime directories that the controller creates before launch. Creation is confined to the selected worktree, rejects symlink or canonical-path escape, is idempotent, and never implies automatic deletion.",
-    "Reserve controller-owned variables including PORT and NODE_ENV so profiles cannot bypass stable-port or runtime-mode policy.",
-    "Validate variable names, pass values through the child-process env object with shell:false, display effective variable names and redacted sources, and require a restart when the active profile changes.",
-    "Expose profiles through the service layer, dashboard, CLI, and MCP. MCP may read names and redacted effective configuration with project read access, select an existing profile with profiles:select, and create, update, or delete configuration only with a separately granted config:write capability.",
-    "Never expose environment-file contents, resolved secret values, or inherited host environment values through MCP. Keep arbitrary executable or free-form shell command input out of scope."
+    "Keep existing literal profiles. Select the next slice from an observed owner workflow and reproduce it with a portable fixture: relative working directory, named secret reference, environment-file reference, required directory, or CLI operation.",
+    "Resolve worktree-relative paths against exact Git discovery and reject traversal/symlink escape. Host paths belong in explicit local configuration, never framework-specific branches or portable skills.",
+    "Keep secret resolution controller-side and return only names/source metadata. Reserve runtime loader variables and PORT/NODE_ENV, and preserve controlled restart for active profile changes.",
+    "Preserve the previously requested capability boundaries when scoped tokens are implemented. Do not imply that today's shared bearer/session model already supports scopes.",
+    "PATH prefixes and the full remaining profile surface are later slices unless a concrete supported command requires them. Production mode is a separate item."
   ],
   "source": "Product discussion and WinPath inspection on 2026-08-29",
   "status": "open",
-  "title": "Configure safe environment profiles for managed servers",
+  "title": "Extend existing profiles only for concrete reusable launch needs",
   "type": "feature",
   "validation": [
-    "Configure a WinPath-style E2E profile and verify variables such as E2E_RESET_DB_CONFIRM reach the child process while PORT and NODE_ENV remain controller-owned.",
-    "Verify a referenced secret is read from the controller environment at launch and never appears in SQLite, API/MCP payloads, logs, errors, or audit records.",
-    "Verify invalid variable names, missing required secret references, and attempts to override reserved variables fail before spawning a process.",
-    "Verify profile changes require restart, apply to the selected worktree only through its managed process, and preserve shell-free spawning.",
-    "Verify relative working directories, environment files, PATH prefixes, and required directories resolve under their approved roots and reject traversal, symlink escape, missing files, and non-directory targets.",
-    "Verify an MCP token with profiles:select can choose an existing profile but cannot edit it, while config:write can mutate allowed non-secret configuration and every mutation is attributed and audited."
+    "For the selected enhancement, reproduce the owner workflow with a portable fixture outside the owner's repositories. Preserve existing Node.js and Django literal-profile behavior and controller-owned PORT/NODE_ENV.",
+    "For path-related slices, verify allowed relative working directories/files/directories and reject traversal, symlink escape, missing inputs, and invalid types before spawn. Directory creation must be idempotent and never imply deletion.",
+    "For a secret-reference slice, verify missing references fail before spawn and values never enter SQLite, API/MCP responses, audit records, or diagnostic output.",
+    "Verify active-profile changes require the existing controlled restart, mutations remain owner-authorized, and command execution remains shell-free.",
+    "When scoped tokens are introduced, verify profiles:select and config:write separately in their owning token item. Record completed and remaining profile slices explicitly instead of treating deferred scopes or PATH support as already implemented."
   ],
   "value": [
     "Projects can express development, E2E, fixture, and diagnostic modes without project-specific code in Worktree Switcher or unsafe free-form command execution."

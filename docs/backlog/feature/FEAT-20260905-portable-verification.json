@@ -1,0 +1,51 @@
+{
+  "area": "distribution",
+  "created": "2026-09-05",
+  "id": "FEAT-20260905-portable-verification",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-license-and-package-release",
+      "FEAT-20260829-user-service-installation",
+      "NOTE-20260829-readiness-assessment"
+    ]
+  },
+  "notes": [
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "No .github/workflows directory was present at d4a2c8d. Existing notes record a historical package smoke test and Linux service validation; those outcomes must not be presented as a current automated check. The owner explicitly reaffirmed reusable distribution as an experiment on 2026-09-05."
+    }
+  ],
+  "priority": "next",
+  "problem": [
+    "The checkout has pnpm check and build scripts but no checked-in GitHub Actions workflow. Repeating broad manual validation costs time, and a passing source checkout does not prove a new user can run the packed CLI and dashboard."
+  ],
+  "risk": {
+    "dimensions": [
+      "ci-release",
+      "process"
+    ],
+    "level": "medium",
+    "rollback": "Revert the focused implementation change without changing existing project configuration or unrelated runtime ownership."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Add one small CI workflow using the supported pnpm check and build commands, a pinned package-manager setup, and cancellation of superseded runs.",
+    "Pack the built artifact and install it into an isolated prefix outside the source tree. Smoke-test CLI discovery, static dashboard assets, and an isolated controller with fixture repositories and temporary ports/state.",
+    "Exercise the documented install -> register repository -> inspect/claim through MCP path without printing credentials. Preserve shell-free commands and no automatic dependency installation inside managed projects.",
+    "Keep CI independent of the owner's filesystem, local Hub checkout, running service, systemd policies, credentials, and private repositories. Any backlog validation step must use a pinned, portable validator setup.",
+    "Use Linux for the first repeatable smoke path. Add macOS coverage only for supported behavior that needs it; service-manager integration validation remains in its existing item. Do not publish npm packages or change installed services as a CI side effect."
+  ],
+  "source": "Repository assessment and owner direction on 2026-09-05",
+  "status": "open",
+  "title": "Automate portable checks and a clean package smoke test",
+  "type": "feature",
+  "validation": [
+    "Run checks/build/package installation in an isolated environment without access to the checkout's dependencies or state, and verify the executable serves packaged assets.",
+    "Verify missing assets, a failed check, a spawned fixture left alive, or failed cleanup makes the job fail; never label a restarted process as a completed check.",
+    "Inspect the package and CI output for accidental state, credentials, logs, or host paths. Document one finite smoke command usable locally and in CI."
+  ],
+  "value": [
+    "The owner avoids repeating installation checks, and other developers can try the experiment without reproducing the owner's machine."
+  ]
+}

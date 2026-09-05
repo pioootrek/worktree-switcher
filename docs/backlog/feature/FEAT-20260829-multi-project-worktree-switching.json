@@ -6,8 +6,10 @@
     "related_ids": [
       "FEAT-20260829-cli-project-management",
       "FEAT-20260829-license-and-package-release",
-      "RWK-20260829-idle-memory-budget",
-      "NOTE-20260829-readiness-assessment"
+      "FIX-20260905-dashboard-refresh-amplification",
+      "FIX-20260905-owned-process-tree-stop",
+      "NOTE-20260829-readiness-assessment",
+      "RWK-20260829-idle-memory-budget"
     ]
   },
   "notes": [
@@ -95,11 +97,16 @@
       "author": "agent:claude",
       "date": "2026-08-29",
       "text": "Independent readiness review recorded in NOTE-20260829-readiness-assessment. Tests and typecheck pass, the implementation matches the brief, and the reservation and MCP layer is the capability with no cheap substitute; server switching alone is replaceable by a terminal per worktree. Three gaps were spun off so this item stays focused on the switch flow: CLI project management (FEAT-20260829-cli-project-management), license and first release (FEAT-20260829-license-and-package-release), and the unreachable idle memory target in this item's release validation (RWK-20260829-idle-memory-budget). Until that rework lands, treat the 50 MiB entry in validation as superseded."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Owner prioritizes personal utility, time/token efficiency, and a reusable public experiment. Core implementation exists; this record now owns remaining integrated evidence only. Broad market validation and a runtime rewrite are not prerequisites."
     }
   ],
-  "priority": "now",
+  "priority": "next",
   "problem": [
-    "Developers manually stop and restart development servers when moving between Git worktrees, and the workflow becomes error-prone when several related repositories run at the same time."
+    "Multi-project switching, the static dashboard, SQLite, reservations, and MCP are implemented. Their integrated failure and resource behavior still needs bounded acceptance evidence, and the assessment found process cleanup and refresh amplification defects."
   ],
   "risk": {
     "dimensions": [
@@ -111,22 +118,20 @@
   },
   "schema_version": 1,
   "scope": [
-    "Create a local control plane that registers multiple Git repositories, discovers their worktrees, and maintains one independently switchable server slot with a stable port for each project.",
-    "Include serialized lifecycle operations per project, readiness checks, isolated logs, loopback-only control endpoints, and reconciliation after control-plane restart.",
-    "Ship a static Next.js dashboard composed from owned shadcn/ui source components inside one lightweight Node controller and isolate SQLite persistence behind a replaceable transactional StateStore contract.",
-    "Include human hard locks and expiring agent leases pinned to worktrees, allow dirty worktrees with a warning, and stop only controller-owned process trees during shutdown."
+    "After the linked process and refresh fixes, exercise independent switching, stable ports, reservations, failure isolation, and accurate status with multiple fixture repositories.",
+    "Keep the current single-controller architecture and one runtime slot per project. Treat custom launch configuration, test jobs, and distribution through their own items.",
+    "Check the owner's normal workflow and one portable fixture workflow. Public adoption targets are not a completion requirement."
   ],
   "source": "Product planning conversation on 2026-08-29",
   "status": "open",
-  "title": "Run and switch multiple worktree-backed projects",
+  "title": "Complete integrated verification of independent project switching",
   "type": "feature",
   "validation": [
-    "Run at least three fixture projects concurrently, switch each to another worktree, and verify that only the selected project's process restarts while every project keeps its configured port.",
-    "Verify concurrent requests for one project are serialized, failures are isolated, stale paths and arbitrary commands are rejected, and the dashboard reports readiness and logs accurately.",
-    "Measure the release build on the supported Linux reference environment and verify at most 50 MiB idle RSS, negligible idle CPU, bounded log memory, and no repository-wide watcher or continuous Git polling.",
-    "Verify concurrent reservation attempts are atomic, at most one active reservation exists per project, expired leases can be reclaimed, audit events commit with their mutation, and a failed transaction leaves no partial state.",
-    "Verify keyboard navigation, visible focus, reduced-motion behavior, and screen-reader announcements; runtime and reservation states must remain understandable without color.",
-    "Verify dirty worktrees run with a persistent warning, controller shutdown terminates every owned process tree, and an unrelated process occupying a configured port is reported but never terminated."
+    "Switch three isolated fixture projects between worktrees and verify only the selected runtime restarts, ports stay stable, and reservations remain authoritative.",
+    "Verify failures, stale worktrees, concurrent requests, and unknown port owners produce truthful status without affecting another project.",
+    "Use the measurement procedure from RWK-20260829-idle-memory-budget. The historical 50 MiB absolute threshold is superseded; record runtime baseline, controller overhead, idle CPU, and bounded growth.",
+    "Verify affected dashboard controls, keyboard focus, non-color state labels, and persistent dirty-worktree warnings in one focused browser pass.",
+    "Verify shutdown and switch remove complete owned process groups using the linked cleanup fix."
   ],
   "value": [
     "A developer can move an entire local stack between branches from one dashboard without repeatedly navigating directories or disturbing unrelated services."

@@ -1,0 +1,50 @@
+{
+  "area": "process-manager",
+  "created": "2026-09-05",
+  "id": "FIX-20260905-owned-process-tree-stop",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-dev-server-capacity",
+      "FEAT-20260829-multi-project-worktree-switching",
+      "FEAT-20260901-mcp-runtime-operations",
+      "NOTE-20260829-readiness-assessment"
+    ]
+  },
+  "notes": [
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Reproduced against d4a2c8d using a temporary ProcessManager fixture: {\"reportedPhase\":\"stopped\",\"childStillServes\":\"fixture-alive\"}. The fixture process group was killed and the temporary script removed. Source: src/server/process-manager.ts:165-174,195-224. The TestJobManager descendant variant is a related inspection target, not a completed reproduction."
+    }
+  ],
+  "priority": "now",
+  "problem": [
+    "ProcessManager clears the recorded PID when the direct child exits. stop() then skips escalation even if another member of its process group remains alive, reports stopped, and can release capacity while the port is still occupied."
+  ],
+  "risk": {
+    "dimensions": [
+      "availability",
+      "process"
+    ],
+    "level": "high",
+    "rollback": "If ownership cannot be verified after the change, report cleanup failure and retain truthful resource accounting instead of signalling unknown PIDs. Revert the implementation only after cleaning up owned fixtures; never mask a surviving process as stopped."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Retain verified process-group ownership through direct-child exit and finish stop only when the owned group has exited. Escalate against verified surviving members after the existing grace period; never identify ownership from port occupancy alone.",
+    "Cover normal stop, unexpected launcher exit, startup timeout, restart, switch, and controller shutdown. Keep truthful failure state and resource accounting when cleanup cannot be confirmed.",
+    "Inspect the same launcher/descendant assumption in TestJobManager cancellation and timeout paths, including descendants that close inherited output streams. Share only the ownership mechanism actually needed by both managers."
+  ],
+  "source": "Repository assessment and owner direction on 2026-09-05",
+  "status": "open",
+  "title": "Confirm owned process-group exit before reporting a stopped server",
+  "type": "fix",
+  "validation": [
+    "Use an isolated launcher that spawns an HTTP child ignoring SIGTERM. Let the launcher exit on SIGTERM; confirm the descendant and port are gone before stopped is reported. The pre-fix reproduction reports stopped while HTTP still responds.",
+    "Cover early launcher exit, stubborn descendants, timeout escalation, and repeated stop. Verify unrelated port owners are never signalled and capacity is released only after confirmed cleanup.",
+    "Exercise a package-manager-style test launcher with surviving descendants and verify a terminal cancellation cannot silently abandon its owned group. Run finite fixtures sequentially and clean up every process."
+  ],
+  "value": [
+    "Switching remains dependable and agents do not waste retries or leave resource-consuming processes behind."
+  ]
+}
