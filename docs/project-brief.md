@@ -60,6 +60,11 @@ owner's Secret Runtime proposal through scoped worker-side credential delivery.
 Its original documents are retained as reference; a standalone vault and its
 proposed technology stack are not adopted as current Switcher architecture.
 
+The [architecture and effort assessment](architecture-effort-assessment.md)
+records the expected structural changes, indicative effort, exclusions, and
+delivery uncertainty. It recommends an incremental remote-verification slice,
+not a rewrite or a committed launch schedule.
+
 ## Initial architecture
 
 The control plane lives outside the repositories it manages. Next.js builds the

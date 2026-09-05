@@ -120,6 +120,11 @@ completion of the original check.
 
 ## Delivery and verification
 
+The [architecture and effort assessment](architecture-effort-assessment.md)
+estimates a narrow remote-worker slice and identifies enabling refactors.
+Re-estimate after actual execution and recovery evidence; its calendar range
+is not a delivery commitment.
+
 1. Specify request/run contracts and prove exact-commit execution with fixture
    repositories using the existing queue/process abstractions.
 2. Connect one worker to a self-hosted control plane with scoped outbound

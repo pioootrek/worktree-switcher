@@ -123,6 +123,10 @@ are already delivered.
 
 ## Product execution priority
 
+See the [architecture and effort assessment](architecture-effort-assessment.md)
+for shared foundations, preliminary ranges, and assumptions. These estimates
+are reference material and do not turn this roadmap into a fixed schedule.
+
 The owner's subsequent discussion identified
 [remote commit verification](remote-verification-plan.md) as an early concrete
 experiment: push from an existing LLM workflow, request checks on an owned
