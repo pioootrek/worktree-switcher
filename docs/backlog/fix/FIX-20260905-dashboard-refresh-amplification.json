@@ -1,0 +1,48 @@
+{
+  "area": "git",
+  "created": "2026-09-05",
+  "id": "FIX-20260905-dashboard-refresh-amplification",
+  "links": {
+    "related_ids": [
+      "NOTE-20260829-readiness-assessment",
+      "RWK-20260829-idle-memory-budget"
+    ]
+  },
+  "notes": [
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Confirmed code path at d4a2c8d: ProcessManager.append -> EventStream.publish (250 ms) -> Dashboard changed listener -> ControlService.dashboard/snapshot -> SystemGitWorktreeReader.list/status. No load benchmark was run during the assessment."
+    }
+  ],
+  "priority": "now",
+  "problem": [
+    "Every changed SSE event triggers a full dashboard fetch. Each dashboard snapshot runs Git worktree discovery and git status for every worktree. Continuous log output can emit changes roughly every 250 ms per connected dashboard, with overlapping requests and no shared Git cache."
+  ],
+  "risk": {
+    "dimensions": [
+      "perf",
+      "availability"
+    ],
+    "level": "medium",
+    "rollback": "Revert the focused implementation change without changing existing project configuration or unrelated runtime ownership."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Separate log/runtime/test-output updates from Git discovery and configuration changes. Serve cached worktree metadata with freshness/error information and an explicit refresh path.",
+    "Coalesce concurrent discovery for the same repository, bound Git subprocess concurrency, and invalidate or refresh on relevant operations. Do not add recursive watchers.",
+    "Prevent overlapping dashboard refreshes from applying stale responses. Preserve fast log updates and authorize all incremental endpoints through existing boundaries."
+  ],
+  "source": "Repository assessment and owner direction on 2026-09-05",
+  "status": "open",
+  "title": "Stop log updates from repeatedly scanning every worktree",
+  "type": "fix",
+  "validation": [
+    "Use a counting Git adapter and a log burst fixture to prove output-only refreshes do not launch discovery/status work per event; verify multiple clients share one in-flight repository refresh.",
+    "Verify explicit refresh and worktree changes update metadata, out-of-order HTTP results cannot restore stale runtime state, and failures expose freshness instead of implying clean worktrees.",
+    "Record Git call counts, controller CPU/RSS, and response sizes for a bounded multi-project scenario with and without an open dashboard. Treat this as a future measurement, not an already observed regression magnitude."
+  ],
+  "value": [
+    "The dashboard stays cheap during the noisy builds and agent sessions it is meant to coordinate."
+  ]
+}

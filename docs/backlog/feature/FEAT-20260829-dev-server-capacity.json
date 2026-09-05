@@ -4,8 +4,10 @@
   "id": "FEAT-20260829-dev-server-capacity",
   "links": {
     "related_ids": [
+      "FEAT-20260829-monitor-managed-memory",
       "FEAT-20260829-multi-project-worktree-switching",
-      "FEAT-20260829-monitor-managed-memory"
+      "FIX-20260905-owned-process-tree-stop",
+      "NOTE-20260829-readiness-assessment"
     ]
   },
   "notes": [
@@ -18,11 +20,16 @@
       "author": "agent:codex",
       "date": "2026-08-29",
       "text": "Implemented the persisted optional counting semaphore across the shared ControlService used by HTTP and MCP. The dashboard can enable a limit from 1 to 64 and shows usage and holders; service status and the MCP get_server_capacity tool expose the same state. Starts acquire atomically, switches retain their slot, failures release it, and lowering the limit preserves running servers. Focused tests cover contention for the final slot, capacity exhaustion, switch retention, failed-start release, persistence, HTTP, MCP, and localization. Keep the item open until the rebuilt controller is explicitly installed and exercised with real managed processes; the active service was not restarted implicitly."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Re-scoped from implementation to remaining validation. Earlier notes already record the implemented capacity contract. Run the dependent cleanup fix first; backlog work does not authorize restarting the installed service."
     }
   ],
-  "priority": "now",
+  "priority": "next",
   "problem": [
-    "Several independent projects can currently start at once without a global resource budget. On a development host, agents or humans can therefore consume enough memory and CPU to disrupt the primary development workload."
+    "The optional capacity limit is implemented and unit-tested. Remaining work is integrated validation with real managed processes, especially truthful slot accounting after launcher/descendant failures."
   ],
   "risk": {
     "dimensions": [
@@ -31,19 +38,16 @@
       "process"
     ],
     "level": "medium",
-    "rollback": "Disable the capacity gate while retaining the configured value and audit history. Never stop already running servers merely because the configured limit is lowered."
+    "rollback": "If integrated validation fails, record the failing scenario and leave the installed capacity policy unchanged. Revert only the associated faulty code change; disabling the owner's configured resource gate requires its own authorization."
   },
   "schema_version": 1,
   "scope": [
-    "Add a controller-wide configurable capacity expressed as a counting semaphore; each starting or running managed server consumes one slot regardless of development or production mode.",
-    "Acquire a slot atomically before starting a stopped project and release it after a failed start or confirmed stop. Switching a running project retains its existing slot and must not transiently require a second one.",
-    "Return an explicit capacity-exhausted result instead of silently queueing; show the configured limit, used slots, and projects holding them in the dashboard, CLI, status API, and MCP read tools.",
-    "Keep project reservations separate from capacity: a human lock or agent lease protects ownership but consumes a capacity slot only while its server is starting or running.",
-    "When the limit is reduced below current usage, keep current servers alive and refuse new starts until usage falls within the new limit."
+    "Exercise the existing semaphore through HTTP and MCP after owned-process cleanup is fixed. Keep reservations independent of capacity and preserve slots during switches.",
+    "Record isolated runtime evidence and close this item only when its existing contention/failure acceptance checks pass. Do not reimplement the semaphore or add production mode here."
   ],
   "source": "Product discussion on 2026-08-29",
   "status": "open",
-  "title": "Limit concurrently running managed servers",
+  "title": "Validate the implemented server capacity with owned process cleanup",
   "type": "feature",
   "validation": [
     "With capacity two, start two projects concurrently and verify a third start or stopped-project claim is rejected without spawning a process.",

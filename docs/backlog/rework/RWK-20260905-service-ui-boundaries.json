@@ -1,0 +1,51 @@
+{
+  "area": "core",
+  "created": "2026-09-05",
+  "id": "RWK-20260905-service-ui-boundaries",
+  "links": {
+    "related_ids": [
+      "FIX-20260905-dashboard-refresh-amplification",
+      "FIX-20260905-owned-process-tree-stop",
+      "FIX-20260905-test-log-lifecycle",
+      "NOTE-20260829-readiness-assessment"
+    ]
+  },
+  "notes": [
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Owner authorized code decomposition as a backlog direction on 2026-09-05. Counts are from the d4a2c8d assessment. This item schedules incremental extraction; the backlog edit itself does not refactor application code."
+    }
+  ],
+  "priority": "next",
+  "problem": [
+    "The dashboard combines project cards, tests, environment settings, TLS, capacity, and resource views in 1326 lines. ControlService combines multiple operation families in 802 lines, while SqliteStateStore has 1055 lines. Editing one behavior requires loading and reviewing substantial unrelated code."
+  ],
+  "risk": {
+    "dimensions": [
+      "process",
+      "ui-only"
+    ],
+    "level": "medium",
+    "rollback": "Revert the focused implementation change without changing existing project configuration or unrelated runtime ownership."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Extract dashboard compositions by existing responsibility: project runtime, tests, environment settings, capacity, and TLS. Keep owned UI primitives separate and preserve translations and accessible interactions.",
+    "Keep ControlService as the public facade while extracting test/profile and runtime/maintenance use cases where touched. Preserve one shared lock/capacity authority; never create independent locks in extracted services.",
+    "Split SQLite mapping/query helpers and migrations into cohesive modules without adding database owners, changing schema, or altering transaction boundaries.",
+    "Work in small behavior-preserving commits after the urgent fixes, starting with the area needed by the next task. No framework migration, generic plugin framework, microservices, or line-count target."
+  ],
+  "source": "Repository assessment and owner direction on 2026-09-05",
+  "status": "open",
+  "title": "Split service and dashboard responsibilities in small verified changes",
+  "type": "rework",
+  "validation": [
+    "Existing focused service, persistence, HTTP/MCP, and localization tests must still pass. Add tests only for uncovered behavior that an extraction could change.",
+    "Verify representative affected dashboard actions in the browser when UI extraction occurs and use the supported build command for module/bundling changes.",
+    "Review each diff for unchanged API payloads, transaction/lock ownership, and error semantics. Record which modules a typical follow-up task now needs to read; do not claim token savings from file size alone."
+  ],
+  "value": [
+    "Humans and agents can understand and change one workflow with less unrelated context and lower regression risk."
+  ]
+}

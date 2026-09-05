@@ -1,0 +1,50 @@
+{
+  "area": "core",
+  "created": "2026-09-05",
+  "id": "FEAT-20260905-compact-mcp-status",
+  "links": {
+    "related_ids": [
+      "FEAT-20260901-mcp-runtime-operations",
+      "FIX-20260905-dashboard-refresh-amplification",
+      "NOTE-20260829-readiness-assessment"
+    ]
+  },
+  "notes": [
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Agent proposal accepted for backlog prioritization under the owner's explicit time/token-efficiency and reusability goals. Inspect current MCP snapshot payloads before choosing an additive contract; no response-size baseline has been measured yet."
+    }
+  ],
+  "priority": "next",
+  "problem": [
+    "Project status snapshots include logs, worktree metadata, test presets/history, and storage data even when an agent only needs placement, owner, phase, and available capacity. Repeated polling spends context and tool calls on unchanged details."
+  ],
+  "risk": {
+    "dimensions": [
+      "external-integration",
+      "perf"
+    ],
+    "level": "medium",
+    "rollback": "Revert the focused implementation change without changing existing project configuration or unrelated runtime ownership."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Add a compatible compact status contract containing stable project/run identifiers, exact worktree path, runtime phase, safe owner label, capacity, error code, and state revision/timestamp.",
+    "Make logs, storage history, test history, and preset details explicit bounded reads or opt-in expansions. Preserve existing clients through additive options or separately named tools.",
+    "Offer bounded wait-for-change or actionable retry-after information for status polling. Document a short inspect -> act -> wait -> verify -> release workflow in the portable skill.",
+    "Keep raw credentials, lease secrets, session identifiers, and environment values out of the compact contract. Avoid automatic release, restart, or force claim."
+  ],
+  "source": "Repository assessment and owner direction on 2026-09-05",
+  "status": "open",
+  "title": "Offer compact MCP status and fetch details only when needed",
+  "type": "feature",
+  "validation": [
+    "Compare response bytes and tool-call counts for the same successful claim and queued-test workflows before and after. Keep the actual work and evidence identical; report token estimates only with a named tokenizer.",
+    "Verify a quiet status response omits bulky logs/history, requested details stay bounded, and existing clients retain their supported behavior.",
+    "Verify wait timeout, disconnect, state change, authorization failure, and cancellation cannot retain an unbounded waiter or silently repeat a mutation."
+  ],
+  "value": [
+    "Routine agent work uses fewer tokens and repeated tool calls while keeping enough evidence to act correctly."
+  ]
+}

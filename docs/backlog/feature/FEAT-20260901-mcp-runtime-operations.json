@@ -6,7 +6,10 @@
     "related_ids": [
       "FEAT-20260829-dev-server-capacity",
       "FEAT-20260829-multi-project-worktree-switching",
-      "FEAT-20260829-scoped-mcp-agent-tokens"
+      "FEAT-20260829-scoped-mcp-agent-tokens",
+      "FEAT-20260905-compact-mcp-status",
+      "FIX-20260905-owned-process-tree-stop",
+      "NOTE-20260829-readiness-assessment"
     ]
   },
   "notes": [
@@ -14,6 +17,11 @@
       "author": "user",
       "date": "2026-09-01",
       "text": "Expose explicit MCP operations for starting, restarting, and stopping a managed development server."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "High-value next work for the owner: restart/stop a claimed server without manual intervention or bypassing the controller. Implement after FIX-20260905-owned-process-tree-stop and reuse current session ownership; scoped-token rollout is not required for the initial tools. Coordinate compact responses with the linked MCP status proposal."
     }
   ],
   "priority": "next",

@@ -2,54 +2,34 @@
   "generated_by": "hub.py fmt",
   "items": [
     {
-      "area": "core",
-      "id": "FEAT-20260829-dev-server-capacity",
-      "path": "feature/FEAT-20260829-dev-server-capacity.json",
+      "area": "git",
+      "id": "FIX-20260905-dashboard-refresh-amplification",
+      "path": "fix/FIX-20260905-dashboard-refresh-amplification.json",
       "priority": "now",
       "risk_level": "medium",
       "status": "open",
-      "title": "Limit concurrently running managed servers",
-      "type": "feature"
-    },
-    {
-      "area": "distribution",
-      "id": "FEAT-20260829-license-and-package-release",
-      "path": "feature/FEAT-20260829-license-and-package-release.json",
-      "priority": "now",
-      "risk_level": "medium",
-      "status": "open",
-      "title": "Add a license and prepare the first package release",
-      "type": "feature"
-    },
-    {
-      "area": "core",
-      "id": "FEAT-20260829-multi-project-worktree-switching",
-      "path": "feature/FEAT-20260829-multi-project-worktree-switching.json",
-      "priority": "now",
-      "risk_level": "medium",
-      "status": "open",
-      "title": "Run and switch multiple worktree-backed projects",
-      "type": "feature"
-    },
-    {
-      "area": "distribution",
-      "id": "FEAT-20260829-user-service-installation",
-      "path": "feature/FEAT-20260829-user-service-installation.json",
-      "priority": "now",
-      "risk_level": "medium",
-      "status": "open",
-      "title": "Install Worktree Switcher as a persistent user service",
-      "type": "feature"
+      "title": "Stop log updates from repeatedly scanning every worktree",
+      "type": "fix"
     },
     {
       "area": "process-manager",
-      "id": "FEAT-20260902-managed-test-queue",
-      "path": "feature/FEAT-20260902-managed-test-queue.json",
+      "id": "FIX-20260905-owned-process-tree-stop",
+      "path": "fix/FIX-20260905-owned-process-tree-stop.json",
+      "priority": "now",
+      "risk_level": "high",
+      "status": "open",
+      "title": "Confirm owned process-group exit before reporting a stopped server",
+      "type": "fix"
+    },
+    {
+      "area": "process-manager",
+      "id": "FIX-20260905-test-log-lifecycle",
+      "path": "fix/FIX-20260905-test-log-lifecycle.json",
       "priority": "now",
       "risk_level": "medium",
       "status": "open",
-      "title": "Manage framework-aware tests per worktree",
-      "type": "feature"
+      "title": "Close completed test logs and bound their retained resources",
+      "type": "fix"
     },
     {
       "area": "distribution",
@@ -58,17 +38,17 @@
       "priority": "next",
       "risk_level": "medium",
       "status": "open",
-      "title": "Serve the controller dashboard over HTTPS",
+      "title": "Provide a small secure transport path for the existing LAN dashboard",
       "type": "feature"
     },
     {
       "area": "core",
-      "id": "FEAT-20260829-independent-auth-modes",
-      "path": "feature/FEAT-20260829-independent-auth-modes.json",
+      "id": "FEAT-20260829-dev-server-capacity",
+      "path": "feature/FEAT-20260829-dev-server-capacity.json",
       "priority": "next",
-      "risk_level": "high",
+      "risk_level": "medium",
       "status": "open",
-      "title": "Control Web and MCP authentication independently",
+      "title": "Validate the implemented server capacity with owned process cleanup",
       "type": "feature"
     },
     {
@@ -78,47 +58,27 @@
       "priority": "next",
       "risk_level": "medium",
       "status": "open",
-      "title": "Configure safe environment profiles for managed servers",
+      "title": "Extend existing profiles only for concrete reusable launch needs",
+      "type": "feature"
+    },
+    {
+      "area": "distribution",
+      "id": "FEAT-20260829-license-and-package-release",
+      "path": "feature/FEAT-20260829-license-and-package-release.json",
+      "priority": "next",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Prepare a reusable package trial and an optional first npm release",
       "type": "feature"
     },
     {
       "area": "core",
-      "id": "FEAT-20260829-local-web-accounts",
-      "path": "feature/FEAT-20260829-local-web-accounts.json",
-      "priority": "next",
-      "risk_level": "high",
-      "status": "open",
-      "title": "Add simple local accounts for the web dashboard",
-      "type": "feature"
-    },
-    {
-      "area": "process-manager",
-      "id": "FEAT-20260829-next-production-runtime",
-      "path": "feature/FEAT-20260829-next-production-runtime.json",
+      "id": "FEAT-20260829-multi-project-worktree-switching",
+      "path": "feature/FEAT-20260829-multi-project-worktree-switching.json",
       "priority": "next",
       "risk_level": "medium",
       "status": "open",
-      "title": "Build and serve managed Next.js projects in production mode",
-      "type": "feature"
-    },
-    {
-      "area": "process-manager",
-      "id": "FEAT-20260829-reset-next-build-cache",
-      "path": "feature/FEAT-20260829-reset-next-build-cache.json",
-      "priority": "next",
-      "risk_level": "medium",
-      "status": "open",
-      "title": "Reset a selected worktree's Next.js cache safely",
-      "type": "feature"
-    },
-    {
-      "area": "core",
-      "id": "FEAT-20260829-scoped-mcp-agent-tokens",
-      "path": "feature/FEAT-20260829-scoped-mcp-agent-tokens.json",
-      "priority": "next",
-      "risk_level": "high",
-      "status": "open",
-      "title": "Issue scoped MCP access tokens for coding agents",
+      "title": "Complete integrated verification of independent project switching",
       "type": "feature"
     },
     {
@@ -132,6 +92,56 @@
       "type": "feature"
     },
     {
+      "area": "process-manager",
+      "id": "FEAT-20260902-managed-test-queue",
+      "path": "feature/FEAT-20260902-managed-test-queue.json",
+      "priority": "next",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Complete managed test-queue reliability and user-flow validation",
+      "type": "feature"
+    },
+    {
+      "area": "core",
+      "id": "FEAT-20260905-compact-mcp-status",
+      "path": "feature/FEAT-20260905-compact-mcp-status.json",
+      "priority": "next",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Offer compact MCP status and fetch details only when needed",
+      "type": "feature"
+    },
+    {
+      "area": "distribution",
+      "id": "FEAT-20260905-portable-verification",
+      "path": "feature/FEAT-20260905-portable-verification.json",
+      "priority": "next",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Automate portable checks and a clean package smoke test",
+      "type": "feature"
+    },
+    {
+      "area": "core",
+      "id": "FIX-20260905-cache-lifecycle-serialization",
+      "path": "fix/FIX-20260905-cache-lifecycle-serialization.json",
+      "priority": "next",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Serialize cache deletion with worktree runtime and test activity",
+      "type": "fix"
+    },
+    {
+      "area": "process-manager",
+      "id": "FIX-20260905-test-run-source-attribution",
+      "path": "fix/FIX-20260905-test-run-source-attribution.json",
+      "priority": "next",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Report the source state actually used by queued verification",
+      "type": "fix"
+    },
+    {
       "area": "core",
       "id": "RWK-20260829-idle-memory-budget",
       "path": "rework/RWK-20260829-idle-memory-budget.json",
@@ -140,6 +150,76 @@
       "status": "open",
       "title": "Revise the unreachable idle memory acceptance target",
       "type": "rework"
+    },
+    {
+      "area": "core",
+      "id": "RWK-20260905-service-ui-boundaries",
+      "path": "rework/RWK-20260905-service-ui-boundaries.json",
+      "priority": "next",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Split service and dashboard responsibilities in small verified changes",
+      "type": "rework"
+    },
+    {
+      "area": "core",
+      "id": "FEAT-20260829-independent-auth-modes",
+      "path": "feature/FEAT-20260829-independent-auth-modes.json",
+      "priority": "later",
+      "risk_level": "high",
+      "status": "open",
+      "title": "Control Web and MCP authentication independently",
+      "type": "feature"
+    },
+    {
+      "area": "core",
+      "id": "FEAT-20260829-local-web-accounts",
+      "path": "feature/FEAT-20260829-local-web-accounts.json",
+      "priority": "later",
+      "risk_level": "high",
+      "status": "open",
+      "title": "Add simple local accounts for the web dashboard",
+      "type": "feature"
+    },
+    {
+      "area": "process-manager",
+      "id": "FEAT-20260829-next-production-runtime",
+      "path": "feature/FEAT-20260829-next-production-runtime.json",
+      "priority": "later",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Build and serve managed Next.js projects in production mode",
+      "type": "feature"
+    },
+    {
+      "area": "process-manager",
+      "id": "FEAT-20260829-reset-next-build-cache",
+      "path": "feature/FEAT-20260829-reset-next-build-cache.json",
+      "priority": "later",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Extend existing cache reset with explicit CLI or before-start use",
+      "type": "feature"
+    },
+    {
+      "area": "core",
+      "id": "FEAT-20260829-scoped-mcp-agent-tokens",
+      "path": "feature/FEAT-20260829-scoped-mcp-agent-tokens.json",
+      "priority": "later",
+      "risk_level": "high",
+      "status": "open",
+      "title": "Issue scoped MCP access tokens for coding agents",
+      "type": "feature"
+    },
+    {
+      "area": "distribution",
+      "id": "FEAT-20260829-user-service-installation",
+      "path": "feature/FEAT-20260829-user-service-installation.json",
+      "priority": "later",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Finish packaged service lifecycle validation on supported platforms",
+      "type": "feature"
     }
   ],
   "notes": [
@@ -147,6 +227,7 @@
       "author": "agent:claude",
       "created": "2026-08-29",
       "files": [
+        "assessment-20260905.md",
         "findings.md"
       ],
       "id": "NOTE-20260829-readiness-assessment",
@@ -156,10 +237,14 @@
         "assessment",
         "distribution",
         "mcp",
+        "owner-workflow",
         "positioning",
-        "release-readiness"
+        "release-readiness",
+        "reliability",
+        "reusability",
+        "token-efficiency"
       ],
-      "title": "Prototype readiness and positioning assessment"
+      "title": "Current owner workflow, reusable experiment, and technical assessment"
     },
     {
       "author": "agent:codex",
@@ -169,7 +254,7 @@
       ],
       "id": "NOTE-20260829-initial-architecture",
       "path": "notes/NOTE-20260829-initial-architecture",
-      "status": "active",
+      "status": "archived",
       "tags": [
         "architecture",
         "git-worktree",

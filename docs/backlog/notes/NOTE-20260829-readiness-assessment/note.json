@@ -1,22 +1,40 @@
 {
   "author": "agent:claude",
   "body": {
-    "summary": "Independent readiness review of the prototype on 2026-08-29. The implementation matches the brief and its checks pass, but the differentiating capability is agent arbitration over a worktree and port, not development-server supervision. Three gaps block real use: project registration exists only in the dashboard, the repository has no license, and the 50 MiB idle RSS acceptance target is not reachable as currently measured."
+    "direction": [
+      {
+        "author": "user",
+        "date": "2026-09-05",
+        "text": "Primarily for the owner; avoid wasting time and tokens. Update the backlog, add proposals and required fixes, allow code decomposition, and keep changes on the current branch."
+      },
+      {
+        "author": "user",
+        "date": "2026-09-05",
+        "text": "The project must remain reusable; sharing it and seeing whether it catches on is an experiment."
+      }
+    ],
+    "editor": "agent:codex",
+    "summary": "Read assessment-20260905.md first. The owner prioritizes personal utility and time/token efficiency while explicitly preserving a reusable public experiment. Three urgent fixes have source or reproduction evidence; follow-up work covers accurate verification, compact MCP, incremental decomposition, and portable package checks. findings.md preserves the superseded 2026-08-29 assessment."
   },
   "created": "2026-08-29",
   "files": [
+    "assessment-20260905.md",
     "findings.md"
   ],
   "id": "NOTE-20260829-readiness-assessment",
-  "last_reviewed": "2026-08-29",
+  "last_reviewed": "2026-09-05",
   "schema_version": 1,
   "status": "active",
   "tags": [
     "assessment",
     "distribution",
     "mcp",
+    "owner-workflow",
     "positioning",
-    "release-readiness"
+    "release-readiness",
+    "reliability",
+    "reusability",
+    "token-efficiency"
   ],
-  "title": "Prototype readiness and positioning assessment"
+  "title": "Current owner workflow, reusable experiment, and technical assessment"
 }

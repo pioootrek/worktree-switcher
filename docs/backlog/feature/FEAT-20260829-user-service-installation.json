@@ -7,6 +7,8 @@
       "FEAT-20260829-cli-project-management",
       "FEAT-20260829-license-and-package-release",
       "FEAT-20260829-multi-project-worktree-switching",
+      "FEAT-20260905-portable-verification",
+      "FIX-20260905-owned-process-tree-stop",
       "NOTE-20260829-readiness-assessment"
     ]
   },
@@ -35,11 +37,16 @@
       "author": "agent:codex",
       "date": "2026-08-29",
       "text": "Fixed managed project startup when a package manager is installed in a user directory such as ~/.local/bin. Service definitions now add only PATH directories containing a detected supported package manager, alongside Node and standard system directories, rather than inheriting the full interactive PATH. Verified on llm-worker by refreshing the real systemd user service and starting WinPath through the authenticated controller API; pnpm resolved and Next.js reached Ready over HTTPS."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Moved later because daily Linux operation already has historical evidence. This remains necessary before claiming fully validated macOS service support; it does not block a clearly scoped Linux-first experiment."
     }
   ],
-  "priority": "now",
+  "priority": "later",
   "problem": [
-    "The controller currently lives only as a foreground terminal process. Closing the terminal, logging out, or an unexpected controller failure removes the dashboard and MCP control plane and stops or loses ownership of managed development servers, so the tool cannot reliably support daily background use."
+    "Service installation and Linux lifecycle behavior are implemented and historically exercised. Packaged upgrade coverage and real macOS LaunchAgent validation remain outstanding."
   ],
   "risk": {
     "dimensions": [
@@ -48,23 +55,17 @@
       "ci-release"
     ],
     "level": "medium",
-    "rollback": "Stop and uninstall only the generated user service while preserving the database, credentials, configuration, and logs. Foreground worktree-switcher start must remain available."
+    "rollback": "Remove only isolated validation fixtures and restore a changed test service definition. Leave the owner's installed service and state untouched unless that lifecycle change was separately authorized."
   },
   "schema_version": 1,
   "scope": [
-    "Add user-level service support for systemd on Linux and a LaunchAgent on macOS. Do not require sudo, install a system-wide daemon, alter firewall rules, or generate host-specific memory and CPU limits.",
-    "Add CLI commands service install, service status, service start, service stop, service restart, and service uninstall. Installation and removal are explicit, idempotent, and report the exact user-level artifact and controller endpoint without printing credentials.",
-    "Generate service definitions from controlled templates using absolute executable and data/state/config paths, --no-open, an explicit working directory, a bounded restart policy with backoff, and a minimal predictable environment that does not depend on an interactive shell or nvm initialization.",
-    "Keep the foreground worktree-switcher start command for evaluation, development, and diagnostics. Detect and reject a second controller through a real single-instance lock rather than allowing two process owners to share SQLite and runtime state.",
-    "Define service and managed-process lifecycle together: a deliberate service stop gracefully terminates controller-owned process trees; an unexpected crash or service restart must not leave orphan processes that a new controller mistakes for its own.",
-    "Use the OS service manager's process-group/cgroup behavior where available, then reconcile persisted runtime hints, occupied ports, reservations, and configured auto-start projects before accepting new operations after restart.",
-    "Expose service health, controller PID, uptime, effective version, bind endpoints, last exit/restart reason, and log locations through service status and doctor. Keep journal/LaunchAgent output and existing rotating application logs free of pairing links, bearer tokens, passwords, and secret environment values.",
-    "Handle upgrades explicitly: detect when a generated service points at an obsolete executable, provide service install --refresh or an equivalent safe update path, and restart only after the operator confirms the new installation is valid.",
-    "Document platform behavior: a systemd user service normally starts with the user session; optional loginctl linger for pre-login operation is an administrator choice that the installer explains but never enables silently."
+    "Use the portable package smoke work as input, then finish packaged lifecycle/upgrade checks on Linux and macOS without redesigning the service layer.",
+    "Recheck owned-child cleanup for deliberate stop and unexpected controller failure after the linked fix. Preserve unknown processes and user data.",
+    "Keep absolute service paths generated from each installation and host resource policy external to portable templates. Do not restart or replace the owner's installed service as part of backlog maintenance."
   ],
   "source": "Pre-publication product decision on 2026-08-29",
   "status": "open",
-  "title": "Install Worktree Switcher as a persistent user service",
+  "title": "Finish packaged service lifecycle validation on supported platforms",
   "type": "feature",
   "validation": [
     "Install and enable the service from a packaged executable on supported Linux and macOS environments, log out or close the invoking terminal as appropriate, and verify the controller, dashboard, and MCP remain reachable according to platform session policy.",

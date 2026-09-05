@@ -5,7 +5,8 @@
   "links": {
     "related_ids": [
       "FEAT-20260829-independent-auth-modes",
-      "FEAT-20260829-local-web-accounts"
+      "FEAT-20260829-local-web-accounts",
+      "NOTE-20260829-readiness-assessment"
     ]
   },
   "notes": [
@@ -13,11 +14,16 @@
       "author": "agent:codex",
       "date": "2026-08-29",
       "text": "Local password accounts introduce reusable credentials and session cookies. They must not be accepted over the current plaintext LAN listener, so controller HTTPS or an explicitly documented secure tunnel is a prerequisite for non-loopback account login."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "The earlier assessment recommended loopback by default, but the owner's existing LAN requirement remains authoritative. This record now separates a small transport improvement from deferred accounts and treats any default change as a proposal."
     }
   ],
   "priority": "next",
   "problem": [
-    "The Worktree Switcher dashboard currently uses plaintext HTTP. Pairing tokens are already sensitive, but adding reusable passwords and browser sessions would make plaintext non-loopback access an unacceptable credential-exposure path."
+    "The owner explicitly requested LAN access and the dashboard currently sends pairing credentials over HTTP. A reusable setup needs a documented secure transport option independent of any future account system."
   ],
   "risk": {
     "dimensions": [
@@ -25,27 +31,25 @@
       "process"
     ],
     "level": "medium",
-    "rollback": "Bind the dashboard to loopback and use a secure tunnel. Do not fall back from HTTPS to plaintext LAN password login."
+    "rollback": "Revert the new transport configuration through an explicit operator action and preserve the existing chosen bind address. Do not silently rebind a running service or downgrade a configured secure credential path."
   },
   "schema_version": 1,
   "scope": [
-    "Add optional HTTPS to the Worktree Switcher controller itself, separate from the existing per-project Next.js development HTTPS setting.",
-    "Support canonical local key, certificate, and optional CA paths with owner-readable validation; never upload, copy into SQLite, return, or log private-key contents.",
-    "Expose effective scheme, certificate mode, bind address, and restart requirement in security settings. Apply listener certificate changes through an explicit controlled controller restart rather than hot-swapping ambiguous state.",
-    "Set Secure session cookies and enforce HTTPS-aware Origin validation when Web account mode is used over a non-loopback connection.",
-    "Document secure-tunnel and reverse-proxy deployment as alternatives, including how trusted proxy headers are disabled by default and enabled only for an explicit trusted proxy configuration."
+    "Start with one supported secure tunnel/proxy recipe for the existing pairing-token dashboard, including API, SSE, Origin handling, and private setup instructions. Choose native controller TLS only if the actual workflow needs it.",
+    "Preserve existing LAN installation settings. A loopback default for new installations is a proposal to assess and document, not authorization to rebind or restart the owner's service.",
+    "If native TLS is selected, accept canonical local key/certificate paths, avoid storing or returning private-key contents, and apply changes through an explicit controlled restart.",
+    "Keep reusable passwords and account-mode cookies out of this slice; their secure-transport requirements remain in the account item. Do not change firewall rules or trust arbitrary proxy headers."
   ],
   "source": "Security prerequisite identified during local-account design on 2026-08-29",
   "status": "open",
-  "title": "Serve the controller dashboard over HTTPS",
+  "title": "Provide a small secure transport path for the existing LAN dashboard",
   "type": "feature",
   "validation": [
-    "Serve the dashboard over HTTPS with a configured local certificate and verify API, SSE, pairing, account login, and Secure cookies use the correct origin and scheme.",
-    "Verify invalid, missing, unreadable, or mismatched certificate files fail closed without silently starting a plaintext non-loopback account listener.",
-    "Verify private-key contents never appear in SQLite, dashboard/API/MCP responses, logs, errors, or process arguments beyond the protected filesystem path contract.",
-    "Verify loopback HTTP remains available for local-only operation and a documented secure tunnel can satisfy the non-loopback account transport requirement."
+    "Verify pairing, API mutations, SSE, and expected Origin checks through the selected transport without exposing credentials in logs or documentation.",
+    "Verify invalid transport configuration fails visibly and does not silently expose a new plaintext listener.",
+    "Verify existing LAN and loopback choices remain explicit and installing documentation/configuration does not restart or rebind a running service."
   ],
   "value": [
-    "Reusable local account credentials and browser sessions can cross the LAN without being exposed as plaintext while local-only users retain a simple loopback setup."
+    "The owner can keep LAN convenience with protected credentials, and trial users get a portable setup recipe."
   ]
 }

@@ -1,0 +1,48 @@
+{
+  "area": "core",
+  "created": "2026-09-05",
+  "id": "FIX-20260905-cache-lifecycle-serialization",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-reset-next-build-cache",
+      "NOTE-20260829-readiness-assessment"
+    ]
+  },
+  "notes": [
+    {
+      "author": "agent:codex",
+      "date": "2026-09-05",
+      "text": "Additional static finding while updating the backlog: src/server/control-service.ts:641-664 performs asynchronous deletion outside the per-project serialization used for operate/enqueueTest/claimProject. No runtime reproduction was executed; start implementation with the deterministic interleaving test."
+    }
+  ],
+  "priority": "next",
+  "problem": [
+    "deleteWorktreeCache checks runtime, reservations, scans, and test runs before awaiting removal, but does not participate in ControlService.serialized. A start, claim, or enqueue can pass while deletion is in progress."
+  ],
+  "risk": {
+    "dimensions": [
+      "availability",
+      "process"
+    ],
+    "level": "medium",
+    "rollback": "If the new maintenance exclusion is faulty, temporarily refuse cache deletion and preserve runtime/test ownership until corrected. Do not restore the known racing deletion path as an automatic fallback."
+  },
+  "schema_version": 1,
+  "scope": [
+    "First reproduce the interleaving with a deferred cache-cleaner fixture. Use a shared worktree maintenance exclusion for deletion and conflicting lifecycle/test admission; keep unrelated projects independent.",
+    "Keep the existing allowlist, Git-derived paths, symlink rejection, authorization, and audit behavior. Hold the exclusion until deletion has completed or failed.",
+    "Cover storage-scan admission during maintenance as well as test/runtime admission. Do not expand deletion targets or add agent cache-delete privileges in this fix."
+  ],
+  "source": "Repository assessment and owner direction on 2026-09-05",
+  "status": "open",
+  "title": "Serialize cache deletion with worktree runtime and test activity",
+  "type": "fix",
+  "validation": [
+    "Pause the cleaner after checks and attempt start, claim, enqueue, and scan. Verify none can use the worktree cache until maintenance ends.",
+    "Verify the inverse ordering refuses deletion during active work and failure releases the exclusion without deadlocking later operations.",
+    "Keep existing missing-directory, symlink, foreign-path, reservation, and unrelated-project tests passing."
+  ],
+  "value": [
+    "Cache recovery cannot race with a build or server and create another avoidable debugging session."
+  ]
+}
