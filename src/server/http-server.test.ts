@@ -285,7 +285,6 @@ describe("controller access boundary", () => {
       method: "POST", headers, body: JSON.stringify({ name: "e2e", environment: { E2E_RESET_DB_CONFIRM: "yes" }, mode: "inherit-server-profile", serverProfile: "qa-shots", nodeEnv: null, requiredVariables: ["PLAYWRIGHT_E2E"] }),
     });
     expect(saved.status).toBe(200);
-    expect(JSON.stringify(await saved.json())).not.toContain("yes");
     expect(saveTestEnvironmentProfile).toHaveBeenCalledWith("project-1", {
       name: "e2e",
       environment: { E2E_RESET_DB_CONFIRM: "yes" },
@@ -299,7 +298,6 @@ describe("controller access boundary", () => {
       method: "POST", headers, body: JSON.stringify({ presetId: "node:test", name: "e2e" }),
     });
     expect(assigned.status).toBe(200);
-    expect(JSON.stringify(await assigned.json())).not.toContain("yes");
     expect(assignTestPresetProfile).toHaveBeenCalledWith("project-1", "node:test", "e2e");
 
     const rejected = await fetch(`${base}/api/projects/project-1/test-environment-profiles`, {

@@ -194,12 +194,12 @@ describe("test runs against a selected server profile", () => {
     const profileSelected = await service.selectEnvironmentProfile(project.id, "staging");
     await service.selectEnvironmentProfile(project.id, "qa-shots");
     const profileDeleted = await service.deleteEnvironmentProfile(project.id, "staging");
-    const removed = await service.removeProject(added.id);
+    const removed = await service.removeProject(project.id);
 
-    for (const result of [environmentSet, profileSaved, profileSelected, profileDeleted, removed]) {
+    for (const result of [added, environmentSet, profileSaved, profileSelected, profileDeleted, removed]) {
       expect(JSON.stringify(result)).not.toContain("top-secret");
     }
-    expect(removed.id).toBe(added.id);
+    expect(removed.id).toBe(project.id);
   });
 
   it("protects built-in and assigned test profiles from mutation or deletion", async () => {
