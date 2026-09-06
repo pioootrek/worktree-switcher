@@ -676,12 +676,25 @@ export class ControlService {
   }
 
   async shutdown(): Promise<void> {
+    const failures: unknown[] = [];
     const cleanup = await Promise.allSettled([this.tests?.shutdown(), this.processes.stopAll()]);
-    const failures = cleanup.filter((result) => result.status === "rejected");
-    if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Nie zakończono wszystkich zarządzanych procesów.");
-    await this.storage?.close();
-    this.store.close();
-    await this.logs.close();
+    failures.push(...cleanup.filter((result) => result.status === "rejected").map((result) => result.reason));
+    try {
+      await this.storage?.close();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      this.store.close();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      await this.logs.close();
+    } catch (error) {
+      failures.push(error);
+    }
+    if (failures.length) throw new AggregateError(failures, "Nie zakończono poprawnie wszystkich zasobów kontrolera.");
   }
 
   private async snapshot(project: Project, scheduleStorage = false): Promise<ProjectSnapshot> {
@@ -773,7 +786,7 @@ export class ControlService {
     const holders = projects.flatMap(({ project, runtime }) => {
       const pending = this.pendingStarts.has(project.id);
       if (!pending && !runtime.pid && runtime.phase !== "starting" && runtime.phase !== "running" && runtime.phase !== "stopping") return [];
-      const phase: ServerCapacityStatus["holders"][number]["phase"] = runtime.phase === "running" || runtime.phase === "stopping"
+      const phase: ServerCapacityStatus["holders"][number]["phase"] = runtime.phase === "starting" || runtime.phase === "running" || runtime.phase === "stopping"
         ? runtime.phase
         : runtime.pid ? "stopping" : "starting";
       return [{

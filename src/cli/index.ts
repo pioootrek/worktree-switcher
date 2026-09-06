@@ -186,14 +186,31 @@ async function main(): Promise<void> {
     if (closing) return;
     closing = true;
     writeCliLine(translate(locale, "cli.stopping"));
-    await mcp?.close();
-    await controller.close();
-    await service.shutdown();
-    if (serviceMode) removeServiceAccess(paths.serviceAccessPath);
-    controllerLock.release();
+    try {
+      const listeners = await Promise.allSettled([mcp?.close(), controller.close()]);
+      const listenerFailures = listeners.filter((result) => result.status === "rejected");
+      let serviceFailure: unknown = null;
+      try {
+        await service.shutdown();
+      } catch (error) {
+        serviceFailure = error;
+      }
+      const failures = [...listenerFailures.map((result) => result.reason), ...(serviceFailure ? [serviceFailure] : [])];
+      if (failures.length) throw new AggregateError(failures, "Controller shutdown did not complete cleanly.");
+    } finally {
+      if (serviceMode) removeServiceAccess(paths.serviceAccessPath);
+      controllerLock.release();
+    }
   };
-  process.once("SIGINT", () => void shutdown().then(() => process.exit(0)));
-  process.once("SIGTERM", () => void shutdown().then(() => process.exit(0)));
+  const handleSignal = () => void shutdown().then(
+    () => process.exit(0),
+    (error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    },
+  );
+  process.once("SIGINT", handleSignal);
+  process.once("SIGTERM", handleSignal);
 }
 
 async function handleServiceCommand(args: string[], paths: ReturnType<typeof resolveAppPaths>): Promise<void> {

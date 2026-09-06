@@ -173,6 +173,78 @@ describe("TestJobManager", () => {
     managers.splice(managers.indexOf(manager), 1);
   });
 
+  it("automatically retries transient cleanup failure without changing a passed result", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    const stop = vi.spyOn(OwnedProcessGroup.prototype, "stop")
+      .mockRejectedValueOnce(new Error("inspection unavailable"));
+    const run = manager.enqueue({
+      projectId: project.id,
+      worktree: worktree("/tmp/a"),
+      command: command(20),
+      environment: resolved(),
+      actor: "local-user",
+    });
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"), { timeout: 2_000 });
+    expect(store.getTestRun(run.id)).toMatchObject({ error: null, exitCode: 0 });
+    expect(stop).toHaveBeenCalledTimes(2);
+    await manager.shutdown();
+    store.close();
+    managers.splice(managers.indexOf(manager), 1);
+  });
+
+  it("preserves an observed passed result when cleanup is retried explicitly", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    const stop = vi.spyOn(OwnedProcessGroup.prototype, "stop")
+      .mockRejectedValue(new Error("inspection unavailable"));
+    const run = manager.enqueue({
+      projectId: project.id,
+      worktree: worktree("/tmp/a"),
+      command: command(20),
+      environment: resolved(),
+      actor: "local-user",
+    });
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.error).toContain("inspection unavailable"));
+    expect(store.getTestRun(run.id)).toMatchObject({ phase: "running", exitCode: 0, finishedAt: null });
+
+    stop.mockRestore();
+    manager.cancel(run.id, "local-user");
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"));
+    expect(store.getTestRun(run.id)?.error).toBeNull();
+    await manager.shutdown();
+    store.close();
+    managers.splice(managers.indexOf(manager), 1);
+  });
+
+  it("bounds output-pipe close after the owned process group has exited", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    const daemonized = command(20);
+    daemonized.args = ["-e", `
+      const child = require('node:child_process').spawn(
+        process.execPath,
+        ['-e', "setTimeout(() => console.log('late-daemon-output'), 1500); setTimeout(() => process.exit(0), 2000)"],
+        { detached: true, stdio: ['ignore', 1, 2] },
+      );
+      child.unref();
+    `];
+    const run = manager.enqueue({
+      projectId: project.id,
+      worktree: worktree("/tmp/a"),
+      command: daemonized,
+      environment: resolved(),
+      actor: "local-user",
+    });
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"), { timeout: 1_700 });
+    expect(manager.status().running).toBe(0);
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    expect(store.getTestRun(run.id)?.logs).not.toContain("late-daemon-output");
+    await manager.shutdown();
+    store.close();
+    managers.splice(managers.indexOf(manager), 1);
+  });
+
   it.each(["cancel", "timeout", "launcher-exit", "shutdown"])(
     "retains the queue slot until a silent stubborn descendant exits: %s",
     async (mode) => {

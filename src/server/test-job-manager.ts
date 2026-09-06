@@ -13,12 +13,17 @@ const MAX_LOG_LINES = 200;
 const MAX_LOG_LINE_LENGTH = 2_000;
 const MAX_QUEUED_RUNS = 100;
 const LOG_PERSISTENCE_INTERVAL_MS = 250;
+const PROCESS_GROUP_CLEANUP_ATTEMPTS = 3;
+const PROCESS_GROUP_CLEANUP_RETRY_MS = 100;
+const OUTPUT_CLOSE_GRACE_MS = 1_000;
 
 interface ActiveRun {
   child: ChildProcess;
   group: OwnedProcessGroup;
   closed: Promise<void>;
   completion: Promise<void> | null;
+  executionError: string | null;
+  exited: boolean;
   run: TestRun;
   timeout: NodeJS.Timeout;
   cancellationRequested: boolean;
@@ -135,7 +140,7 @@ export class TestJobManager {
       return run;
     }
     if (!active || run.phase !== "running") return run;
-    active.cancellationRequested = true;
+    if (!active.exited) active.cancellationRequested = true;
     this.complete(active);
     this.onChange();
     return run;
@@ -205,7 +210,7 @@ export class TestJobManager {
     }
     const timeout = setTimeout(() => {
       const active = this.active.get(run.id);
-      if (!active) return;
+      if (!active || active.exited) return;
       active.timedOut = true;
       this.complete(active);
     }, this.timeouts.get(run.id) ?? 15 * 60_000);
@@ -213,16 +218,20 @@ export class TestJobManager {
     const active: ActiveRun = {
       child, run, timeout, cancellationRequested: false, timedOut: false,
       worktreePath: run.worktreePath, group: new OwnedProcessGroup(child), completion: null,
+      executionError: null, exited: false,
       closed: new Promise<void>((resolve) => child.once("close", () => resolve())),
     };
     this.active.set(run.id, active);
     child.stdout?.on("data", (chunk: Buffer) => this.appendChunk(run, chunk));
     child.stderr?.on("data", (chunk: Buffer) => this.appendChunk(run, chunk));
     child.once("error", (error) => {
+      active.executionError = error.message;
       run.error = error.message;
       this.complete(active);
     });
     child.once("exit", (code, signal) => {
+      active.exited = true;
+      clearTimeout(active.timeout);
       run.exitCode = code;
       run.signal = signal;
       this.complete(active);
@@ -235,8 +244,9 @@ export class TestJobManager {
     active.completion = (async () => {
       const { run } = active;
       try {
-        await active.group.stop();
-        await active.closed;
+        await this.stopWithRetries(active.group);
+        await this.waitForOutputClose(active);
+        run.error = active.executionError;
         run.finishedAt = new Date().toISOString();
         run.phase = active.cancellationRequested ? "cancelled" : active.timedOut ? "timed_out"
           : run.exitCode === 0 && !run.error ? "passed" : "failed";
@@ -252,6 +262,39 @@ export class TestJobManager {
       }
     })();
     return active.completion;
+  }
+
+  private async stopWithRetries(group: OwnedProcessGroup): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= PROCESS_GROUP_CLEANUP_ATTEMPTS; attempt += 1) {
+      try {
+        await group.stop();
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < PROCESS_GROUP_CLEANUP_ATTEMPTS) {
+          await new Promise((resolve) => setTimeout(resolve, PROCESS_GROUP_CLEANUP_RETRY_MS));
+        }
+      }
+    }
+    throw lastError;
+  }
+
+  private async waitForOutputClose(active: ActiveRun): Promise<void> {
+    let timeout: NodeJS.Timeout | null = null;
+    const closed = await Promise.race([
+      active.closed.then(() => true),
+      new Promise<false>((resolve) => {
+        timeout = setTimeout(() => resolve(false), OUTPUT_CLOSE_GRACE_MS);
+        timeout.unref();
+      }),
+    ]);
+    if (timeout) clearTimeout(timeout);
+    if (closed) return;
+    active.child.stdout?.removeAllListeners("data");
+    active.child.stderr?.removeAllListeners("data");
+    active.child.stdout?.destroy();
+    active.child.stderr?.destroy();
   }
 
   private finish(run: TestRun): void {
