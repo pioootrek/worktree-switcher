@@ -34,4 +34,20 @@ describe("OwnedProcessGroup", () => {
     await new OwnedProcessGroup({} as ChildProcess).stop();
     expect(kill).not.toHaveBeenCalled();
   });
+
+  it("retries transient inspection failures against only the owned group", async () => {
+    const kill = vi.spyOn(process, "kill").mockReturnValue(true);
+    const inspect = vi.fn()
+      .mockRejectedValueOnce(new Error("busy"))
+      .mockRejectedValueOnce(new Error("busy"))
+      .mockResolvedValue(false);
+    const group = new OwnedProcessGroup({ pid: 12345 } as ChildProcess, inspect);
+
+    await group.stop();
+
+    expect(inspect).toHaveBeenCalledTimes(3);
+    expect(inspect).toHaveBeenCalledWith(12345);
+    expect(kill).toHaveBeenCalledOnce();
+    expect(kill).toHaveBeenCalledWith(-12345, 0);
+  });
 });

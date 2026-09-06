@@ -3,6 +3,29 @@ import { promisify } from "node:util";
 
 const execute = promisify(execFile);
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const INSPECTION_ATTEMPTS = 3;
+const INSPECTION_RETRY_MS = 100;
+const EXIT_POLL_INTERVAL_MS = 200;
+
+type ProcessGroupInspector = (processGroupId: number) => Promise<boolean>;
+
+async function inspectProcessGroup(processGroupId: number): Promise<boolean> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execute("ps", ["-o", "stat=", "-g", String(processGroupId)], {
+      timeout: 1_000,
+      maxBuffer: 64 * 1024,
+    }));
+  } catch (error) {
+    const inspection = error as { code?: string | number; stdout?: string };
+    if (inspection.code === 1 && !inspection.stdout?.trim()) return false;
+    throw error;
+  }
+  return stdout.split("\n").some((line) => {
+    const state = line.trim();
+    return state && !state.startsWith("Z");
+  });
+}
 
 /** Ownership comes only from a freshly spawned detached child, never a port or saved PID.
  * Keep it through launcher exit; retire it permanently once the group has no live members.
@@ -11,7 +34,10 @@ export class OwnedProcessGroup {
   private retired = false;
   private stopping: Promise<void> | null = null;
 
-  constructor(private readonly child: ChildProcess) {}
+  constructor(
+    private readonly child: ChildProcess,
+    private readonly inspect: ProcessGroupInspector = inspectProcessGroup,
+  ) {}
 
   async alive(): Promise<boolean> {
     if (this.retired || !this.child.pid) return false;
@@ -26,12 +52,19 @@ export class OwnedProcessGroup {
       return false;
     }
     // Orphan zombies can remain until init reaps them. They cannot run or hold a port.
-    // ps supports this format on both supported platforms (Linux and macOS).
-    const { stdout } = await execute("ps", ["-axo", "pgid=,stat="], { timeout: 1_000, maxBuffer: 4 * 1024 * 1024 });
-    const live = stdout.split("\n").some((line) => {
-      const [group, state] = line.trim().split(/\s+/);
-      return Number(group) === this.child.pid && state && !state.startsWith("Z");
-    });
+    // Query only this freshly owned group and tolerate short-lived inspection failures.
+    let live: boolean | null = null;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= INSPECTION_ATTEMPTS; attempt += 1) {
+      try {
+        live = await this.inspect(this.child.pid);
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt < INSPECTION_ATTEMPTS) await delay(INSPECTION_RETRY_MS);
+      }
+    }
+    if (live === null) throw lastError;
     if (!live) this.retired = true;
     return live;
   }
@@ -55,7 +88,7 @@ export class OwnedProcessGroup {
     const deadline = Date.now() + timeoutMs;
     do {
       if (!await this.alive()) return true;
-      await delay(50);
+      await delay(EXIT_POLL_INTERVAL_MS);
     } while (Date.now() < deadline);
     return !await this.alive();
   }
