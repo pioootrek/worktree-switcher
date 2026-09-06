@@ -676,8 +676,9 @@ export class ControlService {
   }
 
   async shutdown(): Promise<void> {
-    await this.tests?.shutdown();
-    await this.processes.stopAll();
+    const cleanup = await Promise.allSettled([this.tests?.shutdown(), this.processes.stopAll()]);
+    const failures = cleanup.filter((result) => result.status === "rejected");
+    if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Nie zakończono wszystkich zarządzanych procesów.");
     await this.storage?.close();
     this.store.close();
     await this.logs.close();
@@ -771,10 +772,10 @@ export class ControlService {
       }));
     const holders = projects.flatMap(({ project, runtime }) => {
       const pending = this.pendingStarts.has(project.id);
-      if (!pending && runtime.phase !== "starting" && runtime.phase !== "running" && runtime.phase !== "stopping") return [];
+      if (!pending && !runtime.pid && runtime.phase !== "starting" && runtime.phase !== "running" && runtime.phase !== "stopping") return [];
       const phase: ServerCapacityStatus["holders"][number]["phase"] = runtime.phase === "running" || runtime.phase === "stopping"
         ? runtime.phase
-        : "starting";
+        : runtime.pid ? "stopping" : "starting";
       return [{
         projectId: project.id,
         projectName: project.name,

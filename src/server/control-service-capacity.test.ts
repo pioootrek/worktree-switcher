@@ -204,6 +204,23 @@ describe("ControlService server capacity", () => {
     store.close();
   });
 
+  it.each(["restart", "switch"] as const)("keeps capacity and blocks %s when cleanup fails", async (operation) => {
+    const { service, store, projects, runtimes, start, stop } = fixture(2);
+    service.setServerCapacity({ enabled: true, limit: 1 });
+    await service.operate(projects[0].id, "start");
+    stop.mockImplementationOnce(async (id) => {
+      runtimes.get(id)!.phase = "failed";
+      throw new Error("cleanup unconfirmed");
+    });
+    await expect(service.operate(projects[0].id, operation)).rejects.toThrow("cleanup unconfirmed");
+    expect(service.serverCapacity()).toMatchObject({ used: 1, available: 0, holders: [{ phase: "stopping" }] });
+    await expect(service.operate(projects[1].id, "start")).rejects.toThrow("limit 1");
+    expect(start).toHaveBeenCalledTimes(1);
+    await service.operate(projects[0].id, "stop");
+    expect(service.serverCapacity().used).toBe(0);
+    store.close();
+  });
+
   it("releases a slot after a failed start", async () => {
     const { service, store, projects, start } = fixture(2, async (project) => {
       if (project.id === projects[0].id) throw new Error("broken start");

@@ -4,6 +4,7 @@ import { networkInterfaces } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Project } from "@/shared/contracts";
+import { OwnedProcessGroup } from "./owned-process-group";
 import { ProcessManager } from "./process-manager";
 import type { ProcessResourceSampler, RawResourceSample } from "./resource-monitor";
 
@@ -68,6 +69,68 @@ describe("ProcessManager", () => {
     await manager.stop(fixture.id);
     expect(manager.snapshot(fixture.id).phase).toBe("stopped");
   });
+
+  it("retains ownership after cleanup failure and permits a safe retry", async () => {
+    const manager = new ProcessManager();
+    managers.push(manager);
+    const fixture = project(await unusedPort());
+    await manager.start(fixture, process.cwd());
+    const pid = manager.snapshot(fixture.id).pid;
+    const stop = vi.spyOn(OwnedProcessGroup.prototype, "stop").mockRejectedValueOnce(new Error("inspection unavailable"));
+    await expect(manager.stop(fixture.id)).rejects.toThrow("inspection unavailable");
+    expect(manager.snapshot(fixture.id)).toMatchObject({ phase: "failed", pid });
+    await expect(manager.start(fixture, process.cwd())).rejects.toThrow("już działa");
+    stop.mockRestore();
+    await manager.stop(fixture.id);
+    expect(manager.snapshot(fixture.id)).toMatchObject({ phase: "stopped", pid: null });
+  });
+
+  it.each(["stop", "shutdown", "early-exit", "startup-timeout"])(
+    "cleans stubborn descendants before releasing ownership: %s",
+    async (mode) => {
+      const manager = new ProcessManager();
+      managers.push(manager);
+      const fixture = project(await unusedPort());
+      const descendant = `
+        process.on('SIGTERM', () => {});
+        require('node:http').createServer((_, r) => r.end('descendant'))
+          .listen(Number(process.env.PORT), '127.0.0.1', () => process.send('ready'));
+      `;
+      fixture.args = ["-e", `
+        const child = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}],
+          { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+        child.on('message', () => {
+          console.log('descendant-ready');
+          ${mode === "early-exit" ? "process.exit(7);" : ""}
+        });
+        process.on('SIGTERM', () => process.exit(0));
+      `];
+      if (mode === "startup-timeout") {
+        // Keep HTTP open but make both health probes report not-ready.
+        vi.spyOn(manager as unknown as { isHealthy: () => Promise<boolean> }, "isHealthy").mockResolvedValue(false);
+        fixture.startupTimeoutMs = 700;
+      }
+      if (mode === "early-exit" || mode === "startup-timeout") {
+        await expect(manager.start(fixture, process.cwd())).rejects.toThrow();
+        expect(manager.snapshot(fixture.id).phase).toBe("failed");
+      } else {
+        await manager.start(fixture, process.cwd());
+        const stopping = mode === "shutdown" ? manager.stopAll() : manager.stop(fixture.id);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        expect(manager.snapshot(fixture.id)).toMatchObject({ phase: "stopping", pid: expect.any(Number) });
+        expect(await (await fetch(`http://127.0.0.1:${fixture.port}`)).text()).toBe("descendant");
+        await stopping;
+        expect(manager.snapshot(fixture.id).phase).toBe("stopped");
+      }
+      expect(manager.snapshot(fixture.id).pid).toBeNull();
+      await expect(fetch(`http://127.0.0.1:${fixture.port}`)).rejects.toThrow();
+      await Promise.all([manager.stop(fixture.id), manager.stop(fixture.id)]);
+      // The same port can be reused by the next worktree/runtime.
+      vi.restoreAllMocks();
+      await manager.start(project(fixture.port), process.cwd());
+      expect(manager.snapshot(fixture.id).phase).toBe("running");
+    }, 12_000,
+  );
 
   it("injects project environment overrides into the child process", async () => {
     const manager = new ProcessManager();

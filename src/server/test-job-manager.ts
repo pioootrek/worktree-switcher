@@ -7,6 +7,8 @@ import type { StateStore } from "./state-store";
 import type { ResolvedTestEnvironment } from "./test-environment";
 import type { TestCommand } from "./test-command";
 
+import { OwnedProcessGroup } from "./owned-process-group";
+
 const MAX_LOG_LINES = 200;
 const MAX_LOG_LINE_LENGTH = 2_000;
 const MAX_QUEUED_RUNS = 100;
@@ -14,6 +16,9 @@ const LOG_PERSISTENCE_INTERVAL_MS = 250;
 
 interface ActiveRun {
   child: ChildProcess;
+  group: OwnedProcessGroup;
+  closed: Promise<void>;
+  completion: Promise<void> | null;
   run: TestRun;
   timeout: NodeJS.Timeout;
   cancellationRequested: boolean;
@@ -131,10 +136,7 @@ export class TestJobManager {
     }
     if (!active || run.phase !== "running") return run;
     active.cancellationRequested = true;
-    this.signal(active.child, "SIGTERM");
-    setTimeout(() => {
-      if (this.active.has(run.id)) this.signal(active.child, "SIGKILL");
-    }, 3_500).unref();
+    this.complete(active);
     this.onChange();
     return run;
   }
@@ -145,10 +147,8 @@ export class TestJobManager {
     this.outputNotification = null;
     const unfinished = this.store.listPendingTestRuns();
     for (const run of unfinished) this.cancel(run.id, "local-user");
-    await Promise.all([...this.active.values()].map(({ child }) => new Promise<void>((resolve) => {
-      child.once("close", () => resolve());
-      setTimeout(resolve, 4_500).unref();
-    })));
+    await Promise.all([...this.active.values()].map((active) => this.complete(active)));
+    if (this.active.size) throw new Error("Nie potwierdzono zakończenia wszystkich grup procesów testowych.");
   }
 
   private readonly environments = new Map<string, Record<string, string>>();
@@ -207,33 +207,51 @@ export class TestJobManager {
       const active = this.active.get(run.id);
       if (!active) return;
       active.timedOut = true;
-      this.signal(child, "SIGTERM");
-      setTimeout(() => {
-        if (this.active.has(run.id)) this.signal(child, "SIGKILL");
-      }, 3_500).unref();
+      this.complete(active);
     }, this.timeouts.get(run.id) ?? 15 * 60_000);
     timeout.unref();
-    this.active.set(run.id, { child, run, timeout, cancellationRequested: false, timedOut: false, worktreePath: run.worktreePath });
+    const active: ActiveRun = {
+      child, run, timeout, cancellationRequested: false, timedOut: false,
+      worktreePath: run.worktreePath, group: new OwnedProcessGroup(child), completion: null,
+      closed: new Promise<void>((resolve) => child.once("close", () => resolve())),
+    };
+    this.active.set(run.id, active);
     child.stdout?.on("data", (chunk: Buffer) => this.appendChunk(run, chunk));
     child.stderr?.on("data", (chunk: Buffer) => this.appendChunk(run, chunk));
     child.once("error", (error) => {
-      if (!this.active.has(run.id)) return;
-      run.phase = "failed";
       run.error = error.message;
-      run.finishedAt = new Date().toISOString();
-      this.finish(run);
+      this.complete(active);
     });
-    child.once("close", (code, signal) => {
-      if (!this.active.has(run.id)) return;
-      const active = this.active.get(run.id)!;
+    child.once("exit", (code, signal) => {
       run.exitCode = code;
       run.signal = signal;
-      run.finishedAt = new Date().toISOString();
-      run.phase = active.cancellationRequested ? "cancelled" : active.timedOut ? "timed_out" : code === 0 ? "passed" : "failed";
-      if (run.phase === "failed" && !run.error) run.error = `Proces testowy zakończył się z kodem ${code ?? signal ?? "unknown"}.`;
-      this.finish(run);
+      this.complete(active);
     });
     this.onChange();
+  }
+
+  private complete(active: ActiveRun): Promise<void> {
+    if (active.completion) return active.completion;
+    active.completion = (async () => {
+      const { run } = active;
+      try {
+        await active.group.stop();
+        await active.closed;
+        run.finishedAt = new Date().toISOString();
+        run.phase = active.cancellationRequested ? "cancelled" : active.timedOut ? "timed_out"
+          : run.exitCode === 0 && !run.error ? "passed" : "failed";
+        if (run.phase === "failed" && !run.error) run.error = `Proces testowy zakończył się z kodem ${run.exitCode ?? run.signal ?? "unknown"}.`;
+        this.finish(run);
+      } catch (error) {
+        // Non-terminal: preserve the active slot and worktree exclusion until cleanup succeeds.
+        run.error = `Nie potwierdzono sprzątania procesów: ${error instanceof Error ? error.message : String(error)}`;
+        this.persistNow(run);
+        this.onChange();
+      } finally {
+        active.completion = null;
+      }
+    })();
+    return active.completion;
   }
 
   private finish(run: TestRun): void {
@@ -285,15 +303,6 @@ export class TestJobManager {
     const run = this.store.getTestRun(id);
     if (!run) throw new Error("Nie znaleziono uruchomienia testu.");
     return run;
-  }
-
-  private signal(child: ChildProcess, signal: NodeJS.Signals): void {
-    if (!child.pid) return;
-    try {
-      process.kill(process.platform === "win32" ? child.pid : -child.pid, signal);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-    }
   }
 
   private schedulePersistence(run: TestRun): void {
