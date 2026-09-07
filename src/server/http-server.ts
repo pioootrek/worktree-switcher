@@ -3,7 +3,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
 
-import type { DashboardResponse, LaunchPreset, McpStatus, TestEnvironmentMode, TestEnvironmentProfile } from "@/shared/contracts";
+import type { DashboardLiveResponse, DashboardResponse, DashboardSection, LaunchPreset, McpStatus, ProjectSnapshot, TestEnvironmentMode, TestEnvironmentProfile } from "@/shared/contracts";
 import { ControlService } from "./control-service";
 import { localeFrom } from "../i18n/messages";
 import { localizeServerMessage } from "../i18n/server-errors";
@@ -228,11 +228,9 @@ function messageFrom(error: unknown): string {
   return String(error);
 }
 
-function localizedDashboard(dashboard: DashboardResponse, locale: "pl" | "en"): DashboardResponse {
-  if (locale === "pl") return dashboard;
+function localizedProjectSnapshot(snapshot: ProjectSnapshot, locale: "pl" | "en"): ProjectSnapshot {
+  if (locale === "pl") return snapshot;
   return {
-    ...dashboard,
-    projects: dashboard.projects.map((snapshot) => ({
       ...snapshot,
       discoveryError: snapshot.discoveryError
         ? localizeServerMessage(snapshot.discoveryError, locale)
@@ -246,6 +244,40 @@ function localizedDashboard(dashboard: DashboardResponse, locale: "pl" | "en"): 
         error: entry.error ? localizeServerMessage(entry.error, locale) : null,
       })),
       testRuns: snapshot.testRuns.map((run) => ({
+        ...run,
+        error: run.error ? localizeServerMessage(run.error, locale) : null,
+      })),
+  };
+}
+
+function localizedDashboard(dashboard: DashboardResponse, locale: "pl" | "en"): DashboardResponse {
+  if (locale === "pl") return dashboard;
+  return {
+    ...dashboard,
+    projects: dashboard.projects.map((snapshot) => localizedProjectSnapshot(snapshot, locale)),
+  };
+}
+
+function parseLiveQuery(url: URL): { projectIds: string[]; sections: DashboardSection[] } {
+  const projectIds = [...new Set(url.searchParams.getAll("project"))];
+  const sections = [...new Set(url.searchParams.getAll("section"))] as DashboardSection[];
+  const allowed: DashboardSection[] = ["runtime", "reservation", "tests", "storage", "controller"];
+  if (projectIds.length > 128 || projectIds.some((id) => !id || id.length > 160)) throw new Error("Nieprawidłowa lista projektów.");
+  if (sections.length === 0 || sections.some((section) => !allowed.includes(section))) throw new Error("Nieprawidłowy zakres odświeżenia.");
+  return { projectIds, sections };
+}
+
+function localizedLive(response: DashboardLiveResponse, locale: "pl" | "en"): DashboardLiveResponse {
+  if (locale === "pl") return response;
+  return {
+    ...response,
+    projects: response.projects.map((project) => ({
+      ...project,
+      runtime: project.runtime ? {
+        ...project.runtime,
+        error: project.runtime.error ? localizeServerMessage(project.runtime.error, locale) : null,
+      } : undefined,
+      testRuns: project.testRuns?.map((run) => ({
         ...run,
         error: run.error ? localizeServerMessage(run.error, locale) : null,
       })),
@@ -314,6 +346,14 @@ export function createControllerServer(options: {
           });
           return;
         }
+        if (request.method === "GET" && url.pathname === "/api/dashboard/live") {
+          const query = parseLiveQuery(url);
+          json(response, 200, localizedLive({
+            ...options.service.dashboardLive(query.projectIds, query.sections),
+            version: options.events.version(),
+          }, locale));
+          return;
+        }
         if (request.method === "GET" && url.pathname === "/api/metrics") {
           json(response, 200, options.service.runtimeMetrics());
           return;
@@ -336,26 +376,35 @@ export function createControllerServer(options: {
         }
         if (request.method === "POST" && url.pathname === "/api/projects") {
           const project = await options.service.addProject(parseAddProject(await readJson(request)));
-          options.events.publish();
+          options.events.publish({ kinds: ["topology", "metadata"], projectIds: [project.id] });
           json(response, 201, { project });
+          return;
+        }
+        const metadataRefreshMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/metadata\/refresh$/);
+        if (request.method === "POST" && metadataRefreshMatch) {
+          strictRecord(await readJson(request), []);
+          const projectId = decodeURIComponent(metadataRefreshMatch[1]);
+          const snapshot = await options.service.refreshProjectMetadata(projectId);
+          options.events.publish({ kinds: ["metadata", "storage"], projectIds: [projectId] });
+          json(response, 200, { snapshot: localizedProjectSnapshot(snapshot, locale) });
           return;
         }
         const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
         if (request.method === "DELETE" && projectMatch) {
           const project = await options.service.removeProject(decodeURIComponent(projectMatch[1]));
-          options.events.publish();
+          options.events.publish({ kinds: ["topology"] });
           json(response, 200, { project });
           return;
         }
         if (request.method === "POST" && url.pathname === "/api/settings/capacity") {
           const capacity = options.service.setServerCapacity(parseCapacitySettings(await readJson(request)));
-          options.events.publish();
+          options.events.publish({ kinds: ["controller"] });
           json(response, 200, { capacity });
           return;
         }
         if (request.method === "POST" && url.pathname === "/api/settings/test-queue") {
           const testQueue = options.service.setTestQueueLimit(parseTestQueueSettings(await readJson(request)).limit);
-          options.events.publish();
+          options.events.publish({ kinds: ["controller", "tests"] });
           json(response, 200, { testQueue });
           return;
         }
@@ -369,7 +418,7 @@ export function createControllerServer(options: {
         if (request.method === "POST" && testCancelMatch) {
           strictRecord(await readJson(request), []);
           const run = await options.service.cancelTest(decodeURIComponent(testCancelMatch[1]));
-          options.events.publish();
+          options.events.publish({ kinds: ["tests"], projectIds: [run.projectId] });
           json(response, 200, { run });
           return;
         }
@@ -379,15 +428,16 @@ export function createControllerServer(options: {
           const run = await options.service.enqueueTest(
             decodeURIComponent(projectTestsMatch[1]), input.worktreePath, input.presetId,
           );
-          options.events.publish();
+          options.events.publish({ kinds: ["tests"], projectIds: [run.projectId] });
           json(response, 202, { run });
           return;
         }
         const operationMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/operation$/);
         if (request.method === "POST" && operationMatch) {
           const input = parseOperation(await readJson(request));
-          await options.service.operate(decodeURIComponent(operationMatch[1]), input.operation, input.worktreePath);
-          options.events.publish();
+          const projectId = decodeURIComponent(operationMatch[1]);
+          await options.service.operate(projectId, input.operation, input.worktreePath);
+          options.events.publish({ kinds: ["runtime", "reservation"], projectIds: [projectId] });
           json(response, 200, { ok: true });
           return;
         }
@@ -397,7 +447,7 @@ export function createControllerServer(options: {
             decodeURIComponent(tlsMatch[1]),
             parseTlsSettings(await readJson(request)),
           );
-          options.events.publish();
+          options.events.publish({ kinds: ["topology"], projectIds: [decodeURIComponent(tlsMatch[1])] });
           json(response, 200, { ok: true });
           return;
         }
@@ -407,7 +457,7 @@ export function createControllerServer(options: {
             decodeURIComponent(environmentMatch[1]),
             parseEnvironment(await readJson(request)),
           );
-          options.events.publish();
+          options.events.publish({ kinds: ["topology"], projectIds: [decodeURIComponent(environmentMatch[1])] });
           json(response, 200, { project });
           return;
         }
@@ -417,14 +467,14 @@ export function createControllerServer(options: {
           const project = await options.service.saveEnvironmentProfile(
             decodeURIComponent(profilesMatch[1]), input.name, input.environment, { owner: "local-user" }, input.restart,
           );
-          options.events.publish();
+          options.events.publish({ kinds: ["topology", "metadata"], projectIds: [decodeURIComponent(profilesMatch[1])] });
           json(response, 200, { project });
           return;
         }
         if (request.method === "DELETE" && profilesMatch) {
           const input = parseProfileSelection(await readJson(request));
           const project = await options.service.deleteEnvironmentProfile(decodeURIComponent(profilesMatch[1]), input.name);
-          options.events.publish();
+          options.events.publish({ kinds: ["topology", "metadata"], projectIds: [decodeURIComponent(profilesMatch[1])] });
           json(response, 200, { project });
           return;
         }
@@ -434,7 +484,7 @@ export function createControllerServer(options: {
           const project = await options.service.selectEnvironmentProfile(
             decodeURIComponent(profileSelectionMatch[1]), input.name, { owner: "local-user" }, input.restart,
           );
-          options.events.publish();
+          options.events.publish({ kinds: ["topology", "metadata"], projectIds: [decodeURIComponent(profileSelectionMatch[1])] });
           json(response, 200, { project });
           return;
         }
@@ -446,14 +496,14 @@ export function createControllerServer(options: {
         if (request.method === "POST" && testProfilesMatch) {
           const input = parseTestEnvironmentProfile(await readJson(request));
           const project = await options.service.saveTestEnvironmentProfile(decodeURIComponent(testProfilesMatch[1]), input);
-          options.events.publish();
+          options.events.publish({ kinds: ["topology", "metadata"], projectIds: [decodeURIComponent(testProfilesMatch[1])] });
           json(response, 200, { project });
           return;
         }
         if (request.method === "DELETE" && testProfilesMatch) {
           const input = parseProfileSelection(await readJson(request));
           const project = await options.service.deleteTestEnvironmentProfile(decodeURIComponent(testProfilesMatch[1]), input.name);
-          options.events.publish();
+          options.events.publish({ kinds: ["topology", "metadata"], projectIds: [decodeURIComponent(testProfilesMatch[1])] });
           json(response, 200, { project });
           return;
         }
@@ -463,7 +513,7 @@ export function createControllerServer(options: {
           const project = await options.service.assignTestPresetProfile(
             decodeURIComponent(testPresetProfileMatch[1]), input.presetId, input.name,
           );
-          options.events.publish();
+          options.events.publish({ kinds: ["topology", "metadata"], projectIds: [decodeURIComponent(testPresetProfileMatch[1])] });
           json(response, 200, { project });
           return;
         }
@@ -497,7 +547,7 @@ export function createControllerServer(options: {
           } else {
             await options.service.release(projectId, input.action === "force-release");
           }
-          options.events.publish();
+          options.events.publish({ kinds: ["reservation", "runtime"], projectIds: [projectId] });
           json(response, 200, { ok: true });
           return;
         }

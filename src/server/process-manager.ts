@@ -88,14 +88,14 @@ async function isPortOpen(port: number): Promise<boolean> {
 
 export class ProcessManager {
   private readonly runtimes = new Map<string, RuntimeEntry>();
-  private readonly onChange: () => void;
+  private readonly onChange: (projectId: string) => void;
   private readonly logs: LogWriter;
   private readonly resourceSampler: ProcessResourceSampler;
   private readonly resourceSampleIntervalMs: number;
   private readonly maxResourceHistoryPoints: number;
   private readonly memoryWarningThresholdBytes: number | null;
 
-  constructor(onChange: () => void = () => undefined, logs: LogWriter = nullLogWriter, options: ProcessManagerOptions = {}) {
+  constructor(onChange: (projectId: string) => void = () => undefined, logs: LogWriter = nullLogWriter, options: ProcessManagerOptions = {}) {
     this.onChange = onChange;
     this.logs = logs;
     this.resourceSampler = options.resourceSampler ?? defaultProcessResourceSampler();
@@ -177,7 +177,7 @@ export class ProcessManager {
       const failure = processExitFailure(project, runtime.logs, code, signal);
       void this.cleanupRuntime(runtime).then(() => this.markFailed(runtime, failure), () => undefined);
     });
-    this.onChange();
+    this.onChange(project.id);
 
     const deadline = Date.now() + project.startupTimeoutMs;
     while (Date.now() < deadline) {
@@ -189,7 +189,7 @@ export class ProcessManager {
         runtime.phase = "running";
         runtime.error = null;
         runtime.failure = null;
-        this.onChange();
+        this.onChange(project.id);
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -208,7 +208,7 @@ export class ProcessManager {
   private cleanupRuntime(runtime: RuntimeEntry): Promise<void> {
     if (runtime.cleanup) return runtime.cleanup;
     runtime.phase = "stopping";
-    this.onChange();
+    this.onChange(runtime.projectId);
     runtime.cleanup = (async () => {
       try {
         await runtime.group?.stop();
@@ -232,7 +232,7 @@ export class ProcessManager {
         throw error;
       } finally {
         runtime.cleanup = null;
-        this.onChange();
+        this.onChange(runtime.projectId);
       }
     })();
     return runtime.cleanup;
@@ -326,7 +326,7 @@ export class ProcessManager {
     runtime.logs.push(line.slice(0, 4000));
     this.logs.project(runtime.projectId, line.slice(0, 4000));
     if (runtime.logs.length > MAX_LOG_LINES) runtime.logs.splice(0, runtime.logs.length - MAX_LOG_LINES);
-    this.onChange();
+    this.onChange(runtime.projectId);
   }
 
   private markFailed(runtime: RuntimeEntry, failure: RuntimeFailure): void {

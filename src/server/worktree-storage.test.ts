@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SqliteStateStore } from "./sqlite-store";
 import { AllowlistedWorktreeCacheCleaner, FilesystemWorktreeDiskScanner, WorktreeStorageManager, type WorktreeDiskScanner } from "./worktree-storage";
@@ -68,6 +68,30 @@ describe("FilesystemWorktreeDiskScanner", () => {
     }
     expect(maximumActive).toBe(1);
     expect(store.getWorktreeStorage(project.id, "/code/app")?.nextCacheBytes).toBe(30);
+    await manager.close();
+    store.close();
+  });
+
+  it("does not let failed-scan notifications immediately schedule the same scan again", async () => {
+    const root = mkdtempSync(join(tmpdir(), "worktree-storage-cooldown-"));
+    directories.push(root);
+    const store = new SqliteStateStore(join(root, "state.sqlite3"));
+    const first = store.addProject({ name: "One", repositoryPath: "/code/one", port: 3300, executable: "pnpm", args: [] });
+    const second = store.addProject({ name: "Two", repositoryPath: "/code/two", port: 3301, executable: "pnpm", args: [] });
+    const paths = new Map([[first.id, ["/code/one"]], [second.id, ["/code/two"]]]);
+    const scan = vi.fn(async () => { throw new Error("fixture unavailable"); });
+    const manager = new WorktreeStorageManager(store, { scan }, (projectId) => {
+      manager.ensureFresh(projectId, paths.get(projectId) ?? []);
+    });
+
+    manager.ensureFresh(first.id, paths.get(first.id)!);
+    manager.ensureFresh(second.id, paths.get(second.id)!);
+    await vi.waitFor(() => expect(scan).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(scan).toHaveBeenCalledTimes(2);
+
+    manager.queue(first.id, "/code/one", true);
+    await vi.waitFor(() => expect(scan).toHaveBeenCalledTimes(3));
     await manager.close();
     store.close();
   });

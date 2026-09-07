@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
+import { DashboardQueryService } from "./modules/dashboard";
 import { EnvironmentService, redactProject } from "./modules/environments";
 import { leaseTokenHash, type OperationActor, ProjectLifecycle } from "./modules/lifecycle";
 import { RuntimeService } from "./modules/runtime";
@@ -7,9 +8,11 @@ import { VerificationService } from "./modules/verification";
 
 import type {
   CacheDeletionResult,
+  DashboardLiveResponse,
   DashboardResponse,
-  Project,
+  DashboardSection,
   ProjectSnapshot,
+  ProjectSummary,
   ProjectView,
   RedactedTestEnvironmentProfile,
   Reservation,
@@ -53,6 +56,7 @@ export class ControlService {
   private readonly runtime: RuntimeService;
   private readonly environments: EnvironmentService;
   private readonly verification: VerificationService;
+  private readonly dashboardQueries: DashboardQueryService;
 
   constructor(
     private readonly store: StateStore,
@@ -69,11 +73,27 @@ export class ControlService {
     this.runtime = new RuntimeService(store, git, processes, logs, commands, this.lifecycle);
     this.environments = new EnvironmentService(store, logs, this.lifecycle, this.runtime);
     this.verification = new VerificationService(store, git, logs, testCommands, this.lifecycle, tests);
+    this.dashboardQueries = new DashboardQueryService({
+      store,
+      git,
+      processes,
+      storage,
+      discoverPresets: (project, worktreePath) => this.verification.discoverPresets(project, worktreePath),
+      capacity: (projects) => this.lifecycle.capacityStatus(projects),
+      testQueue: () => this.testQueueStatus(),
+    });
   }
 
   async dashboard(): Promise<DashboardResponse> {
-    const projects = await Promise.all(this.store.listProjects().map((project) => this.snapshot(project, true)));
-    return { projects, capacity: this.lifecycle.capacityStatus(projects), testQueue: this.testQueueStatus() };
+    return this.dashboardQueries.dashboard();
+  }
+
+  dashboardLive(projectIds: string[], sections: DashboardSection[]): DashboardLiveResponse {
+    return this.dashboardQueries.live(projectIds, sections);
+  }
+
+  projectSummaries(): ProjectSummary[] {
+    return this.dashboardQueries.projectSummaries();
   }
 
   serverCapacity(): ServerCapacityStatus {
@@ -175,6 +195,7 @@ export class ControlService {
         port: project.port,
         actor: actor.owner,
       });
+      this.dashboardQueries.remove(project.repositoryPath);
       return redactProject(project);
     });
   }
@@ -189,23 +210,32 @@ export class ControlService {
   }
 
   async setProjectTls(projectId: string, input: NextTlsConfiguration): Promise<void> {
-    return this.runtime.setProjectTls(projectId, input);
+    await this.runtime.setProjectTls(projectId, input);
+    this.invalidateDashboardMetadata(projectId);
   }
 
   async setProjectEnvironment(projectId: string, environment: Record<string, string>, actor: OperationActor = { owner: "local-user" }): Promise<ProjectView> {
-    return this.environments.setProjectEnvironment(projectId, environment, actor);
+    const project = await this.environments.setProjectEnvironment(projectId, environment, actor);
+    this.invalidateDashboardMetadata(projectId);
+    return project;
   }
 
   async saveEnvironmentProfile(projectId: string, name: string, environment: Record<string, string>, actor: OperationActor = { owner: "local-user" }, restart = false): Promise<ProjectView> {
-    return this.environments.saveEnvironmentProfile(projectId, name, environment, actor, restart);
+    const project = await this.environments.saveEnvironmentProfile(projectId, name, environment, actor, restart);
+    this.invalidateDashboardMetadata(projectId);
+    return project;
   }
 
   async selectEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }, restart = false): Promise<ProjectView> {
-    return this.environments.selectEnvironmentProfile(projectId, name, actor, restart);
+    const project = await this.environments.selectEnvironmentProfile(projectId, name, actor, restart);
+    this.invalidateDashboardMetadata(projectId);
+    return project;
   }
 
   async deleteEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }): Promise<ProjectView> {
-    return this.environments.deleteEnvironmentProfile(projectId, name, actor);
+    const project = await this.environments.deleteEnvironmentProfile(projectId, name, actor);
+    this.invalidateDashboardMetadata(projectId);
+    return project;
   }
 
   testEnvironmentProfiles(projectId: string): {
@@ -221,15 +251,21 @@ export class ControlService {
     input: { name: string; environment: Record<string, string>; mode?: TestEnvironmentProfile["policy"]["mode"]; serverProfile?: string | null; nodeEnv?: TestEnvironmentProfile["nodeEnv"]; requiredVariables?: string[] },
     actor: OperationActor = { owner: "local-user" },
   ): Promise<ProjectView> {
-    return this.environments.saveTestEnvironmentProfile(projectId, input, actor);
+    const project = await this.environments.saveTestEnvironmentProfile(projectId, input, actor);
+    this.invalidateDashboardMetadata(projectId);
+    return project;
   }
 
   async deleteTestEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }): Promise<ProjectView> {
-    return this.environments.deleteTestEnvironmentProfile(projectId, name, actor);
+    const project = await this.environments.deleteTestEnvironmentProfile(projectId, name, actor);
+    this.invalidateDashboardMetadata(projectId);
+    return project;
   }
 
   async assignTestPresetProfile(projectId: string, presetId: string, name: string | null, actor: OperationActor = { owner: "local-user" }): Promise<ProjectView> {
-    return this.environments.assignTestPresetProfile(projectId, presetId, name, actor);
+    const project = await this.environments.assignTestPresetProfile(projectId, presetId, name, actor);
+    this.invalidateDashboardMetadata(projectId);
+    return project;
   }
 
   async reserve(input: ReservationRequest): Promise<void> {
@@ -308,7 +344,7 @@ export class ControlService {
       return {
         reservation,
         leaseToken,
-        snapshot: await this.snapshot(this.lifecycle.requireProject(input.projectId)),
+        snapshot: await this.dashboardQueries.projectSnapshot(this.lifecycle.requireProject(input.projectId)),
         operationError,
       };
     });
@@ -335,7 +371,11 @@ export class ControlService {
   }
 
   async projectSnapshot(projectId: string): Promise<ProjectSnapshot> {
-    return this.snapshot(this.lifecycle.requireProject(projectId));
+    return this.dashboardQueries.projectSnapshot(this.lifecycle.requireProject(projectId));
+  }
+
+  async refreshProjectMetadata(projectId: string): Promise<ProjectSnapshot> {
+    return this.dashboardQueries.refresh(this.lifecycle.requireProject(projectId));
   }
 
   async refreshWorktreeStorage(projectId: string, worktreePath: string): Promise<void> {
@@ -392,6 +432,8 @@ export class ControlService {
     } catch (error) {
       failures.push(error);
     }
+    this.dashboardQueries.close();
+    this.git.close?.();
     try {
       this.store.close();
     } catch (error) {
@@ -405,32 +447,8 @@ export class ControlService {
     if (failures.length) throw new AggregateError(failures, "Nie zakończono poprawnie wszystkich zasobów kontrolera.");
   }
 
-  private async snapshot(project: Project, scheduleStorage = false): Promise<ProjectSnapshot> {
-    try {
-      const worktrees = await this.git.list(project.repositoryPath);
-      const worktreePaths = worktrees.map(({ path }) => path);
-      if (scheduleStorage) this.storage?.ensureFresh(project.id, worktreePaths);
-      return {
-        project: redactProject(project),
-        runtime: this.processes.snapshot(project.id),
-        reservation: this.store.getActiveReservation(project.id),
-        worktrees,
-        storage: this.storage?.snapshots(project.id, worktreePaths) ?? [],
-        testPresets: worktrees.map((worktree) => this.verification.discoverPresets(project, worktree.path)),
-        testRuns: this.store.listTestRuns(project.id, 20),
-      };
-    } catch (error) {
-      return {
-        project: redactProject(project),
-        runtime: this.processes.snapshot(project.id),
-        reservation: this.store.getActiveReservation(project.id),
-        worktrees: [],
-        storage: [],
-        testPresets: [],
-        testRuns: this.store.listTestRuns(project.id, 20),
-        discoveryError: error instanceof Error ? error.message : String(error),
-      };
-    }
+  private invalidateDashboardMetadata(projectId: string): void {
+    this.dashboardQueries.invalidate(this.lifecycle.requireProject(projectId).repositoryPath);
   }
 
 }

@@ -48,12 +48,13 @@ export class TestJobManager {
   private pumping = false;
   private closed = false;
   private outputNotification: NodeJS.Timeout | null = null;
+  private readonly outputProjects = new Set<string>();
   private readonly logPersistence = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly store: StateStore,
     private readonly logs: LogWriter,
-    private readonly onChange: () => void = () => undefined,
+    private readonly onChange: (projectId?: string) => void = () => undefined,
   ) {
     this.store.markInterruptedTestRuns();
     void this.pruneLogs();
@@ -127,7 +128,7 @@ export class TestJobManager {
     this.write(run, `$ ${run.executable} ${run.args.join(" ")}`);
     this.persistNow(run);
     this.pump();
-    this.onChange();
+    this.onChange(run.projectId);
     return this.requireRun(run.id);
   }
 
@@ -145,7 +146,7 @@ export class TestJobManager {
     if (!active || run.phase !== "running") return run;
     if (!active.exited) active.cancellationRequested = true;
     this.complete(active);
-    this.onChange();
+    this.onChange(run.projectId);
     return run;
   }
 
@@ -245,7 +246,7 @@ export class TestJobManager {
       run.signal = signal;
       this.complete(active);
     });
-    this.onChange();
+    this.onChange(run.projectId);
   }
 
   private complete(active: ActiveRun): Promise<void> {
@@ -265,7 +266,7 @@ export class TestJobManager {
         // Non-terminal: preserve the active slot and worktree exclusion until cleanup succeeds.
         run.error = `Nie potwierdzono sprzątania procesów: ${error instanceof Error ? error.message : String(error)}`;
         this.persistNow(run);
-        this.onChange();
+        this.onChange(run.projectId);
       } finally {
         active.completion = null;
       }
@@ -340,7 +341,7 @@ export class TestJobManager {
     })().finally(() => {
       this.finalizations.delete(run.id);
       this.pump();
-      this.onChange();
+      this.onChange(run.projectId);
     });
     this.finalizations.set(run.id, completion);
     return completion;
@@ -356,7 +357,7 @@ export class TestJobManager {
     if (run.logs.length > MAX_LOG_LINES) run.logs.splice(0, run.logs.length - MAX_LOG_LINES);
     this.logs.test(run.id, bounded);
     this.schedulePersistence(run);
-    this.notifyOutput();
+    this.notifyOutput(run.projectId);
   }
 
   private updateQueuePositions(): void {
@@ -403,11 +404,16 @@ export class TestJobManager {
     this.store.saveTestRun(run);
   }
 
-  private notifyOutput(): void {
+  private notifyOutput(projectId: string): void {
+    if (this.outputProjects.size < 128) this.outputProjects.add(projectId);
     if (this.outputNotification || this.closed) return;
     this.outputNotification = setTimeout(() => {
       this.outputNotification = null;
-      if (!this.closed) this.onChange();
+      if (!this.closed) {
+        if (this.outputProjects.size >= 128) this.onChange();
+        else for (const id of this.outputProjects) this.onChange(id);
+      }
+      this.outputProjects.clear();
     }, 500);
     this.outputNotification.unref();
   }

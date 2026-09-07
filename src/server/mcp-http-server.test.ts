@@ -100,6 +100,7 @@ describe("MCP loopback server", () => {
     const capacity = { enabled: true, limit: 2, used: 1, available: 1, holders: [{ projectId, projectName: "Web", phase: "running" as const }] };
     const testQueue = { limit: 1, running: 0, queued: 0 };
     const dashboard = vi.fn(async (): Promise<DashboardResponse> => ({ projects: [snapshot], capacity, testQueue }));
+    const projectSummaries = vi.fn(() => [{ project: snapshot.project, runtime: snapshot.runtime, reservation: snapshot.reservation }]);
     const claimProject = vi.fn(async () => ({
       reservation,
       leaseToken: "never-return-this-lease-secret",
@@ -124,6 +125,7 @@ describe("MCP loopback server", () => {
     const cancelTest = vi.fn(() => ({ ...queuedRun, phase: "cancelled" as const }));
     const service = {
       dashboard,
+      projectSummaries,
       serverCapacity: vi.fn(() => capacity),
       testQueueStatus: vi.fn(() => testQueue),
       projectSnapshot: vi.fn(async () => snapshot),
@@ -217,6 +219,11 @@ describe("MCP loopback server", () => {
     const testQueueResult = await client.callTool({ name: "get_test_queue", arguments: {} });
     const testQueueText = (testQueueResult as { content: Array<{ type: "text"; text: string }> }).content[0].text;
     expect(JSON.parse(testQueueText)).toEqual(testQueue);
+
+    const projectsResult = await client.callTool({ name: "list_projects", arguments: {} });
+    expect(JSON.stringify(projectsResult)).toContain("Web");
+    expect(projectSummaries).toHaveBeenCalledOnce();
+    expect(dashboard).not.toHaveBeenCalled();
 
     const testPresetsResult = await client.callTool({ name: "list_test_presets", arguments: { projectId } });
     expect(JSON.stringify(testPresetsResult)).toContain("node:test");

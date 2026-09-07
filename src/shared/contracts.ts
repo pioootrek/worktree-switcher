@@ -122,6 +122,15 @@ export interface Worktree {
   locked: boolean;
   prunable: boolean;
   dirty: boolean;
+  statusError?: string;
+}
+
+export interface WorktreeMetadataStatus {
+  status: "fresh" | "stale" | "refreshing" | "unavailable";
+  lastSuccessfulAt: string | null;
+  lastAttemptAt: string | null;
+  retryAt: string | null;
+  error: string | null;
 }
 
 export interface Reservation {
@@ -186,7 +195,41 @@ export interface ProjectSnapshot {
   storage: WorktreeStorageSnapshot[];
   testPresets: WorktreeTestPresets[];
   testRuns: TestRun[];
+  metadata?: WorktreeMetadataStatus;
   discoveryError?: string;
+}
+
+export type DashboardSection = "runtime" | "reservation" | "tests" | "storage" | "controller";
+export type DashboardChangeKind = DashboardSection | "topology" | "metadata";
+
+export interface DashboardChangeEvent {
+  epoch: string;
+  revision: number;
+  kinds: DashboardChangeKind[];
+  projectIds: string[];
+  allProjects: boolean;
+  at: string;
+}
+
+export interface ProjectLiveSnapshot {
+  projectId: string;
+  runtime?: RuntimeSnapshot;
+  reservation?: Reservation | null;
+  testRuns?: TestRun[];
+  storage?: WorktreeStorageSnapshot[];
+}
+
+export interface DashboardLiveResponse {
+  projects: ProjectLiveSnapshot[];
+  capacity?: ServerCapacityStatus;
+  testQueue?: TestQueueStatus;
+  version?: Pick<DashboardChangeEvent, "epoch" | "revision">;
+}
+
+export interface ProjectSummary {
+  project: ProjectView;
+  runtime: RuntimeSnapshot;
+  reservation: Reservation | null;
 }
 
 export interface WorktreeStorageHistoryPoint {

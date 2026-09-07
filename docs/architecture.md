@@ -104,12 +104,17 @@ controller must be event-driven and have bounded memory use:
 
 - no recursive filesystem watcher over managed repositories;
 - no continuous Git polling while the dashboard is closed;
-- lazy dirty-state calculation with debounced refresh;
+- a repository-keyed dashboard metadata projection with single-flight refresh,
+  30-second freshness/error disclosure, at most 128 entries and an 8 MiB
+  serialized metadata budget;
+- at most four Git subprocesses with 128 queued commands, prioritizing fresh
+  operational validation over background display refreshes;
 - bounded per-project and global log buffers;
 - one five-second resource sampler per active Linux process group, with at
   most 60 in-memory RAM points and no sampler for stopped projects;
 - one serialized filesystem scan queue for worktree disk usage, refreshed no
-  more than once per six hours unless a user explicitly requests it;
+  more than once per six hours unless a user explicitly requests it, with a
+  30-second cooldown measured from a failed attempt;
 - one controller process and no resident Next.js runtime;
 - release benchmarks report idle RSS, idle CPU, startup time, and growth while
   managing several fixture projects.
@@ -132,9 +137,9 @@ leave a Git-discovered worktree root.
 The scanner records allocated bytes for the complete tree, `.next`,
 `.next/cache`, `node_modules`, and the five largest top-level directories.
 Results are persisted in SQLite with the first measurement and at most 179
-recent samples per worktree. Browser
-refreshes may schedule a missing or stale measurement; read-only MCP calls
-only consume the stored snapshot.
+recent samples per worktree. Successful metadata discovery or an explicit
+refresh may schedule a missing or stale measurement. Live dashboard reads and
+read-only MCP summaries only consume stored snapshots and cannot requeue scans.
 
 The first maintenance action uses a closed allowlist containing only the
 Next.js `.next` directory. The service resolves the worktree through current

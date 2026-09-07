@@ -21,6 +21,7 @@ connects the application modules; existing constructor arguments remain valid.
 | Test-run SQL or storage history | `src/server/infrastructure/sqlite/test-run-queries.ts` or `storage-queries.ts` | Owning feature, if payload presentation changes | `pnpm test src/server/infrastructure/sqlite` |
 | Schema upgrade | `src/server/infrastructure/sqlite/migrations.ts` | None | `pnpm test src/server/infrastructure/sqlite` |
 | Session, event subscription, dashboard refresh | `src/features/dashboard/use-dashboard.ts` | `src/features/dashboard/dashboard.tsx` | `pnpm build` followed by `pnpm test:ui` |
+| Dashboard read projection and Git refresh admission | `src/server/modules/dashboard/` and `src/server/git-worktrees.ts` | `src/features/dashboard/use-dashboard.ts` | `pnpm test src/server/modules/dashboard src/server/control-service-dashboard.test.ts src/server/events.test.ts` |
 
 These are entry points, not claims that a change can ignore its callers.
 Cross-workflow behavior still needs the relevant integration tests.
@@ -38,6 +39,15 @@ Runtime operations and environment changes share this lifecycle instance with
 verification admission and the facade's project/reservation operations.
 A profile restart calls `operateLocked` while already holding the project lock.
 It does not reacquire that lock. Capacity remains held across the stop and start.
+
+`DashboardQueryService` owns display-only worktree/preset metadata caching,
+repository single-flight refresh, stale/error disclosure, cheap live sections,
+and cheap project summaries. `ControlService` exposes compatible full snapshots,
+explicit project metadata refresh and live queries through that module. The
+cache is never passed to runtime, reservation, verification, storage or cache
+maintenance operations; those continue to validate against fresh Git discovery.
+`SystemGitWorktreeReader` shares one bounded, priority-aware subprocess admission
+queue across both display reads and operational validation.
 
 `SqliteStateStore` opens one connection, runs the unchanged schema initialization
 and migrations, and lends the connection to query helpers. Helpers do not close
@@ -81,12 +91,13 @@ cycles in local imports, including type-only imports.
 ## Deliberately remaining work
 
 The facade still owns project registration/removal, reservation and claim
-operations, dashboard snapshot assembly, cache maintenance, and controller
-shutdown. HTTP/MCP adapters and bootstrap retain their existing locations.
+operations, cache maintenance, and controller shutdown. HTTP/MCP adapters and
+bootstrap retain their existing locations.
 Extract these when their next workflow needs it, using the same lifecycle.
 
 In particular, asynchronous cache deletion already lacks lifecycle serialization;
 its race is tracked separately as `FIX-20260905-cache-lifecycle-serialization`.
 This extraction preserves that behavior and does not present it as fixed.
-Likewise the existing log-event/full-dashboard refresh behavior is unchanged;
-feature extraction introduces no additional subscriptions or refresh policy.
+Dashboard event classification and browser reconciliation live at the existing
+event/feature boundaries; feature composition still has one SSE subscription
+and one metrics timer.
