@@ -4,7 +4,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import type { TestQueueStatus, TestRun, Worktree } from "@/shared/contracts";
 import type { LogWriter } from "./log-writer";
 import type { StateStore } from "./state-store";
-import type { ResolvedTestEnvironment } from "./test-environment";
+import type { ResolvedTestEnvironment } from "@/server/modules/environments";
 import type { TestCommand } from "./test-command";
 
 import { OwnedProcessGroup } from "./owned-process-group";

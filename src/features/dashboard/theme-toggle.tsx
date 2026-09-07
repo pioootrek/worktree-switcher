@@ -1,0 +1,27 @@
+"use client";
+
+import { Button } from "@/components/ui/button";
+import { useI18n } from "@/i18n/provider";
+import { Moon, Sun } from "lucide-react";
+import { useEffect, useState } from "react";
+
+export function ThemeToggle() {
+  const { t } = useI18n();
+  const [dark, setDark] = useState(true);
+  const toggle = () => {
+    const next = !dark;
+    setDark(next);
+    document.documentElement.classList.toggle("dark", next);
+    localStorage.setItem("worktree-switcher-theme", next ? "dark" : "light");
+  };
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const saved = localStorage.getItem("worktree-switcher-theme");
+      const next = saved !== "light";
+      document.documentElement.classList.toggle("dark", next);
+      setDark(next);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+  return <Button variant="outline" size="icon" onClick={toggle} aria-label={dark ? t("theme.light") : t("theme.dark")}>{dark ? <Sun aria-hidden /> : <Moon aria-hidden />}</Button>;
+}

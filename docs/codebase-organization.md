@@ -20,11 +20,11 @@ are not a claim that the directory migration is complete.
 
 | Responsibility | Current location | Destination when extracted |
 | --- | --- | --- |
-| Pages, layouts, dashboard composition | `src/app/`, `src/components/dashboard.tsx` | Keep pages in `src/app/`; feature UI, hooks, and API clients in `src/features/<area>/` |
+| Pages, layouts, dashboard composition | `src/app/`, `src/features/dashboard/`, feature compositions in `src/features/<area>/` | Keep new feature UI, hooks, and API clients with their area |
 | Reusable UI controls | `src/components/ui/` | Keep here; feature-specific composition stays with its feature |
-| Application operations | `src/server/control-service.ts` and related services | `src/server/modules/<area>/` |
+| Application operations | `src/server/modules/{lifecycle,runtime,environments,verification}/`, remaining operations in `src/server/control-service.ts` | Extract the next touched workflow behind the existing facade |
 | HTTP and MCP adapters | `src/server/http-server.ts`, `src/server/mcp-*.ts` | `src/server/transports/http/` and `src/server/transports/mcp/` |
-| Persistence, Git, OS processes, file logs | Adapters under `src/server/` | `src/server/infrastructure/<adapter>/` |
+| Persistence, Git, OS processes, file logs | SQLite under `src/server/infrastructure/sqlite/`; other adapters under `src/server/` | `src/server/infrastructure/<adapter>/` |
 | Controller construction and lifecycle wiring | `src/cli/index.ts` | `src/server/bootstrap/`; command parsing and CLI output stay in `src/cli/` |
 | Browser-safe API types and schemas | `src/shared/contracts.ts` | `src/shared/contracts/<area>.ts` |
 | Translations and locale handling | `src/i18n/` | Keep the existing typed translation system |
@@ -33,6 +33,9 @@ Existing areas include projects, reservations, runtime, verification, and
 environments. Add workers, memory, or coordination modules with their first
 implemented workflow. Do not create empty modules or generic extension
 frameworks for backlog ideas.
+
+See [module development](module-development.md) for implemented APIs, ownership,
+focused test commands, and responsibilities still retained by the facade.
 
 ### Dependency and contract rules
 

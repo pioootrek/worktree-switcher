@@ -1,13 +1,13 @@
-import { mkdtempSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { SqliteStateStore } from "./sqlite-store";
 import type { TestRun } from "@/shared/contracts";
+import { SqliteStateStore } from "./index";
 
 const directories: string[] = [];
 

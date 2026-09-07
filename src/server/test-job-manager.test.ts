@@ -10,7 +10,7 @@ import { OwnedProcessGroup } from "./owned-process-group";
 import { nullLogWriter } from "./log-writer";
 import { SqliteStateStore } from "./sqlite-store";
 import { TestJobManager } from "./test-job-manager";
-import type { ResolvedTestEnvironment } from "./test-environment";
+import type { ResolvedTestEnvironment } from "@/server/modules/environments";
 
 function resolved(environment: Record<string, string> = {}): ResolvedTestEnvironment {
   return {
