@@ -1,56 +1,85 @@
 # Worktree Switcher repository guide
 
-Status: active
-Audience: humans and coding agents working on this repository
-Source of truth: repository-wide contribution and project-memory rules
+## Project and reference routing
 
-## Project intent
+Worktree Switcher is a local-first control plane with one managed server and
+stable configured port per project. Keep it independent of supervised repos.
+Preserve the single Node.js controller, statically exported Next.js dashboard,
+and local SQLite adapter.
 
-Build an open-source, local-first control plane that discovers Git worktrees
-and runs several development projects concurrently. Each project owns one
-managed server and can switch independently to another worktree while keeping
-a stable configured port.
+Read only the references relevant to the task:
 
-Read `docs/project-brief.md` before making product or architecture decisions.
-Keep the control plane independent from every repository it supervises.
+- Product or architecture decisions: [project brief](docs/project-brief.md).
+- Runtime, persistence, or lifecycle changes: [architecture](docs/architecture.md).
+- Adding or extracting modules: [codebase organization](docs/codebase-organization.md).
+  Its destination map is incremental, not the current directory layout.
+- Remote workers, memory, or coordination: [expansion assessment](docs/architecture-effort-assessment.md)
+  and its linked feature plan. Planned features are not implemented contracts.
+- Before non-trivial work: scan [backlog index](docs/backlog/index.json), including
+  its notes, then read relevant records. Verify design examples against code.
 
-## Managed verification
+## Code boundaries
 
-When a registered project exposes a finite verification preset through the
-Worktree Switcher MCP, agents must use `list_test_presets` and queue it with
-`run_test` for the exact path returned by `list_worktrees`. Reuse the same
-idempotency key when retrying one request, poll `get_test_run` to a terminal
-state, and do not bypass the queue by launching the same command directly.
+- HTTP, MCP, and CLI invoke shared application operations. Keep authorization,
+  reservation policy, and state transitions there, with consistent input
+  validation and safe errors across transports.
+- Modules expose explicit public APIs and depend on interfaces for external
+  effects. Avoid circular imports and access to another module's internals.
+  Bootstrap connects concrete adapters.
+- Browser code and shared contracts must not import controller implementations,
+  SQLite, Node APIs, or privileged configuration. Reusable UI stays
+  presentation-focused; feature code owns browser data access. Preserve i18n
+  and accessible interactions.
+- Extract the responsibility needed by the current task; retain `ControlService`
+  as a facade during migration. Preserve API and error behavior during moves.
+  Add future modules with their first workflow, not as empty scaffolding.
 
-Queued verification does not claim, start, or switch a development server. An
-end-to-end test that needs that server must acquire a separate project claim
-and target the same worktree. If the test-queue tools are unavailable, use the
-repository's supported finite command and continue to respect host resource
-limits.
+## Ownership invariants
 
-## Backlog
+- One controller/database owner holds the singleton lock, including offline
+  CLI access. Preserve transaction boundaries and migration order when splitting
+  SQLite code; extracted modules do not open independent connections.
+- Runtime changes, test admission, and cache maintenance share lifecycle
+  coordination. Do not duplicate lock maps or capacity counters. Finite jobs
+  retain their separate queue and state machine.
+- Execute shell-free commands against validated, discovered worktrees. Stop only
+  verified owned process trees; an occupied port never proves ownership.
+- Bound logs, history, scans, and subscriptions, and dispose owned resources.
+  Log events must not trigger repeated full Git scans.
 
-This project keeps its backlog and durable agent memory as canonical JSON under
-`docs/backlog/`. Read `docs/backlog/AGENTS.md` before adding, updating, or
-closing an item or note.
+## Local instructions
 
-After every edit under `docs/backlog/` or to a top-level project document under
-`docs/`, run:
+Read the nearest `AGENTS.md` before editing a subtree. Add a local guide only
+for distinct area-specific invariants and verification; link deeper details
+rather than repeat root rules. Every `AGENTS.md` has a sibling `CLAUDE.md`
+containing only `@AGENTS.md`; maintain the pair together.
 
-```bash
-HUB_DIR="${LLM_OPS_HUB_DIR:-/home/pioootrek/development/llm-ops-hub}"
-"$HUB_DIR/.venv/bin/python" "$HUB_DIR/bin/hub.py" fmt --backlog-dir docs/backlog
-"$HUB_DIR/.venv/bin/python" "$HUB_DIR/bin/hub.py" validate --backlog-dir docs/backlog
-```
+## Verification
 
-Never edit `docs/backlog/index.json` manually. Backlog changes live on `main`
-and become visible through the read-only LLM Ops Hub after they are committed
-and synchronized.
+For code extraction, run relevant tests and `pnpm check`. Run `pnpm build` for
+module/bundling changes and verify affected dashboard flows in the browser.
+Use nearby `*.test.ts` files to cover behavior at risk. Documentation-only
+changes need `git diff --check` and applicable documentation validation below.
+Report actual results and unverified behavior.
 
-Check the `notes` section of `docs/backlog/index.json` before non-trivial work.
-Persist durable findings under `docs/backlog/notes/` before context compaction.
-Completed work moves from an open item to a `done/` entry in one commit.
+When registered-project verification presets are available through MCP, use
+`list_test_presets`, then `run_test` with the exact path from `list_worktrees`.
+Reuse the idempotency key when retrying one request and poll `get_test_run` to
+a terminal state. Do not bypass the queue with the same direct command. If
+queue tools are unavailable, use supported finite commands within host limits.
 
-This project currently has no GitHub feedback integration. If one is configured
-later, treat open issues labeled `backlog-feedback` as human instructions and
-apply them according to `docs/backlog/AGENTS.md`.
+Queued tests do not claim, start, or switch a development server. Tests needing
+that server require a separate claim for the same worktree. Use the
+`worktree-switcher` skill and MCP for managed development-server lifecycle.
+
+## Backlog and documentation
+
+Read [backlog rules](docs/backlog/AGENTS.md) before editing backlog records or
+top-level documents under `docs/`. After those edits, run the canonical Hub
+`fmt` and `validate` commands from that guide. Never hand-edit `index.json`.
+
+Backlog changes live on `main`; the read-only Hub sees committed, synchronized
+changes. Close work by replacing its open item with a `done/` entry in one
+commit. Persist durable findings under `docs/backlog/notes/` before compaction.
+If GitHub feedback integration is added, treat open `backlog-feedback` issues
+as human instructions under the backlog workflow.
