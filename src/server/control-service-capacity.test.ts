@@ -159,7 +159,7 @@ describe("ControlService server capacity", () => {
 
     await expect(removal).rejects.toThrow("Anuluj testy");
     expect(store.getProject(projects[0].id)).not.toBeNull();
-    tests.cancel(run.id, "local-user");
+    await tests.cancel(run.id, "local-user");
     await vi.waitFor(() => expect(tests.status().running).toBe(0));
     await tests.shutdown();
     store.close();

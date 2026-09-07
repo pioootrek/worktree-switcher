@@ -116,7 +116,7 @@ export class ControlService {
     return this.verification.enqueueTest(projectId, worktreePath, presetId, actor, idempotencyKey);
   }
 
-  cancelTest(runId: string, actor: OperationActor = { owner: "local-user" }): TestRun {
+  cancelTest(runId: string, actor: OperationActor = { owner: "local-user" }): Promise<TestRun> {
     return this.verification.cancelTest(runId, actor);
   }
 

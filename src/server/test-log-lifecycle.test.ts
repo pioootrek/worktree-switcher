@@ -74,10 +74,10 @@ describe("test log lifecycle", () => {
       cwd: outcome === "sync_spawn_error" ? "invalid\0cwd" : undefined,
       timeoutMs: outcome === "timed_out" ? 50 : undefined,
     });
-    if (outcome === "queued_cancelled") manager.cancel(run.id, "local-user");
+    if (outcome === "queued_cancelled") await manager.cancel(run.id, "local-user");
     if (outcome === "cancelled") {
       await vi.waitFor(() => expect(store.getTestRun(run.id)?.logs).toContain("ready"));
-      manager.cancel(run.id, "local-user");
+      await manager.cancel(run.id, "local-user");
     }
     const phase = outcome.includes("spawn_error") ? "failed" : outcome === "queued_cancelled" ? "cancelled" : outcome;
     await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe(phase));
@@ -117,7 +117,7 @@ describe("test log lifecycle", () => {
   it("recovers interrupted history and deletes orphan logs after project removal", async () => {
     const { directory, store, project, logs, manager, enqueue } = fixture();
     const seed = enqueue();
-    manager.cancel(seed.id, "local-user");
+    await manager.cancel(seed.id, "local-user");
     await manager.shutdown();
     const template = store.getTestRun(seed.id)!;
     for (let index = 0; index < 60; index += 1) {
@@ -159,6 +159,37 @@ describe("test log lifecycle", () => {
     }
   });
 
+  it("acknowledges queued cancellation only after logs and stored state are finalized", async () => {
+    const { directory, store, project, logs, manager, enqueue } = fixture();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(logs, "finishTest").mockImplementationOnce(async (id) => {
+      await gate;
+      await FileLogWriter.prototype.finishTest.call(logs, id);
+    });
+    const run = enqueue();
+    let acknowledged = false;
+    const cancelled = manager.cancel(run.id, "local-user").then((result) => {
+      acknowledged = true;
+      return result;
+    });
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(acknowledged).toBe(false);
+      expect(store.getTestRun(run.id)?.phase).toBe("queued");
+      release();
+      expect((await cancelled).phase).toBe("cancelled");
+      expect(store.getTestRun(run.id)?.phase).toBe("cancelled");
+      expect(store.countTestRuns(["queued", "running"], project.id)).toBe(0);
+      store.removeProject(project.id, "local-user");
+      await manager.pruneLogs();
+      expect(existsSync(join(directory, "tests", `${run.id}.log`))).toBe(false);
+    } finally {
+      release();
+      await cancelled;
+    }
+  });
+
   it("keeps the queue moving during slow log pruning and awaits pruning on shutdown", async () => {
     const { store, logs, manager, enqueue } = fixture();
     await manager.pruneLogs();
@@ -168,8 +199,10 @@ describe("test log lifecycle", () => {
     try {
       const first = enqueue();
       const second = enqueue();
-      await vi.waitFor(() => expect(store.getTestRun(second.id)?.phase).toBe("passed"));
-      expect(store.getTestRun(first.id)?.phase).toBe("passed");
+      await vi.waitFor(() => {
+        expect(store.getTestRun(first.id)?.phase).toBe("passed");
+        expect(store.getTestRun(second.id)?.phase).toBe("passed");
+      });
       expect(manager.status()).toMatchObject({ running: 0, queued: 0 });
       let stopped = false;
       const shutdown = manager.shutdown().then(() => { stopped = true; });
@@ -179,6 +212,46 @@ describe("test log lifecycle", () => {
       await shutdown;
     } finally {
       release();
+    }
+  });
+
+  it("observes background finalization failures after a synchronous spawn error", async () => {
+    const { store, logs, enqueue, testDescriptors } = fixture();
+    const audit = vi.spyOn(logs, "controller");
+    const save = store.saveTestRun.bind(store);
+    vi.spyOn(store, "saveTestRun").mockImplementation((run, key) => {
+      if (run.phase === "failed") throw new Error("database write failed");
+      save(run, key);
+    });
+    const run = enqueue("", { cwd: "invalid\0cwd" });
+    await vi.waitFor(() => expect(audit).toHaveBeenCalledWith("test_run.finalization_failed", {
+      runId: run.id, error: "Error: database write failed",
+    }));
+    expect(testDescriptors()).toHaveLength(0);
+    // No false terminal result is stored when persistence fails; other jobs
+    // still run, and restart recovery can mark the remaining record interrupted.
+    expect(store.getTestRun(run.id)?.phase).toBe("running");
+    const next = enqueue();
+    await vi.waitFor(() => expect(store.getTestRun(next.id)?.phase).toBe("passed"));
+  });
+
+  it("still stops active processes when another cancellation fails during shutdown", async () => {
+    const { store, manager, enqueue, testDescriptors } = fixture();
+    const running = enqueue("console.log('ready'); setInterval(() => {}, 1000)");
+    await vi.waitFor(() => expect(store.getTestRun(running.id)?.logs).toContain("ready"));
+    const queued = enqueue();
+    const save = store.saveTestRun.bind(store);
+    const persistence = vi.spyOn(store, "saveTestRun").mockImplementation((run, key) => {
+      if (run.id === queued.id && run.phase === "cancelled") throw new Error("database write failed");
+      save(run, key);
+    });
+    try {
+      await expect(manager.shutdown()).rejects.toThrow("anulowania zadań");
+      expect(store.getTestRun(running.id)?.phase).toBe("cancelled");
+      expect(manager.status().running).toBe(0);
+      expect(testDescriptors()).toHaveLength(0);
+    } finally {
+      persistence.mockRestore();
     }
   });
 
