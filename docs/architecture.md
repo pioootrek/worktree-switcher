@@ -107,8 +107,9 @@ controller must be event-driven and have bounded memory use:
 - a repository-keyed dashboard metadata projection with single-flight refresh,
   30-second freshness/error disclosure, at most 128 entries and an 8 MiB
   serialized metadata budget;
-- at most four Git subprocesses with 128 queued commands, prioritizing fresh
-  operational validation over background display refreshes;
+- at most four Git subprocesses with separately bounded queues of 128 operational
+  and 128 background commands, prioritizing fresh operational validation even
+  when the display queue is full;
 - bounded per-project and global log buffers;
 - one five-second resource sampler per active Linux process group, with at
   most 60 in-memory RAM points and no sampler for stopped projects;

@@ -25,9 +25,9 @@
   "title": "Stopped dashboard output updates from amplifying Git discovery",
   "validation": [
     "pnpm check passed ESLint, TypeScript, and 202 tests in 38 files.",
-    "pnpm build completed the static Next.js export and bundled controller CLI; pnpm test:ui passed all four browser fixtures; git diff --check passed.",
+    "pnpm build completed the static Next.js export and bundled controller CLI; pnpm test:ui passed all five browser fixtures; git diff --check passed.",
     "The real Git audit fixture observed two worktree-list and six status commands for three concurrent cold dashboards, then zero Git commands and zero preset discoveries across twelve warm dashboard reads.",
-    "Regression fixtures cover cold and warm reads after TTL, admission and cache saturation, partial errors, invalidation during refresh, storage cooldown, MCP summaries, HTTP authorization, SSE backpressure, and browser coalescing, reconnect, cancellation, English, and Polish UI.",
+    "Regression fixtures cover cold and warm reads after TTL, fresh detailed MCP topology, admission and cache saturation, partial errors, invalidation during refresh, storage cooldown, MCP summaries, HTTP authorization, SSE backpressure, and browser coalescing, reconnect, cancellation, explicit-only metadata refresh, English, and Polish UI.",
     "Backlog formatting and validation passed. The repository was not registered with the current Worktree Switcher controller, so supported finite project commands were run directly; no production restart or deployment was performed."
   ]
 }

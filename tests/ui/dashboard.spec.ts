@@ -126,3 +126,30 @@ test("an SSE ready event after reconnect reconciles a quiet dashboard", async ({
   });
   await expect.poll(() => bootstraps).toBe(1);
 });
+
+test("stale metadata waits for an explicit refresh", async ({ page }) => {
+  const { requests } = await mountDashboard(page);
+  await expect(page.getByText("Fixture Web", { exact: true })).toBeVisible();
+  const stale = dashboardFixture();
+  stale.projects[0].metadata = {
+    status: "stale",
+    lastSuccessfulAt: "2026-01-01T11:59:00.000Z",
+    lastAttemptAt: "2026-01-01T11:59:00.000Z",
+    retryAt: null,
+    error: null,
+  };
+  let bootstraps = 0;
+  await page.route("**/api/dashboard", async (route) => {
+    bootstraps += 1;
+    await route.fulfill({ json: stale });
+  });
+  await page.evaluate(() => {
+    (window as unknown as { fixtureEvents: { emit(type: string, data: unknown): void } }).fixtureEvents.emit(
+      "changed",
+      { epoch: "fixture", revision: 3, kinds: ["metadata"], projectIds: ["web"], allProjects: false },
+    );
+  });
+  await expect.poll(() => bootstraps).toBe(1);
+  await expect(page.getByText(translate("en", "metadata.stale"), { exact: true })).toBeVisible();
+  expect(requests.filter(({ path }) => path === "/api/projects/web/metadata/refresh")).toEqual([]);
+});

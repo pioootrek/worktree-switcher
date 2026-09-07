@@ -23,12 +23,13 @@ export class GitCommandAdmission {
 
   run<T>(priority: GitCommandPriority, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
     if (this.closed) return Promise.reject(new Error("Obsługa poleceń Git jest zamknięta."));
-    if (this.operational.length + this.background.length >= this.maxQueued) {
+    const queue = priority === "operational" ? this.operational : this.background;
+    if (queue.length >= this.maxQueued) {
       return Promise.reject(new Error("Kolejka poleceń Git jest zajęta. Spróbuj ponownie później."));
     }
     return new Promise<T>((resolve, reject) => {
       const job = { priority, operation, resolve, reject } as AdmissionJob<T>;
-      (priority === "operational" ? this.operational : this.background).push(job as AdmissionJob<unknown>);
+      queue.push(job as AdmissionJob<unknown>);
       this.pump();
     });
   }

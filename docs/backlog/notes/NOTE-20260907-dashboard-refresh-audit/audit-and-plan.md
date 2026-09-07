@@ -335,6 +335,11 @@ than release budgets. The permanent regression separately advances beyond the
 30-second metadata TTL and confirms the same zero-additional-work result,
 including zero storage scheduling.
 
+The final admission boundary keeps the four-process global execution cap but
+applies the 128-waiter bound independently to operational and background work.
+This bounded headroom lets fresh lifecycle and detailed MCP validation enter
+when display discovery has saturated its own queue.
+
 ## Delivery and rollback
 
 Implement this item before broader compact MCP work. Review the cache boundary,

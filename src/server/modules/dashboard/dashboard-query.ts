@@ -86,7 +86,8 @@ export class DashboardQueryService {
   }
 
   async projectSnapshot(project: Project): Promise<ProjectSnapshot> {
-    return this.snapshot(project);
+    await this.load(project, true, "operational");
+    return this.assemble(project, this.requireEntry(project.repositoryPath));
   }
 
   projectSummaries(): ProjectSummary[] {
@@ -200,7 +201,7 @@ export class DashboardQueryService {
     };
   }
 
-  private async load(project: Project, force: boolean): Promise<void> {
+  private async load(project: Project, force: boolean, priority: "operational" | "background" = "background"): Promise<void> {
     if (this.closed) throw new Error("Projekcja panelu jest zamknięta.");
     const entry = this.entry(project.repositoryPath);
     entry.lastUsedAt = this.now();
@@ -210,7 +211,7 @@ export class DashboardQueryService {
     entry.invalidatedDuringRefresh = false;
     const operation = (async () => {
       try {
-        const worktrees = await this.dependencies.git.list(project.repositoryPath, { priority: "background" });
+        const worktrees = await this.dependencies.git.list(project.repositoryPath, { priority });
         const testPresets = worktrees.map((worktree) => this.dependencies.discoverPresets(project, worktree.path));
         const value = { worktrees, testPresets };
         const bytes = Buffer.byteLength(JSON.stringify(value));

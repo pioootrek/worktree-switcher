@@ -41,7 +41,7 @@ describe("parseWorktreePorcelain", () => {
 
 describe("GitCommandAdmission", () => {
   it("bounds execution and admits operational validation before queued display work", async () => {
-    const admission = new GitCommandAdmission(1, 4);
+    const admission = new GitCommandAdmission(1, 1);
     const order: string[] = [];
     let release!: () => void;
     const first = admission.run("background", async () => {

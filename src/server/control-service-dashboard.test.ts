@@ -23,14 +23,18 @@ afterEach(() => {
 });
 
 describe("ControlService dashboard projection", () => {
-  it("shares cold repository reads and adds no Git, preset or storage work for noisy warm updates after TTL", async () => {
+  it("keeps noisy dashboard reads cached but refreshes detailed agent snapshots", async () => {
     vi.useFakeTimers();
     const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-dashboard-amplification-"));
     directories.push(directory);
     const store = new SqliteStateStore(join(directory, "state.sqlite3"));
-    for (let index = 0; index < 2; index += 1) {
-      store.addProject({ name: `P${index}`, repositoryPath: `/repo/${index}`, port: 3300 + index, executable: "pnpm", args: [] });
-    }
+    const projects = Array.from({ length: 2 }, (_, index) => store.addProject({
+      name: `P${index}`,
+      repositoryPath: `/repo/${index}`,
+      port: 3300 + index,
+      executable: "pnpm",
+      args: [],
+    }));
     const list = vi.fn(async (repositoryPath: string) => Array.from({ length: 3 }, (_, index): Worktree => ({
       path: `${repositoryPath}/${index}`,
       head: "abcdef123456",
@@ -79,6 +83,22 @@ describe("ControlService dashboard projection", () => {
     expect(list).toHaveBeenCalledTimes(2);
     expect(discover).toHaveBeenCalledTimes(6);
     expect(ensureFresh).toHaveBeenCalledTimes(2);
+
+    const addedWorktree: Worktree = {
+      path: "/repo/0/added",
+      head: "fedcba654321",
+      shortHead: "fedcba65",
+      branch: "added",
+      detached: false,
+      locked: false,
+      prunable: false,
+      dirty: false,
+    };
+    list.mockResolvedValueOnce([addedWorktree]);
+    const detailed = await service.projectSnapshot(projects[0].id);
+    expect(detailed.worktrees).toEqual([addedWorktree]);
+    expect(list).toHaveBeenCalledTimes(3);
+    expect(list).toHaveBeenLastCalledWith("/repo/0", { priority: "operational" });
 
     events.close();
     store.close();

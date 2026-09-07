@@ -47,7 +47,8 @@ explicit project metadata refresh and live queries through that module. The
 cache is never passed to runtime, reservation, verification, storage or cache
 maintenance operations; those continue to validate against fresh Git discovery.
 `SystemGitWorktreeReader` shares one bounded, priority-aware subprocess admission
-queue across both display reads and operational validation.
+boundary across both display reads and operational validation. Each priority has
+its own queue budget so display saturation cannot reject fresh validation.
 
 `SqliteStateStore` opens one connection, runs the unchanged schema initialization
 and migrations, and lends the connection to query helpers. Helpers do not close

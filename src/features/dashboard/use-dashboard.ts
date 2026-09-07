@@ -40,7 +40,6 @@ export function useDashboard() {
   const pending = useRef<PendingRefresh>(emptyPending());
   const inFlight = useRef<Promise<void> | null>(null);
   const requestAbort = useRef<AbortController | null>(null);
-  const metadataRefreshKeys = useRef(new Set<string>());
 
   const reconcile = useCallback((accessToken: string, request: { bootstrap?: boolean; projectIds?: string[]; sections?: DashboardSection[] } = {}) => {
     if (request.bootstrap) pending.current.bootstrap = true;
@@ -63,14 +62,6 @@ export function useDashboard() {
             });
             const dashboard = await parseResponse<ControllerDashboardResponse>(response, t("http.error", { status: response.status }));
             if (generation.current !== activeGeneration) return;
-            const eligibleMetadata = dashboard.projects.flatMap(({ project, metadata }) => {
-              if (!metadata || metadata.status === "fresh" || metadata.status === "refreshing") return [];
-              if (metadata.retryAt && new Date(metadata.retryAt).getTime() > Date.now()) return [];
-              const key = `${project.id}:${metadata.status}:${metadata.lastAttemptAt ?? "never"}:${metadata.lastSuccessfulAt ?? "never"}`;
-              if (metadataRefreshKeys.current.has(key)) return [];
-              metadataRefreshKeys.current.add(key);
-              return [project.id];
-            });
             setData((current) => {
               const resources = new Map(current.projects.map((project) => [project.project.id, project.runtime.resources]));
               return {
@@ -87,21 +78,6 @@ export function useDashboard() {
                 })),
               };
             });
-            if (eligibleMetadata.length) {
-              let refreshed = false;
-              for (const projectId of eligibleMetadata) {
-                if (generation.current !== activeGeneration) return;
-                const metadataResponse = await fetch(`/api/projects/${projectId}/metadata/refresh`, {
-                  method: "POST",
-                  signal: controller.signal,
-                  headers: { "Accept-Language": locale, "Content-Type": "application/json", "X-Worktree-Switcher-Token": accessToken },
-                  body: "{}",
-                });
-                await parseResponse(metadataResponse, t("http.error", { status: metadataResponse.status }));
-                refreshed = true;
-              }
-              if (refreshed) pending.current.bootstrap = true;
-            }
           } else {
             const query = new URLSearchParams();
             for (const projectId of next.projectIds) query.append("project", projectId);
@@ -197,7 +173,6 @@ export function useDashboard() {
       window.clearTimeout(initialRefresh);
       requestAbort.current?.abort();
       requestAbort.current = null;
-      metadataRefreshKeys.current = new Set();
       pending.current = emptyPending();
       inFlight.current = null;
       events?.close();
