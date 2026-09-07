@@ -1,0 +1,105 @@
+import { existsSync } from "node:fs";
+import { resolve, sep } from "node:path";
+
+import type { Page } from "@playwright/test";
+import type { ControllerDashboardResponse, TestRun } from "../../src/shared/contracts";
+
+const worktreePath = "/fixture/web";
+const now = "2026-01-01T12:00:00.000Z";
+
+export function dashboardFixture(): ControllerDashboardResponse {
+  return {
+    capacity: { enabled: false, limit: 2, used: 0, available: null, holders: [] },
+    testQueue: { limit: 1, running: 0, queued: 0 },
+    mcp: { phase: "disabled", endpoint: null, transport: "streamable-http", network: "loopback", authentication: "bearer", activeSessions: 0 },
+    projects: [{
+      project: {
+        id: "web", name: "Fixture Web", repositoryPath: worktreePath, port: 3000,
+        launchPreset: "node", tlsMode: "off", tlsKeyPath: null, tlsCertPath: null, tlsCaPath: null,
+        executable: "pnpm", args: ["run", "dev"], environment: {},
+        environmentProfiles: [{ name: "default", environment: {} }], selectedEnvironmentProfile: "default",
+        testEnvironmentProfiles: [{ name: "unit", policy: { mode: "clean", serverProfile: null }, variableNames: [], nodeEnv: "test", requiredVariables: [] }],
+        testPresetProfiles: {}, healthcheckPath: "/", startupTimeoutMs: 30_000,
+        selectedWorktreePath: worktreePath, createdAt: now, updatedAt: now,
+      },
+      runtime: {
+        phase: "stopped", pid: null, worktreePath: null, startedAt: null, error: null, failure: null, logs: ["fixture ready"],
+        resources: { status: "idle", currentRssBytes: null, peakRssBytes: null, cpuPercent: null, processCount: null, sampledAt: null, sampleAgeSeconds: null, warningThresholdBytes: null, history: [] },
+      },
+      reservation: null,
+      worktrees: [{ path: worktreePath, head: "abcdef123456", shortHead: "abcdef1", branch: "main", detached: false, locked: false, prunable: false, dirty: false }],
+      storage: [],
+      testPresets: [{ worktreePath, presets: [{ id: "node:test", name: "test", adapter: "node", profile: "unit", timeoutMs: 30_000 }], error: null }],
+      testRuns: [],
+    }],
+  };
+}
+
+/** Loads the real static export into Chromium; no HTTP listener or controller is started. */
+export async function mountDashboard(page: Page) {
+  const webRoot = resolve("out");
+  if (!existsSync(resolve(webRoot, "index.html"))) throw new Error("Run pnpm build before pnpm test:ui.");
+  const data = dashboardFixture();
+  const requests: Array<{ path: string; method: string; body: unknown }> = [];
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.addInitScript(() => {
+    // The fixture owns event delivery; count subscriptions to catch accidental duplication.
+    const events = { active: 0 };
+    Object.assign(window, { fixtureEvents: events });
+    window.EventSource = class extends EventTarget {
+      constructor() { super(); events.active += 1; }
+      close() { events.active -= 1; }
+    } as unknown as typeof EventSource;
+  });
+  await page.route("**/*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin !== "http://switcher.test") return route.abort();
+    if (url.pathname.startsWith("/api/")) {
+      const request = route.request();
+      if (request.headers()["x-worktree-switcher-token"] !== "ui-fixture-token") {
+        return route.fulfill({ status: 401, json: { error: "Missing fixture session" } });
+      }
+      if (request.method() === "GET") {
+        if (url.pathname === "/api/dashboard") return route.fulfill({ json: data });
+        if (url.pathname === "/api/metrics") return route.fulfill({ json: { projects: [] } });
+        return route.fulfill({ status: 404, json: { error: "Unconfigured fixture read" } });
+      }
+      const body = request.postDataJSON();
+      requests.push({ path: url.pathname, method: request.method(), body });
+      const snapshot = data.projects[0];
+      switch (url.pathname) {
+        case "/api/settings/capacity": Object.assign(data.capacity, body); break;
+        case "/api/settings/test-queue": Object.assign(data.testQueue, body); break;
+        case "/api/projects/web/tls": snapshot.project.tlsMode = body.mode; break;
+        case "/api/projects/web/environment-profiles":
+          snapshot.project.environmentProfiles = [{ name: body.name, environment: body.environment }];
+          snapshot.project.environment = body.environment;
+          break;
+        case "/api/projects/web/operation":
+          snapshot.runtime.phase = body.operation === "stop" ? "stopped" : "running";
+          snapshot.runtime.worktreePath = body.worktreePath;
+          break;
+        case "/api/projects/web/tests": {
+          const run: TestRun = {
+            id: "run-1", projectId: "web", worktreePath, worktreeHead: "abcdef123456", worktreeBranch: "main", worktreeDirty: false,
+            presetId: "node:test", presetName: "test", adapter: "node", actor: "local-user", phase: "queued", queuePosition: 1,
+            executable: "pnpm", args: ["run", "test"], cwd: worktreePath, queuedAt: now, startedAt: null, finishedAt: null,
+            exitCode: null, signal: null, error: null, logs: ["fixture test output"], environmentMode: "clean", environmentProfile: "unit",
+            inheritedServerProfile: null, environmentVariableNames: ["NODE_ENV"],
+          };
+          snapshot.testRuns = [run];
+          break;
+        }
+        case "/api/test-runs/run-1/cancel": snapshot.testRuns[0].phase = "cancelled"; break;
+        default: return route.fulfill({ status: 400, json: { error: "Unconfigured fixture mutation" } });
+      }
+      return route.fulfill({ json: {} });
+    }
+    const file = resolve(webRoot, "." + (url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname)));
+    if (!file.startsWith(webRoot + sep) || !existsSync(file)) return route.fulfill({ status: 404, body: "Missing static asset" });
+    return route.fulfill({ path: file });
+  });
+  await page.goto("http://switcher.test/#token=ui-fixture-token");
+  return { requests, errors };
+}

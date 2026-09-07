@@ -1,0 +1,113 @@
+import type { ProcessManager } from "@/server/process-manager";
+import type { StateStore } from "@/server/state-store";
+import type { Project, ProjectSnapshot, ServerCapacityStatus, Worktree } from "@/shared/contracts";
+import { createHash } from "node:crypto";
+import { basename } from "node:path";
+
+export interface OperationActor {
+  owner: string;
+  leaseToken?: string;
+}
+
+export function leaseTokenHash(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/** The facade creates one authority and shares it across application modules. */
+export class ProjectLifecycle {
+  private readonly locks = new Map<string, Promise<unknown>>();
+  private readonly pendingStarts = new Set<string>();
+
+  constructor(
+    private readonly store: Pick<StateStore, "getProject" | "listProjects" | "authorizeReservation" | "getServerCapacitySettings">,
+    private readonly processes: Pick<ProcessManager, "snapshot">,
+  ) {}
+
+  resolveWorktree(project: Project, worktrees: Worktree[], requested?: string): Worktree {
+    const path = requested ?? project.selectedWorktreePath ?? worktrees[0]?.path;
+    const selected = worktrees.find((worktree) => worktree.path === path);
+    if (!selected) throw new Error("Worktree nie należy do zarejestrowanego repozytorium lub już nie istnieje.");
+    if (selected.prunable) throw new Error("Nie można uruchomić uszkodzonego worktree oznaczonego jako prunable.");
+    return selected;
+  }
+
+  assertReservationAllows(projectId: string, worktreePath: string | null, actor: OperationActor): void {
+    const reservation = this.store.authorizeReservation(
+      projectId,
+      actor.owner,
+      actor.leaseToken ? leaseTokenHash(actor.leaseToken) : undefined,
+    );
+    if (reservation && reservation.worktreePath !== worktreePath) {
+      throw new Error(`Projekt jest zablokowany na ${basename(reservation.worktreePath)} przez ${reservation.owner}.`);
+    }
+  }
+
+  requireProject(id: string): Project {
+    const project = this.store.getProject(id);
+    if (!project) throw new Error("Nie znaleziono projektu.");
+    return project;
+  }
+
+  acquireCapacity(project: Project): void {
+    const status = this.capacityStatus();
+    if (status.holders.some(({ projectId }) => projectId === project.id)) {
+      this.pendingStarts.add(project.id);
+      return;
+    }
+    if (status.enabled && status.used >= status.limit) {
+      const holders = status.holders.map(({ projectName }) => projectName).join(", ");
+      throw new Error(`Osiągnięto limit ${status.limit} uruchomionych serwerów. Aktywne: ${holders || "brak"}.`);
+    }
+    this.pendingStarts.add(project.id);
+  }
+
+  capacityStatus(snapshots?: ProjectSnapshot[]): ServerCapacityStatus {
+    const settings = this.store.getServerCapacitySettings();
+    const projects: Array<{ project: Pick<Project, "id" | "name">; runtime: ProjectSnapshot["runtime"] }> = snapshots
+      ?? this.store.listProjects().map((project) => ({
+        project,
+        runtime: this.processes.snapshot(project.id),
+      }));
+    const holders = projects.flatMap(({ project, runtime }) => {
+      const pending = this.pendingStarts.has(project.id);
+      if (!pending && !runtime.pid && runtime.phase !== "starting" && runtime.phase !== "running" && runtime.phase !== "stopping") return [];
+      const phase: ServerCapacityStatus["holders"][number]["phase"] = runtime.phase === "starting" || runtime.phase === "running" || runtime.phase === "stopping"
+        ? runtime.phase
+        : runtime.pid ? "stopping" : "starting";
+      return [{
+        projectId: project.id,
+        projectName: project.name,
+        phase,
+      }];
+    });
+    return {
+      ...settings,
+      used: holders.length,
+      available: settings.enabled ? Math.max(0, settings.limit - holders.length) : null,
+      holders,
+    };
+  }
+
+  async serialized<T>(projectId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.locks.get(projectId) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    this.locks.set(projectId, current);
+    try {
+      return await current;
+    } finally {
+      if (this.locks.get(projectId) === current) this.locks.delete(projectId);
+    }
+  }
+
+  isProjectActive(projectId: string): boolean {
+    const phase = this.processes.snapshot(projectId).phase;
+    return phase === "running" || phase === "starting" || phase === "stopping";
+  }
+
+  releaseCapacity(projectId: string): void {
+    this.pendingStarts.delete(projectId);
+  }
+}
+
+export type LifecycleAccess = Pick<ProjectLifecycle, "serialized" | "requireProject" | "resolveWorktree" | "assertReservationAllows">;
+export type RuntimeCapacity = Pick<ProjectLifecycle, "acquireCapacity" | "releaseCapacity" | "capacityStatus" | "isProjectActive">;

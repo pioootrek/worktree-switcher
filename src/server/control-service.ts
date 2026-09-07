@@ -1,33 +1,37 @@
-import { createHash, randomBytes } from "node:crypto";
-import { basename, resolve } from "node:path";
+import { randomBytes } from "node:crypto";
+import { resolve } from "node:path";
+import { EnvironmentService, redactProject } from "./modules/environments";
+import { leaseTokenHash, type OperationActor, ProjectLifecycle } from "./modules/lifecycle";
+import { RuntimeService } from "./modules/runtime";
+import { VerificationService } from "./modules/verification";
 
-import type { CacheDeletionResult, DashboardResponse, Project, ProjectSnapshot, ProjectView, RedactedTestEnvironmentProfile, Reservation, RuntimeMetricsResponse, SafeCacheKind, ServerCapacitySettings, ServerCapacityStatus, TestEnvironmentProfile, TestPreset, TestQueueStatus, TestRun, Worktree, WorktreeTestPresets } from "@/shared/contracts";
+import type {
+  CacheDeletionResult,
+  DashboardResponse,
+  Project,
+  ProjectSnapshot,
+  ProjectView,
+  RedactedTestEnvironmentProfile,
+  Reservation,
+  RuntimeMetricsResponse,
+  SafeCacheKind,
+  ServerCapacitySettings,
+  ServerCapacityStatus,
+  TestEnvironmentProfile,
+  TestQueueStatus,
+  TestRun,
+} from "@/shared/contracts";
 import type { GitWorktreeReader } from "./git-worktrees";
 import { type LaunchCommandResolver, type NextTlsConfiguration, ProjectLaunchCommandResolver } from "./launch-command";
 import { type LogWriter, nullLogWriter } from "./log-writer";
 import { ProcessManager } from "./process-manager";
 import type { NewProject, ReservationRequest, StateStore } from "./state-store";
-import { AllowlistedWorktreeCacheCleaner, type WorktreeCacheCleaner, type WorktreeStorageManager } from "./worktree-storage";
 import { ProjectTestCommandResolver } from "./test-command";
-import { BUILT_IN_TEST_PROFILES, defaultTestProfileName, resolveTestEnvironment, SYSTEM_ENVIRONMENT_ALLOWLIST } from "./test-environment";
 import type { TestJobManager } from "./test-job-manager";
+import { AllowlistedWorktreeCacheCleaner, type WorktreeCacheCleaner, type WorktreeStorageManager } from "./worktree-storage";
 
 const AGENT_LEASE_DEFAULT_SECONDS = 30 * 60;
 const AGENT_LEASE_MAX_SECONDS = 8 * 60 * 60;
-const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const RESERVED_ENVIRONMENT_NAMES = new Set([
-  "PORT", "NODE_ENV", "PATH",
-  "NODE_OPTIONS",
-  "LD_PRELOAD", "LD_LIBRARY_PATH",
-  "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME",
-]);
-const ENVIRONMENT_PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-
-interface OperationActor {
-  owner: string;
-  leaseToken?: string;
-}
-
 export interface AgentClaimRequest {
   projectId: string;
   worktreePath: string;
@@ -44,26 +48,11 @@ export interface AgentClaimResult {
   operationError: string | null;
 }
 
-/** Test profiles are surfaced by variable name only; values never leave the controller. */
-function redactTestProfile(profile: TestEnvironmentProfile): RedactedTestEnvironmentProfile {
-  const { environment, ...rest } = profile;
-  return { ...rest, variableNames: Object.keys(environment).sort((left, right) => left.localeCompare(right)) };
-}
-
-function redactProject(project: Project): ProjectSnapshot["project"] {
-  return {
-    ...project,
-    testEnvironmentProfiles: project.testEnvironmentProfiles.map(redactTestProfile),
-  };
-}
-
-function leaseTokenHash(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
-
 export class ControlService {
-  private readonly locks = new Map<string, Promise<unknown>>();
-  private readonly pendingStarts = new Set<string>();
+  private readonly lifecycle: ProjectLifecycle;
+  private readonly runtime: RuntimeService;
+  private readonly environments: EnvironmentService;
+  private readonly verification: VerificationService;
 
   constructor(
     private readonly store: StateStore,
@@ -73,17 +62,22 @@ export class ControlService {
     private readonly commands: LaunchCommandResolver = new ProjectLaunchCommandResolver(),
     private readonly storage?: WorktreeStorageManager,
     private readonly cacheCleaner: WorktreeCacheCleaner = new AllowlistedWorktreeCacheCleaner(),
-    private readonly testCommands: ProjectTestCommandResolver = new ProjectTestCommandResolver(),
+    testCommands: ProjectTestCommandResolver = new ProjectTestCommandResolver(),
     private readonly tests?: TestJobManager,
-  ) {}
+  ) {
+    this.lifecycle = new ProjectLifecycle(store, processes);
+    this.runtime = new RuntimeService(store, git, processes, logs, commands, this.lifecycle);
+    this.environments = new EnvironmentService(store, logs, this.lifecycle, this.runtime);
+    this.verification = new VerificationService(store, git, logs, testCommands, this.lifecycle, tests);
+  }
 
   async dashboard(): Promise<DashboardResponse> {
     const projects = await Promise.all(this.store.listProjects().map((project) => this.snapshot(project, true)));
-    return { projects, capacity: this.capacityStatus(projects), testQueue: this.testQueueStatus() };
+    return { projects, capacity: this.lifecycle.capacityStatus(projects), testQueue: this.testQueueStatus() };
   }
 
   serverCapacity(): ServerCapacityStatus {
-    return this.capacityStatus();
+    return this.lifecycle.capacityStatus();
   }
 
   runtimeMetrics(): RuntimeMetricsResponse {
@@ -101,22 +95,15 @@ export class ControlService {
     }
     this.store.setServerCapacitySettings(settings);
     this.logs.controller("server_capacity.updated", { ...settings });
-    return this.capacityStatus();
+    return this.lifecycle.capacityStatus();
   }
 
   testQueueStatus(): TestQueueStatus {
-    if (this.tests) return this.tests.status();
-    return {
-      ...this.store.getTestQueueSettings(),
-      running: this.store.countTestRuns(["running"]),
-      queued: this.store.countTestRuns(["queued"]),
-    };
+    return this.verification.testQueueStatus();
   }
 
   setTestQueueLimit(limit: number): TestQueueStatus {
-    const status = this.requireTests().setLimit(limit);
-    this.logs.controller("test_queue.updated", { limit });
-    return status;
+    return this.verification.setTestQueueLimit(limit);
   }
 
   async enqueueTest(
@@ -126,53 +113,15 @@ export class ControlService {
     actor: OperationActor = { owner: "local-user" },
     idempotencyKey?: string,
   ): Promise<TestRun> {
-    return this.serialized(projectId, async () => {
-      const project = this.requireProject(projectId);
-      const worktrees = await this.git.list(project.repositoryPath);
-      const worktree = this.resolveWorktree(project, worktrees, worktreePath);
-      this.assertReservationAllows(projectId, worktree.path, actor);
-      const command = this.testCommands.resolve(worktree.path, presetId);
-      const environment = resolveTestEnvironment({
-        project,
-        worktree,
-        profile: this.testProfileFor(project, command.preset),
-      });
-      const run = this.requireTests().enqueue({
-        projectId,
-        worktree,
-        command,
-        environment,
-        actor: actor.owner,
-        idempotencyKey,
-      });
-      this.logs.controller("test_run.queued", {
-        runId: run.id,
-        projectId,
-        worktreePath: worktree.path,
-        presetId,
-        actor: actor.owner,
-        environmentMode: environment.mode,
-        environmentProfile: environment.profile,
-        inheritedServerProfile: environment.inheritedServerProfile,
-        variableNames: environment.variableNames,
-      });
-      return run;
-    });
+    return this.verification.enqueueTest(projectId, worktreePath, presetId, actor, idempotencyKey);
   }
 
   cancelTest(runId: string, actor: OperationActor = { owner: "local-user" }): TestRun {
-    const run = this.store.getTestRun(runId);
-    if (!run) throw new Error("Nie znaleziono uruchomienia testu.");
-    this.requireProject(run.projectId);
-    const cancelled = this.requireTests().cancel(runId, actor.owner);
-    this.logs.controller("test_run.cancelled", { runId, projectId: run.projectId, actor: actor.owner });
-    return cancelled;
+    return this.verification.cancelTest(runId, actor);
   }
 
   testRun(runId: string): TestRun {
-    const run = this.store.getTestRun(runId);
-    if (!run) throw new Error("Nie znaleziono uruchomienia testu.");
-    return run;
+    return this.verification.testRun(runId);
   }
 
   async addProject(input: NewProject): Promise<ProjectView> {
@@ -203,16 +152,16 @@ export class ControlService {
       args: command.args,
       portMethod: command.portMethod,
     });
-    return redactProject(this.requireProject(project.id));
+    return redactProject(this.lifecycle.requireProject(project.id));
   }
 
   async removeProject(projectId: string, actor: OperationActor = { owner: "local-user" }): Promise<ProjectView> {
-    return this.serialized(projectId, async () => {
-      const project = this.requireProject(projectId);
+    return this.lifecycle.serialized(projectId, async () => {
+      const project = this.lifecycle.requireProject(projectId);
       if (this.store.countTestRuns(["queued", "running"], projectId) > 0) {
         throw new Error("Anuluj testy projektu przed jego usunięciem.");
       }
-      this.assertReservationAllows(
+      this.lifecycle.assertReservationAllows(
         projectId,
         this.processes.snapshot(projectId).worktreePath ?? project.selectedWorktreePath,
         actor,
@@ -235,183 +184,35 @@ export class ControlService {
     worktreePath?: string,
     actor: OperationActor = { owner: "local-user" },
   ): Promise<void> {
-    try {
-      await this.serialized(projectId, () => this.operateLocked(projectId, operation, worktreePath, actor));
-    } catch (error) {
-      this.logs.controller("project.operation_failed", {
-        projectId,
-        operation,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
-  }
-
-  private async operateLocked(
-    projectId: string,
-    operation: "start" | "stop" | "restart" | "switch",
-    worktreePath: string | undefined,
-    actor: OperationActor,
-  ): Promise<void> {
-    const project = this.requireProject(projectId);
-    if (operation === "stop") {
-      this.assertReservationAllows(
-        projectId,
-        this.processes.snapshot(projectId).worktreePath ?? project.selectedWorktreePath,
-        actor,
-      );
-      await this.processes.stop(projectId);
-      this.logs.controller("project.stopped", { projectId });
-      return;
-    }
-    const worktrees = await this.git.list(project.repositoryPath);
-    const selected = this.resolveWorktree(project, worktrees, worktreePath);
-    this.assertReservationAllows(projectId, selected.path, actor);
-    this.acquireCapacity(project);
-    try {
-      if (operation === "restart" || operation === "switch") await this.processes.stop(projectId);
-      if (operation === "switch") this.store.setSelectedWorktree(projectId, selected.path);
-      const launch = this.commands.resolve(selected.path, project.port, project.launchPreset, {
-        mode: project.tlsMode,
-        keyPath: project.tlsKeyPath,
-        certPath: project.tlsCertPath,
-        caPath: project.tlsCaPath,
-      });
-      if (project.executable !== launch.executable || JSON.stringify(project.args) !== JSON.stringify(launch.args)) {
-        this.store.updateProjectLaunch(projectId, {
-          tlsMode: launch.tls.mode,
-          tlsKeyPath: launch.tls.keyPath,
-          tlsCertPath: launch.tls.certPath,
-          tlsCaPath: launch.tls.caPath,
-          executable: launch.executable,
-          args: launch.args,
-        });
-      }
-      await this.processes.start(this.requireProject(projectId), selected.path);
-    } finally {
-      this.pendingStarts.delete(projectId);
-    }
-    this.logs.controller(`project.${operation}`, { projectId, worktreePath: selected.path });
+    return this.runtime.operate(projectId, operation, worktreePath, actor);
   }
 
   async setProjectTls(projectId: string, input: NextTlsConfiguration): Promise<void> {
-    await this.serialized(projectId, async () => {
-      const project = this.requireProject(projectId);
-      const phase = this.processes.snapshot(projectId).phase;
-      if (phase === "running" || phase === "starting" || phase === "stopping") {
-        throw new Error("Zatrzymaj serwer przed zmianą ustawień HTTPS.");
-      }
-      const worktrees = await this.git.list(project.repositoryPath);
-      const selected = this.resolveWorktree(project, worktrees);
-      this.assertReservationAllows(projectId, selected.path, { owner: "local-user" });
-      if (project.launchPreset === "django") throw new Error("HTTPS zarządzany przez Switcher jest obecnie obsługiwany tylko dla Next.js.");
-      const command = this.commands.resolve(selected.path, project.port, project.launchPreset, input);
-      this.store.updateProjectLaunch(projectId, {
-        tlsMode: command.tls.mode,
-        tlsKeyPath: command.tls.keyPath,
-        tlsCertPath: command.tls.certPath,
-        tlsCaPath: command.tls.caPath,
-        executable: command.executable,
-        args: command.args,
-      });
-      this.logs.controller("project.tls_changed", {
-        projectId,
-        mode: command.tls.mode,
-        keyPath: command.tls.keyPath,
-        certPath: command.tls.certPath,
-        caPath: command.tls.caPath,
-      });
-    });
+    return this.runtime.setProjectTls(projectId, input);
   }
 
   async setProjectEnvironment(projectId: string, environment: Record<string, string>, actor: OperationActor = { owner: "local-user" }): Promise<ProjectView> {
-    return this.serialized(projectId, async () => {
-      const project = this.requireProject(projectId);
-      this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
-      const phase = this.processes.snapshot(projectId).phase;
-      if (phase === "running" || phase === "starting" || phase === "stopping") {
-        throw new Error("Zatrzymaj serwer przed zmianą zmiennych środowiskowych.");
-      }
-      const normalized = this.validateEnvironment(environment);
-      this.store.updateProjectEnvironment(project.id, normalized, actor.owner);
-      this.logs.controller("project.environment_updated", { projectId, variableNames: Object.keys(normalized), actor: actor.owner });
-      return redactProject(this.requireProject(projectId));
-    });
+    return this.environments.setProjectEnvironment(projectId, environment, actor);
   }
 
   async saveEnvironmentProfile(projectId: string, name: string, environment: Record<string, string>, actor: OperationActor = { owner: "local-user" }, restart = false): Promise<ProjectView> {
-    return this.serialized(projectId, async () => {
-      const project = this.requireProject(projectId);
-      this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
-      const profileName = this.validateProfileName(name);
-      const normalized = this.validateEnvironment(environment);
-      const active = this.isProjectActive(projectId);
-      const changesActiveProfile = project.selectedEnvironmentProfile === profileName;
-      if (active && changesActiveProfile && !restart) throw new Error("Zatrzymaj serwer lub wybierz zapis z restartem.");
-      if (active && changesActiveProfile) this.acquireCapacity(project);
-      try {
-        if (active && changesActiveProfile) await this.operateLocked(projectId, "stop", undefined, actor);
-        this.store.saveProjectEnvironmentProfile(projectId, { name: profileName, environment: normalized }, actor.owner);
-        this.logs.controller("project.environment_profile_saved", { projectId, profileName, variableNames: Object.keys(normalized), actor: actor.owner });
-        if (active && changesActiveProfile) await this.operateLocked(projectId, "start", undefined, actor);
-      } finally {
-        if (active && changesActiveProfile) this.pendingStarts.delete(projectId);
-      }
-      return redactProject(this.requireProject(projectId));
-    });
+    return this.environments.saveEnvironmentProfile(projectId, name, environment, actor, restart);
   }
 
   async selectEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }, restart = false): Promise<ProjectView> {
-    return this.serialized(projectId, async () => {
-      const project = this.requireProject(projectId);
-      this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
-      const profileName = this.validateProfileName(name);
-      if (!project.environmentProfiles.some((profile) => profile.name === profileName)) throw new Error("Nie znaleziono profilu środowiska.");
-      if (project.selectedEnvironmentProfile === profileName) return redactProject(project);
-      const active = this.isProjectActive(projectId);
-      if (active && !restart) throw new Error("Zatrzymaj serwer lub wybierz profil z restartem.");
-      if (active) this.acquireCapacity(project);
-      try {
-        if (active) await this.operateLocked(projectId, "stop", undefined, actor);
-        this.store.selectProjectEnvironmentProfile(projectId, profileName, actor.owner);
-        this.logs.controller("project.environment_profile_selected", { projectId, profileName, actor: actor.owner });
-        if (active) await this.operateLocked(projectId, "start", undefined, actor);
-      } finally {
-        if (active) this.pendingStarts.delete(projectId);
-      }
-      return redactProject(this.requireProject(projectId));
-    });
+    return this.environments.selectEnvironmentProfile(projectId, name, actor, restart);
   }
 
   async deleteEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }): Promise<ProjectView> {
-    return this.serialized(projectId, async () => {
-      const project = this.requireProject(projectId);
-      this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
-      const profileName = this.validateProfileName(name);
-      if (profileName === "default") throw new Error("Profilu default nie można usunąć.");
-      if (project.selectedEnvironmentProfile === profileName) throw new Error("Nie można usunąć aktywnego profilu środowiska.");
-      if (!project.environmentProfiles.some((profile) => profile.name === profileName)) throw new Error("Nie znaleziono profilu środowiska.");
-      const testProfiles = project.testEnvironmentProfiles
-        .filter((profile) => profile.policy.mode === "inherit-server-profile" && profile.policy.serverProfile === profileName)
-        .map((profile) => profile.name);
-      if (testProfiles.length > 0) throw new Error(`Profil środowiska jest używany przez profile testowe: ${testProfiles.join(", ")}.`);
-      this.store.deleteProjectEnvironmentProfile(projectId, profileName, actor.owner);
-      this.logs.controller("project.environment_profile_deleted", { projectId, profileName, actor: actor.owner });
-      return redactProject(this.requireProject(projectId));
-    });
+    return this.environments.deleteEnvironmentProfile(projectId, name, actor);
   }
 
   testEnvironmentProfiles(projectId: string): {
     profiles: RedactedTestEnvironmentProfile[];
     presetProfiles: Record<string, string>;
     systemVariableNames: string[];
-  } {
-    const project = this.requireProject(projectId);
-    return {
-      profiles: project.testEnvironmentProfiles.map(redactTestProfile),
-      presetProfiles: project.testPresetProfiles,
-      systemVariableNames: [...SYSTEM_ENVIRONMENT_ALLOWLIST, "LC_*"],
-    };
+  }{
+    return this.environments.testEnvironmentProfiles(projectId);
   }
 
   async saveTestEnvironmentProfile(
@@ -419,131 +220,37 @@ export class ControlService {
     input: { name: string; environment: Record<string, string>; mode?: TestEnvironmentProfile["policy"]["mode"]; serverProfile?: string | null; nodeEnv?: TestEnvironmentProfile["nodeEnv"]; requiredVariables?: string[] },
     actor: OperationActor = { owner: "local-user" },
   ): Promise<ProjectView> {
-    return this.serialized(projectId, async () => {
-      const project = this.requireProject(projectId);
-      this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
-      const profile = this.validateTestProfile(project, input);
-      if (BUILT_IN_TEST_PROFILES.some((candidate) => candidate.name === profile.name)) {
-        throw new Error("Wbudowanego profilu testowego nie można zastąpić.");
-      }
-      this.store.saveProjectTestEnvironmentProfile(projectId, profile, actor.owner);
-      this.logs.controller("project.test_profile_saved", {
-        projectId,
-        profileName: profile.name,
-        mode: profile.policy.mode,
-        inheritedServerProfile: profile.policy.serverProfile,
-        variableNames: Object.keys(profile.environment),
-        actor: actor.owner,
-      });
-      return redactProject(this.requireProject(projectId));
-    });
+    return this.environments.saveTestEnvironmentProfile(projectId, input, actor);
   }
 
   async deleteTestEnvironmentProfile(projectId: string, name: string, actor: OperationActor = { owner: "local-user" }): Promise<ProjectView> {
-    return this.serialized(projectId, async () => {
-      const project = this.requireProject(projectId);
-      this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
-      const profileName = this.validateProfileName(name);
-      if (BUILT_IN_TEST_PROFILES.some((profile) => profile.name === profileName)) throw new Error("Wbudowanego profilu testowego nie można usunąć.");
-      if (!project.testEnvironmentProfiles.some((profile) => profile.name === profileName)) throw new Error("Nie znaleziono profilu testowego.");
-      const assigned = Object.entries(project.testPresetProfiles).filter(([, assignment]) => assignment === profileName).map(([presetId]) => presetId);
-      if (assigned.length > 0) throw new Error(`Profil testowy jest przypisany do presetów: ${assigned.join(", ")}.`);
-      this.store.deleteProjectTestEnvironmentProfile(projectId, profileName, actor.owner);
-      this.logs.controller("project.test_profile_deleted", { projectId, profileName, actor: actor.owner });
-      return redactProject(this.requireProject(projectId));
-    });
+    return this.environments.deleteTestEnvironmentProfile(projectId, name, actor);
   }
 
   async assignTestPresetProfile(projectId: string, presetId: string, name: string | null, actor: OperationActor = { owner: "local-user" }): Promise<ProjectView> {
-    return this.serialized(projectId, async () => {
-      const project = this.requireProject(projectId);
-      this.assertReservationAllows(projectId, project.selectedWorktreePath, actor);
-      if (!presetId.trim() || presetId.length > 160) throw new Error("Nieprawidłowy identyfikator presetu testowego.");
-      const profileName = name === null ? null : this.validateProfileName(name);
-      if (profileName && !project.testEnvironmentProfiles.some((profile) => profile.name === profileName)) {
-        throw new Error("Nie znaleziono profilu testowego.");
-      }
-      this.store.assignProjectTestPresetProfile(projectId, presetId.trim(), profileName, actor.owner);
-      this.logs.controller("project.test_preset_profile_assigned", { projectId, presetId, profileName, actor: actor.owner });
-      return redactProject(this.requireProject(projectId));
-    });
-  }
-
-  private testProfileFor(project: Project, preset: TestPreset): TestEnvironmentProfile {
-    const assigned = project.testPresetProfiles[preset.id];
-    const name = assigned ?? defaultTestProfileName(preset);
-    const profile = project.testEnvironmentProfiles.find((candidate) => candidate.name === name)
-      ?? BUILT_IN_TEST_PROFILES.find((candidate) => candidate.name === name);
-    if (!profile) throw new Error(`Preset ${preset.id} wskazuje nieistniejący profil testowy ${name}.`);
-    return profile;
-  }
-
-  private validateTestProfile(
-    project: Project,
-    input: { name: string; environment: Record<string, string>; mode?: TestEnvironmentProfile["policy"]["mode"]; serverProfile?: string | null; nodeEnv?: TestEnvironmentProfile["nodeEnv"]; requiredVariables?: string[] },
-  ): TestEnvironmentProfile {
-    const name = this.validateProfileName(input.name);
-    const environment = this.validateEnvironment(input.environment);
-    const mode = input.mode ?? "clean";
-    if (mode !== "clean" && mode !== "inherit-server-profile") throw new Error("Nieprawidłowy tryb środowiska testowego.");
-    const serverProfile = mode === "inherit-server-profile" ? (input.serverProfile ?? "").trim() : null;
-    if (mode === "inherit-server-profile") {
-      if (!serverProfile) throw new Error("Dziedziczenie środowiska serwera wymaga jawnej nazwy profilu serwera.");
-      if (!project.environmentProfiles.some((profile) => profile.name === serverProfile)) throw new Error("Nie znaleziono profilu środowiska serwera.");
-    }
-    const nodeEnv = input.nodeEnv ?? null;
-    if (nodeEnv !== null && !["development", "production", "test"].includes(nodeEnv)) throw new Error("Nieprawidłowa wartość NODE_ENV profilu testowego.");
-    const requiredVariables = [...new Set(input.requiredVariables ?? [])];
-    for (const variable of requiredVariables) {
-      if (!ENVIRONMENT_NAME.test(variable) || variable.length > 128) throw new Error(`Nieprawidłowa nazwa zmiennej wymaganej: ${variable}.`);
-    }
-    return { name, policy: { mode, serverProfile }, environment, nodeEnv, requiredVariables: requiredVariables.sort() };
-  }
-
-  private validateEnvironment(environment: Record<string, string>): Record<string, string> {
-    const entries = Object.entries(environment);
-    if (entries.length > 100) throw new Error("Można ustawić maksymalnie 100 zmiennych środowiskowych.");
-    for (const [name, value] of entries) {
-      if (!ENVIRONMENT_NAME.test(name) || name.length > 128) throw new Error(`Nieprawidłowa nazwa zmiennej środowiskowej: ${name}.`);
-      if (RESERVED_ENVIRONMENT_NAMES.has(name) || name.startsWith("DYLD_")) throw new Error(`Zmienna ${name} jest zarządzana przez kontroler.`);
-      if (typeof value !== "string" || value.length > 8192 || value.includes("\0") || value.includes("\n") || value.includes("\r") || value.trim() !== value) {
-        throw new Error(`Nieprawidłowa wartość zmiennej ${name}.`);
-      }
-    }
-    return Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right)));
-  }
-
-  private validateProfileName(name: string): string {
-    const normalized = name.trim();
-    if (!ENVIRONMENT_PROFILE_NAME.test(normalized) || normalized.length > 40) throw new Error("Nieprawidłowa nazwa profilu środowiska.");
-    return normalized;
-  }
-
-  private isProjectActive(projectId: string): boolean {
-    const phase = this.processes.snapshot(projectId).phase;
-    return phase === "running" || phase === "starting" || phase === "stopping";
+    return this.environments.assignTestPresetProfile(projectId, presetId, name, actor);
   }
 
   async reserve(input: ReservationRequest): Promise<void> {
-    await this.serialized(input.projectId, async () => {
-      const project = this.requireProject(input.projectId);
+    await this.lifecycle.serialized(input.projectId, async () => {
+      const project = this.lifecycle.requireProject(input.projectId);
       const worktrees = await this.git.list(project.repositoryPath);
-      const selected = this.resolveWorktree(project, worktrees, input.worktreePath);
+      const selected = this.lifecycle.resolveWorktree(project, worktrees, input.worktreePath);
       this.store.acquireReservation({ ...input, worktreePath: selected.path });
       this.logs.controller("reservation.acquired", { projectId: input.projectId, worktreePath: selected.path, owner: input.owner });
     });
   }
 
   async release(projectId: string, force = false): Promise<void> {
-    await this.serialized(projectId, async () => {
-      this.requireProject(projectId);
+    await this.lifecycle.serialized(projectId, async () => {
+      this.lifecycle.requireProject(projectId);
       this.store.releaseReservation(projectId, "local-user", force);
       this.logs.controller(force ? "reservation.force_released" : "reservation.released", { projectId });
     });
   }
 
   async claimProject(input: AgentClaimRequest, existingLeaseToken?: string): Promise<AgentClaimResult> {
-    return this.serialized(input.projectId, async () => {
+    return this.lifecycle.serialized(input.projectId, async () => {
       const ttlSeconds = input.ttlSeconds ?? AGENT_LEASE_DEFAULT_SECONDS;
       if (!Number.isInteger(ttlSeconds) || ttlSeconds < 30 || ttlSeconds > AGENT_LEASE_DEFAULT_SECONDS) {
         throw new Error(`Agent lease TTL must be between 30 and ${AGENT_LEASE_DEFAULT_SECONDS} seconds.`);
@@ -552,9 +259,9 @@ export class ControlService {
       if (!input.reason.trim()) throw new Error("A claim reason is required.");
       if (!input.idempotencyKey.trim() || input.idempotencyKey.length > 120) throw new Error("Invalid idempotency key.");
 
-      const project = this.requireProject(input.projectId);
+      const project = this.lifecycle.requireProject(input.projectId);
       const worktrees = await this.git.list(project.repositoryPath);
-      const selected = this.resolveWorktree(project, worktrees, input.worktreePath);
+      const selected = this.lifecycle.resolveWorktree(project, worktrees, input.worktreePath);
       const leaseToken = existingLeaseToken ?? randomBytes(32).toString("base64url");
       const reservation = this.store.acquireReservation({
         projectId: input.projectId,
@@ -570,16 +277,16 @@ export class ControlService {
 
       let operationError: string | null = null;
       try {
-        this.assertReservationAllows(input.projectId, selected.path, { owner: input.owner, leaseToken });
+        this.lifecycle.assertReservationAllows(input.projectId, selected.path, { owner: input.owner, leaseToken });
         const runtime = this.processes.snapshot(input.projectId);
         if (runtime.phase !== "running" || runtime.worktreePath !== selected.path) {
-          this.acquireCapacity(project);
+          this.lifecycle.acquireCapacity(project);
           try {
             if (runtime.phase !== "stopped") await this.processes.stop(input.projectId);
             if (project.selectedWorktreePath !== selected.path) this.store.setSelectedWorktree(input.projectId, selected.path);
-            await this.processes.start(this.requireProject(input.projectId), selected.path);
+            await this.processes.start(this.lifecycle.requireProject(input.projectId), selected.path);
           } finally {
-            this.pendingStarts.delete(input.projectId);
+            this.lifecycle.releaseCapacity(input.projectId);
           }
         }
       } catch (error) {
@@ -600,7 +307,7 @@ export class ControlService {
       return {
         reservation,
         leaseToken,
-        snapshot: await this.snapshot(this.requireProject(input.projectId)),
+        snapshot: await this.snapshot(this.lifecycle.requireProject(input.projectId)),
         operationError,
       };
     });
@@ -627,21 +334,21 @@ export class ControlService {
   }
 
   async projectSnapshot(projectId: string): Promise<ProjectSnapshot> {
-    return this.snapshot(this.requireProject(projectId));
+    return this.snapshot(this.lifecycle.requireProject(projectId));
   }
 
   async refreshWorktreeStorage(projectId: string, worktreePath: string): Promise<void> {
-    const project = this.requireProject(projectId);
+    const project = this.lifecycle.requireProject(projectId);
     const worktrees = await this.git.list(project.repositoryPath);
-    const selected = this.resolveWorktree(project, worktrees, worktreePath);
+    const selected = this.lifecycle.resolveWorktree(project, worktrees, worktreePath);
     this.storage?.queue(project.id, selected.path, true);
     this.logs.controller("worktree_storage.refresh_requested", { projectId, worktreePath: selected.path });
   }
 
   async deleteWorktreeCache(projectId: string, worktreePath: string, cache: SafeCacheKind): Promise<CacheDeletionResult> {
-    const project = this.requireProject(projectId);
+    const project = this.lifecycle.requireProject(projectId);
     const worktrees = await this.git.list(project.repositoryPath);
-    const selected = this.resolveWorktree(project, worktrees, worktreePath);
+    const selected = this.lifecycle.resolveWorktree(project, worktrees, worktreePath);
     const auditDetails = { worktreePath: selected.path, cache, target: `${selected.path}/.next` };
     try {
       const runtime = this.processes.snapshot(projectId);
@@ -708,15 +415,7 @@ export class ControlService {
         reservation: this.store.getActiveReservation(project.id),
         worktrees,
         storage: this.storage?.snapshots(project.id, worktreePaths) ?? [],
-        testPresets: worktrees.map((worktree): WorktreeTestPresets => {
-          try {
-            const presets = this.testCommands.discover(worktree.path)
-              .map((preset) => ({ ...preset, profile: this.testProfileFor(project, preset).name }));
-            return { worktreePath: worktree.path, presets, error: null };
-          } catch (error) {
-            return { worktreePath: worktree.path, presets: [], error: error instanceof Error ? error.message : String(error) };
-          }
-        }),
+        testPresets: worktrees.map((worktree) => this.verification.discoverPresets(project, worktree.path)),
         testRuns: this.store.listTestRuns(project.id, 20),
       };
     } catch (error) {
@@ -733,84 +432,4 @@ export class ControlService {
     }
   }
 
-  private resolveWorktree(project: Project, worktrees: Worktree[], requested?: string): Worktree {
-    const path = requested ?? project.selectedWorktreePath ?? worktrees[0]?.path;
-    const selected = worktrees.find((worktree) => worktree.path === path);
-    if (!selected) throw new Error("Worktree nie należy do zarejestrowanego repozytorium lub już nie istnieje.");
-    if (selected.prunable) throw new Error("Nie można uruchomić uszkodzonego worktree oznaczonego jako prunable.");
-    return selected;
-  }
-
-  private assertReservationAllows(projectId: string, worktreePath: string | null, actor: OperationActor): void {
-    const reservation = this.store.authorizeReservation(
-      projectId,
-      actor.owner,
-      actor.leaseToken ? leaseTokenHash(actor.leaseToken) : undefined,
-    );
-    if (reservation && reservation.worktreePath !== worktreePath) {
-      throw new Error(`Projekt jest zablokowany na ${basename(reservation.worktreePath)} przez ${reservation.owner}.`);
-    }
-  }
-
-  private requireProject(id: string): Project {
-    const project = this.store.getProject(id);
-    if (!project) throw new Error("Nie znaleziono projektu.");
-    return project;
-  }
-
-  private requireTests(): TestJobManager {
-    if (!this.tests) throw new Error("Kolejka testów nie jest dostępna w tym trybie kontrolera.");
-    return this.tests;
-  }
-
-  private acquireCapacity(project: Project): void {
-    const status = this.capacityStatus();
-    if (status.holders.some(({ projectId }) => projectId === project.id)) {
-      this.pendingStarts.add(project.id);
-      return;
-    }
-    if (status.enabled && status.used >= status.limit) {
-      const holders = status.holders.map(({ projectName }) => projectName).join(", ");
-      throw new Error(`Osiągnięto limit ${status.limit} uruchomionych serwerów. Aktywne: ${holders || "brak"}.`);
-    }
-    this.pendingStarts.add(project.id);
-  }
-
-  private capacityStatus(snapshots?: ProjectSnapshot[]): ServerCapacityStatus {
-    const settings = this.store.getServerCapacitySettings();
-    const projects: Array<{ project: Pick<Project, "id" | "name">; runtime: ProjectSnapshot["runtime"] }> = snapshots
-      ?? this.store.listProjects().map((project) => ({
-        project,
-        runtime: this.processes.snapshot(project.id),
-      }));
-    const holders = projects.flatMap(({ project, runtime }) => {
-      const pending = this.pendingStarts.has(project.id);
-      if (!pending && !runtime.pid && runtime.phase !== "starting" && runtime.phase !== "running" && runtime.phase !== "stopping") return [];
-      const phase: ServerCapacityStatus["holders"][number]["phase"] = runtime.phase === "starting" || runtime.phase === "running" || runtime.phase === "stopping"
-        ? runtime.phase
-        : runtime.pid ? "stopping" : "starting";
-      return [{
-        projectId: project.id,
-        projectName: project.name,
-        phase,
-      }];
-    });
-    return {
-      ...settings,
-      used: holders.length,
-      available: settings.enabled ? Math.max(0, settings.limit - holders.length) : null,
-      holders,
-    };
-  }
-
-  private async serialized<T>(projectId: string, operation: () => Promise<T>): Promise<T> {
-    const previous = this.locks.get(projectId) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(operation);
-    this.locks.set(projectId, current);
-    try {
-      return await current;
-    } finally {
-      if (this.locks.get(projectId) === current) this.locks.delete(projectId);
-    }
-  }
 }

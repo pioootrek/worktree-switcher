@@ -1,0 +1,106 @@
+import type { GitWorktreeReader } from "@/server/git-worktrees";
+import { type LogWriter } from "@/server/log-writer";
+import { resolveTestEnvironment } from "@/server/modules/environments";
+import type { StateStore } from "@/server/state-store";
+import type { ProjectTestCommandResolver } from "@/server/test-command";
+import type { TestJobManager } from "@/server/test-job-manager";
+import type { Project, TestQueueStatus, TestRun, WorktreeTestPresets } from "@/shared/contracts";
+import { testProfileFor } from "../environments";
+import { type LifecycleAccess, type OperationActor } from "../lifecycle";
+
+export class VerificationService {
+  constructor(
+    private readonly store: Pick<StateStore, "getTestQueueSettings" | "countTestRuns" | "getTestRun">,
+    private readonly git: Pick<GitWorktreeReader, "list">,
+    private readonly logs: Pick<LogWriter, "controller">,
+    private readonly testCommands: Pick<ProjectTestCommandResolver, "resolve" | "discover">,
+    private readonly lifecycle: LifecycleAccess,
+    private readonly tests?: Pick<TestJobManager, "status" | "setLimit" | "enqueue" | "cancel">,
+  ) {}
+
+  testQueueStatus(): TestQueueStatus {
+    if (this.tests) return this.tests.status();
+    return {
+      ...this.store.getTestQueueSettings(),
+      running: this.store.countTestRuns(["running"]),
+      queued: this.store.countTestRuns(["queued"]),
+    };
+  }
+
+  setTestQueueLimit(limit: number): TestQueueStatus {
+    const status = this.requireTests().setLimit(limit);
+    this.logs.controller("test_queue.updated", { limit });
+    return status;
+  }
+
+  async enqueueTest(
+    projectId: string,
+    worktreePath: string,
+    presetId: string,
+    actor: OperationActor = { owner: "local-user" },
+    idempotencyKey?: string,
+  ): Promise<TestRun> {
+    return this.lifecycle.serialized(projectId, async () => {
+      const project = this.lifecycle.requireProject(projectId);
+      const worktrees = await this.git.list(project.repositoryPath);
+      const worktree = this.lifecycle.resolveWorktree(project, worktrees, worktreePath);
+      this.lifecycle.assertReservationAllows(projectId, worktree.path, actor);
+      const command = this.testCommands.resolve(worktree.path, presetId);
+      const environment = resolveTestEnvironment({
+        project,
+        worktree,
+        profile: testProfileFor(project, command.preset),
+      });
+      const run = this.requireTests().enqueue({
+        projectId,
+        worktree,
+        command,
+        environment,
+        actor: actor.owner,
+        idempotencyKey,
+      });
+      this.logs.controller("test_run.queued", {
+        runId: run.id,
+        projectId,
+        worktreePath: worktree.path,
+        presetId,
+        actor: actor.owner,
+        environmentMode: environment.mode,
+        environmentProfile: environment.profile,
+        inheritedServerProfile: environment.inheritedServerProfile,
+        variableNames: environment.variableNames,
+      });
+      return run;
+    });
+  }
+
+  cancelTest(runId: string, actor: OperationActor = { owner: "local-user" }): TestRun {
+    const run = this.store.getTestRun(runId);
+    if (!run) throw new Error("Nie znaleziono uruchomienia testu.");
+    this.lifecycle.requireProject(run.projectId);
+    const cancelled = this.requireTests().cancel(runId, actor.owner);
+    this.logs.controller("test_run.cancelled", { runId, projectId: run.projectId, actor: actor.owner });
+    return cancelled;
+  }
+
+  testRun(runId: string): TestRun {
+    const run = this.store.getTestRun(runId);
+    if (!run) throw new Error("Nie znaleziono uruchomienia testu.");
+    return run;
+  }
+
+  private requireTests(): NonNullable<VerificationService["tests"]> {
+    if (!this.tests) throw new Error("Kolejka testów nie jest dostępna w tym trybie kontrolera.");
+    return this.tests;
+  }
+
+  discoverPresets(project: Project, worktreePath: string): WorktreeTestPresets {
+    try {
+      const presets = this.testCommands.discover(worktreePath)
+        .map((preset) => ({ ...preset, profile: testProfileFor(project, preset).name }));
+      return { worktreePath, presets, error: null };
+    } catch (error) {
+      return { worktreePath, presets: [], error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+}
