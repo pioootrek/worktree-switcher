@@ -1,3 +1,4 @@
+import * as fsPromises from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,6 +7,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FileLogWriter } from "./log-writer";
+
+vi.mock("node:fs/promises", async (importOriginal) => ({
+  ...await importOriginal<typeof import("node:fs/promises")>(),
+}));
 
 const directories: string[] = [];
 
@@ -105,4 +110,37 @@ it("refuses a symlinked test-log directory", () => {
   mkdirSync(join(directory, "outside"));
   symlinkSync(join(directory, "outside"), join(directory, "tests"));
   expect(() => new FileLogWriter(directory)).toThrow("zwykłym katalogiem");
+});
+
+it("runs a prune requested between the final scan check and promise settlement", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "switcher-log-prune-handoff-"));
+  directories.push(directory);
+  const logs = new FileLogWriter(directory);
+  const id = randomUUID();
+  const path = join(directory, "tests", `${id}.log`);
+  writeFileSync(path, "expired output");
+  let subsequent: Promise<void> | undefined;
+  const scan = vi.spyOn(fsPromises, "opendir").mockImplementationOnce(async () => ({
+    [Symbol.asyncIterator]() {
+      return {
+        next() {
+          // The first microtask precedes the loop's done continuation; the
+          // second lands after its final condition but before promise reactions.
+          queueMicrotask(() => queueMicrotask(() => {
+            subsequent = logs.pruneTests(() => false);
+          }));
+          return Promise.resolve({ done: true, value: undefined });
+        },
+      };
+    },
+  }) as Awaited<ReturnType<typeof fsPromises.opendir>>);
+  try {
+    await logs.pruneTests(() => true);
+    await subsequent;
+    expect(existsSync(path)).toBe(false);
+    expect(scan).toHaveBeenCalledTimes(2);
+  } finally {
+    scan.mockRestore();
+    await logs.close();
+  }
 });

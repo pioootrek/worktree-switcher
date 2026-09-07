@@ -119,24 +119,31 @@ export class FileLogWriter implements LogWriter {
   pruneTests(isRetained: (runId: string) => boolean): Promise<void> {
     if (this.closing) return Promise.resolve();
     this.pruneAgain = true;
-    this.pruning ??= (async () => {
-      do {
-        this.pruneAgain = false;
-        const root = join(this.directory, "tests");
-        if (!lstatSync(root).isDirectory()) throw new Error("Katalog logów testów musi być zwykłym katalogiem.");
-        const entries = await opendir(root);
-        for await (const entry of entries) {
-          // Manager-generated UUIDs only; never follow symlinks or recurse.
-          const match = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.log(?:\.1)?$/.exec(entry.name);
-          if (!entry.isFile() || !match) continue;
-          const id = match[1];
-          if (this.testFiles.has(id) || this.finishing.has(id) || isRetained(id)) continue;
-          await unlink(join(root, entry.name)).catch((error: NodeJS.ErrnoException) => {
-            if (error.code !== "ENOENT") throw error;
-          });
-        }
-      } while (this.pruneAgain);
-    })().finally(() => { this.pruning = null; });
+    // Defer entry so even synchronous failures clear an already assigned promise.
+    this.pruning ??= Promise.resolve().then(async () => {
+      try {
+        do {
+          this.pruneAgain = false;
+          const root = join(this.directory, "tests");
+          if (!lstatSync(root).isDirectory()) throw new Error("Katalog logów testów musi być zwykłym katalogiem.");
+          const entries = await opendir(root);
+          for await (const entry of entries) {
+            // Manager-generated UUIDs only; never follow symlinks or recurse.
+            const match = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.log(?:\.1)?$/.exec(entry.name);
+            if (!entry.isFile() || !match) continue;
+            const id = match[1];
+            if (this.testFiles.has(id) || this.finishing.has(id) || isRetained(id)) continue;
+            await unlink(join(root, entry.name)).catch((error: NodeJS.ErrnoException) => {
+              if (error.code !== "ENOENT") throw error;
+            });
+          }
+        } while (this.pruneAgain);
+      } finally {
+        // Clear ownership in the same continuation as the final loop check.
+        // A request before promise settlement must start a fresh scan.
+        this.pruning = null;
+      }
+    });
     return this.pruning;
   }
 
