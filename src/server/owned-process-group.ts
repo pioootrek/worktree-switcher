@@ -9,10 +9,21 @@ const EXIT_POLL_INTERVAL_MS = 200;
 
 type ProcessGroupInspector = (processGroupId: number) => Promise<boolean>;
 
+export function processGroupSelectionArgs(
+  processGroupId: number,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  // procps-ng interprets a numeric `-g` as a session ID; its negative positional
+  // selector targets a PGID. BSD ps on macOS uses `-g` for an exact process group.
+  return platform === "linux"
+    ? ["-o", "stat=", `-${processGroupId}`]
+    : ["-o", "stat=", "-g", String(processGroupId)];
+}
+
 async function inspectProcessGroup(processGroupId: number): Promise<boolean> {
   let stdout: string;
   try {
-    ({ stdout } = await execute("ps", ["-o", "stat=", "-g", String(processGroupId)], {
+    ({ stdout } = await execute("ps", processGroupSelectionArgs(processGroupId), {
       timeout: 1_000,
       maxBuffer: 64 * 1024,
     }));

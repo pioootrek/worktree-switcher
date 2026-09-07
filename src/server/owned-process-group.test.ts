@@ -1,11 +1,16 @@
 import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { OwnedProcessGroup } from "./owned-process-group";
+import { OwnedProcessGroup, processGroupSelectionArgs } from "./owned-process-group";
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("OwnedProcessGroup", () => {
+  it("selects the exact process group with platform-specific ps syntax", () => {
+    expect(processGroupSelectionArgs(12345, "linux")).toEqual(["-o", "stat=", "-12345"]);
+    expect(processGroupSelectionArgs(12345, "darwin")).toEqual(["-o", "stat=", "-g", "12345"]);
+  });
+
   it("never signals a PID after observing that its original group disappeared", async () => {
     const kill = vi.spyOn(process, "kill").mockImplementation(() => {
       throw Object.assign(new Error("gone"), { code: "ESRCH" });
