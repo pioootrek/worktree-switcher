@@ -74,11 +74,11 @@ export class VerificationService {
     });
   }
 
-  cancelTest(runId: string, actor: OperationActor = { owner: "local-user" }): TestRun {
+  async cancelTest(runId: string, actor: OperationActor = { owner: "local-user" }): Promise<TestRun> {
     const run = this.store.getTestRun(runId);
     if (!run) throw new Error("Nie znaleziono uruchomienia testu.");
     this.lifecycle.requireProject(run.projectId);
-    const cancelled = this.requireTests().cancel(runId, actor.owner);
+    const cancelled = await this.requireTests().cancel(runId, actor.owner);
     this.logs.controller("test_run.cancelled", { runId, projectId: run.projectId, actor: actor.owner });
     return cancelled;
   }

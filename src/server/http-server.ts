@@ -368,7 +368,7 @@ export function createControllerServer(options: {
         const testCancelMatch = url.pathname.match(/^\/api\/test-runs\/([^/]+)\/cancel$/);
         if (request.method === "POST" && testCancelMatch) {
           strictRecord(await readJson(request), []);
-          const run = options.service.cancelTest(decodeURIComponent(testCancelMatch[1]));
+          const run = await options.service.cancelTest(decodeURIComponent(testCancelMatch[1]));
           options.events.publish();
           json(response, 200, { run });
           return;

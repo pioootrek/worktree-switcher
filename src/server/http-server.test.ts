@@ -39,7 +39,7 @@ async function fixture() {
   const setServerCapacity = vi.fn(() => capacity);
   const setTestQueueLimit = vi.fn(() => testQueue);
   const enqueueTest = vi.fn(async () => ({ id: "run-1", phase: "queued" }));
-  const cancelTest = vi.fn(() => ({ id: "run-1", phase: "cancelled" }));
+  const cancelTest = vi.fn(async () => ({ id: "run-1", phase: "cancelled" }));
   const testRun = vi.fn(() => ({ id: "run-1", phase: "running" }));
   const runtimeMetrics = vi.fn(() => ({ projects: [] }));
   const refreshWorktreeStorage = vi.fn(async () => undefined);
@@ -268,7 +268,9 @@ describe("controller access boundary", () => {
 
     expect((await fetch(`${base}/api/test-runs/run-1`, { headers })).status).toBe(200);
     expect(testRun).toHaveBeenCalledWith("run-1");
-    expect((await fetch(`${base}/api/test-runs/run-1/cancel`, { method: "POST", headers, body: "{}" })).status).toBe(200);
+    const cancelled = await fetch(`${base}/api/test-runs/run-1/cancel`, { method: "POST", headers, body: "{}" });
+    expect(cancelled.status).toBe(200);
+    expect(await cancelled.json()).toEqual({ run: { id: "run-1", phase: "cancelled" } });
     expect(cancelTest).toHaveBeenCalledWith("run-1");
   });
 

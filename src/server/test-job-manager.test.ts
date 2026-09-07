@@ -124,9 +124,9 @@ describe("TestJobManager", () => {
     const running = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: longRunning, environment: resolved(), actor: "agent:mcp:one" });
     await vi.waitFor(() => expect(store.getTestRun(running.id)?.logs).toContain("ready"));
     const queued = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/b"), command: command(20), environment: resolved(), actor: "agent:mcp:one" });
-    expect(() => manager.cancel(running.id, "agent:mcp:other")).toThrow("autor");
-    expect(manager.cancel(queued.id, "agent:mcp:one").phase).toBe("cancelled");
-    expect(manager.cancel(running.id, "agent:mcp:one")).toMatchObject({ phase: "running", finishedAt: null });
+    await expect(manager.cancel(running.id, "agent:mcp:other")).rejects.toThrow("autor");
+    expect((await manager.cancel(queued.id, "agent:mcp:one")).phase).toBe("cancelled");
+    expect(await manager.cancel(running.id, "agent:mcp:one")).toMatchObject({ phase: "running", finishedAt: null });
     await vi.waitFor(() => expect(manager.status().running).toBe(0));
     expect(store.getTestRun(running.id)?.phase).toBe("cancelled");
     await manager.shutdown();
@@ -141,7 +141,7 @@ describe("TestJobManager", () => {
     const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: delayedExit, environment: resolved(), actor: "local-user" });
     await vi.waitFor(() => expect(store.getTestRun(run.id)?.logs).toContain("ready"));
 
-    expect(manager.cancel(run.id, "local-user")).toMatchObject({ phase: "running", finishedAt: null });
+    expect(await manager.cancel(run.id, "local-user")).toMatchObject({ phase: "running", finishedAt: null });
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(store.getTestRun(run.id)).toMatchObject({ phase: "running", finishedAt: null });
     expect(manager.status().running).toBe(1);
@@ -160,13 +160,13 @@ describe("TestJobManager", () => {
     const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: job, environment: resolved(), actor: "local-user" });
     await vi.waitFor(() => expect(store.getTestRun(run.id)?.logs).toContain("ready"));
     const stop = vi.spyOn(OwnedProcessGroup.prototype, "stop").mockRejectedValue(new Error("inspection unavailable"));
-    manager.cancel(run.id, "local-user");
+    await manager.cancel(run.id, "local-user");
     await vi.waitFor(() => expect(store.getTestRun(run.id)?.error).toContain("inspection unavailable"));
     expect(manager.status().running).toBe(1);
     expect(store.getTestRun(run.id)).toMatchObject({ phase: "running", finishedAt: null });
     await expect(manager.shutdown()).rejects.toThrow("Nie potwierdzono");
     stop.mockRestore();
-    manager.cancel(run.id, "local-user");
+    await manager.cancel(run.id, "local-user");
     await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("cancelled"));
     await manager.shutdown();
     store.close();
@@ -208,7 +208,7 @@ describe("TestJobManager", () => {
     expect(store.getTestRun(run.id)).toMatchObject({ phase: "running", exitCode: 0, finishedAt: null });
 
     stop.mockRestore();
-    manager.cancel(run.id, "local-user");
+    await manager.cancel(run.id, "local-user");
 
     await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"));
     expect(store.getTestRun(run.id)?.error).toBeNull();
@@ -270,7 +270,7 @@ describe("TestJobManager", () => {
       const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: job, environment: resolved(), actor: "local-user" });
       await vi.waitFor(() => expect(store.getTestRun(run.id)?.logs).toContain("descendant-ready"), { timeout: 2_000 });
       const shutdown = mode === "shutdown" ? manager.shutdown() : null;
-      if (mode === "cancel") manager.cancel(run.id, "local-user");
+      if (mode === "cancel") await manager.cancel(run.id, "local-user");
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(manager.status().running).toBe(1);
       expect(store.getTestRun(run.id)).toMatchObject({ phase: "running", finishedAt: null });
@@ -310,7 +310,7 @@ describe("TestJobManager", () => {
     const first = manager.enqueue(input);
     expect(manager.enqueue(input).id).toBe(first.id);
     expect(() => manager.enqueue({ ...input, command: { ...input.command, preset: { ...input.command.preset, id: "node:build" } } })).toThrow("idempotencji");
-    manager.cancel(first.id, "local-user");
+    await manager.cancel(first.id, "local-user");
     await manager.shutdown();
     store.close();
     managers.splice(managers.indexOf(manager), 1);
