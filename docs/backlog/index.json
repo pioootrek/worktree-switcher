@@ -12,16 +12,6 @@
       "type": "fix"
     },
     {
-      "area": "process-manager",
-      "id": "FIX-20260905-test-log-lifecycle",
-      "path": "fix/FIX-20260905-test-log-lifecycle.json",
-      "priority": "now",
-      "risk_level": "medium",
-      "status": "open",
-      "title": "Close completed test logs and bound their retained resources",
-      "type": "fix"
-    },
-    {
       "area": "distribution",
       "id": "FEAT-20260829-controller-https",
       "path": "feature/FEAT-20260829-controller-https.json",
