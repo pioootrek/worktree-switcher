@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TestCommand } from "./test-command";
 import type { Worktree } from "@/shared/contracts";
+import { OwnedProcessGroup } from "./owned-process-group";
 import { nullLogWriter } from "./log-writer";
 import { SqliteStateStore } from "./sqlite-store";
 import { TestJobManager } from "./test-job-manager";
@@ -151,6 +152,141 @@ describe("TestJobManager", () => {
     store.close();
     managers.splice(managers.indexOf(manager), 1);
   });
+
+  it("keeps the worktree occupied on cleanup failure and retries cancellation", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    const job = command(20);
+    job.args = ["-e", "console.log('ready'); setInterval(() => {}, 1000)"];
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: job, environment: resolved(), actor: "local-user" });
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.logs).toContain("ready"));
+    const stop = vi.spyOn(OwnedProcessGroup.prototype, "stop").mockRejectedValue(new Error("inspection unavailable"));
+    manager.cancel(run.id, "local-user");
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.error).toContain("inspection unavailable"));
+    expect(manager.status().running).toBe(1);
+    expect(store.getTestRun(run.id)).toMatchObject({ phase: "running", finishedAt: null });
+    await expect(manager.shutdown()).rejects.toThrow("Nie potwierdzono");
+    stop.mockRestore();
+    manager.cancel(run.id, "local-user");
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("cancelled"));
+    await manager.shutdown();
+    store.close();
+    managers.splice(managers.indexOf(manager), 1);
+  });
+
+  it("automatically retries transient cleanup failure without changing a passed result", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    const stop = vi.spyOn(OwnedProcessGroup.prototype, "stop")
+      .mockRejectedValueOnce(new Error("inspection unavailable"));
+    const run = manager.enqueue({
+      projectId: project.id,
+      worktree: worktree("/tmp/a"),
+      command: command(20),
+      environment: resolved(),
+      actor: "local-user",
+    });
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"), { timeout: 2_000 });
+    expect(store.getTestRun(run.id)).toMatchObject({ error: null, exitCode: 0 });
+    expect(stop).toHaveBeenCalledTimes(2);
+    await manager.shutdown();
+    store.close();
+    managers.splice(managers.indexOf(manager), 1);
+  });
+
+  it("preserves an observed passed result when cleanup is retried explicitly", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    const stop = vi.spyOn(OwnedProcessGroup.prototype, "stop")
+      .mockRejectedValue(new Error("inspection unavailable"));
+    const run = manager.enqueue({
+      projectId: project.id,
+      worktree: worktree("/tmp/a"),
+      command: command(20),
+      environment: resolved(),
+      actor: "local-user",
+    });
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.error).toContain("inspection unavailable"));
+    expect(store.getTestRun(run.id)).toMatchObject({ phase: "running", exitCode: 0, finishedAt: null });
+
+    stop.mockRestore();
+    manager.cancel(run.id, "local-user");
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"));
+    expect(store.getTestRun(run.id)?.error).toBeNull();
+    await manager.shutdown();
+    store.close();
+    managers.splice(managers.indexOf(manager), 1);
+  });
+
+  it("bounds output-pipe close after the owned process group has exited", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    const daemonized = command(20);
+    daemonized.args = ["-e", `
+      const child = require('node:child_process').spawn(
+        process.execPath,
+        ['-e', "setTimeout(() => console.log('late-daemon-output'), 1500); setTimeout(() => process.exit(0), 2000)"],
+        { detached: true, stdio: ['ignore', 1, 2] },
+      );
+      child.unref();
+    `];
+    const run = manager.enqueue({
+      projectId: project.id,
+      worktree: worktree("/tmp/a"),
+      command: daemonized,
+      environment: resolved(),
+      actor: "local-user",
+    });
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("passed"), { timeout: 1_700 });
+    expect(manager.status().running).toBe(0);
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    expect(store.getTestRun(run.id)?.logs).not.toContain("late-daemon-output");
+    await manager.shutdown();
+    store.close();
+    managers.splice(managers.indexOf(manager), 1);
+  });
+
+  it.each(["cancel", "timeout", "launcher-exit", "shutdown"])(
+    "retains the queue slot until a silent stubborn descendant exits: %s",
+    async (mode) => {
+      const { store, project, manager, worktree, command } = fixture();
+      const job = command(20);
+      const heartbeat = join(project.repositoryPath, "heartbeat");
+      const descendant = `
+        process.on('SIGTERM', () => {});
+        const fs = require('node:fs');
+        const beat = () => fs.writeFileSync(${JSON.stringify(heartbeat)}, String(Date.now()));
+        beat(); setInterval(beat, 25); process.send('ready');
+      `;
+      job.args = ["-e", `
+        const child = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}],
+          { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+        child.on('message', () => {
+          console.log('descendant-ready');
+          ${mode === "launcher-exit" ? "process.exit(0);" : ""}
+        });
+        process.on('SIGTERM', () => process.exit(0));
+      `];
+      job.preset.timeoutMs = mode === "timeout" ? 800 : 15_000;
+      const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: job, environment: resolved(), actor: "local-user" });
+      await vi.waitFor(() => expect(store.getTestRun(run.id)?.logs).toContain("descendant-ready"), { timeout: 2_000 });
+      const shutdown = mode === "shutdown" ? manager.shutdown() : null;
+      if (mode === "cancel") manager.cancel(run.id, "local-user");
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(manager.status().running).toBe(1);
+      expect(store.getTestRun(run.id)).toMatchObject({ phase: "running", finishedAt: null });
+      await vi.waitFor(() => expect(manager.status().running).toBe(0), { timeout: 6_000 });
+      await shutdown;
+      expect(store.getTestRun(run.id)?.phase).toBe(
+        mode === "timeout" ? "timed_out" : mode === "launcher-exit" ? "passed" : "cancelled",
+      );
+      const lastBeat = readFileSync(heartbeat, "utf8");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(readFileSync(heartbeat, "utf8")).toBe(lastBeat);
+      await manager.shutdown();
+      store.close();
+      managers.splice(managers.indexOf(manager), 1);
+    }, 12_000,
+  );
 
   it("debounces persisted output while retaining the bounded final tail", async () => {
     const { store, project, manager, worktree, command } = fixture();

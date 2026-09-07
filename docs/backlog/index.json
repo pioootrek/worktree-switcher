@@ -13,16 +13,6 @@
     },
     {
       "area": "process-manager",
-      "id": "FIX-20260905-owned-process-tree-stop",
-      "path": "fix/FIX-20260905-owned-process-tree-stop.json",
-      "priority": "now",
-      "risk_level": "high",
-      "status": "open",
-      "title": "Confirm owned process-group exit before reporting a stopped server",
-      "type": "fix"
-    },
-    {
-      "area": "process-manager",
       "id": "FIX-20260905-test-log-lifecycle",
       "path": "fix/FIX-20260905-test-log-lifecycle.json",
       "priority": "now",

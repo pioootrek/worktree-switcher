@@ -51,11 +51,11 @@ function fixture(count = 3, onStart: (project: Project) => Promise<void> = async
   const start = vi.fn(async (project: Project, path: string) => {
     const runtime = runtimes.get(project.id)!;
     runtime.phase = "starting";
+    runtime.pid = 1000 + projects.indexOf(project);
     runtime.worktreePath = path;
     try {
       await onStart(project);
       runtime.phase = "running";
-      runtime.pid = 1000 + projects.indexOf(project);
     } catch (error) {
       runtime.phase = "failed";
       runtime.pid = null;
@@ -90,6 +90,16 @@ function fixture(count = 3, onStart: (project: Project) => Promise<void> = async
 }
 
 describe("ControlService server capacity", () => {
+  it("closes persistent state after managed-process cleanup fails", async () => {
+    const { service, store, processes } = fixture(1);
+    const close = vi.spyOn(store, "close");
+    vi.mocked(processes.stopAll).mockRejectedValueOnce(new Error("cleanup unconfirmed"));
+
+    await expect(service.shutdown()).rejects.toThrow("Nie zakończono poprawnie");
+
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it("stops an owned process before removing its project", async () => {
     const { service, store, projects, stop } = fixture(1);
     const removed = await service.removeProject(projects[0].id);
@@ -182,6 +192,10 @@ describe("ControlService server capacity", () => {
 
     const first = service.operate(projects[0].id, "start");
     await vi.waitFor(() => expect(runtimes.get(projects[0].id)?.phase).toBe("starting"));
+    expect(service.serverCapacity().holders).toContainEqual(expect.objectContaining({
+      projectId: projects[0].id,
+      phase: "starting",
+    }));
     await expect(service.operate(projects[1].id, "start")).rejects.toThrow("limit 1");
     expect(start).toHaveBeenCalledTimes(1);
     releaseStart();
@@ -201,6 +215,23 @@ describe("ControlService server capacity", () => {
     expect(stop).toHaveBeenCalledOnce();
     expect(start).toHaveBeenCalledTimes(2);
     expect(service.serverCapacity()).toMatchObject({ used: 1, available: 0 });
+    store.close();
+  });
+
+  it.each(["restart", "switch"] as const)("keeps capacity and blocks %s when cleanup fails", async (operation) => {
+    const { service, store, projects, runtimes, start, stop } = fixture(2);
+    service.setServerCapacity({ enabled: true, limit: 1 });
+    await service.operate(projects[0].id, "start");
+    stop.mockImplementationOnce(async (id) => {
+      runtimes.get(id)!.phase = "failed";
+      throw new Error("cleanup unconfirmed");
+    });
+    await expect(service.operate(projects[0].id, operation)).rejects.toThrow("cleanup unconfirmed");
+    expect(service.serverCapacity()).toMatchObject({ used: 1, available: 0, holders: [{ phase: "stopping" }] });
+    await expect(service.operate(projects[1].id, "start")).rejects.toThrow("limit 1");
+    expect(start).toHaveBeenCalledTimes(1);
+    await service.operate(projects[0].id, "stop");
+    expect(service.serverCapacity().used).toBe(0);
     store.close();
   });
 

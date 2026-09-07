@@ -8,12 +8,16 @@ import { defaultProcessResourceSampler, type ProcessResourceSampler, type RawRes
 import { inheritedRuntimeEnvironment } from "./runtime-environment";
 import { portInUseFailure, processExitFailure, spawnFailure, timeoutFailure } from "./runtime-failure";
 
+import { OwnedProcessGroup } from "./owned-process-group";
+
 const MAX_LOG_LINES = 400;
 const DEFAULT_SAMPLE_INTERVAL_MS = 5_000;
 const DEFAULT_MAX_HISTORY_POINTS = 60;
 
 type RuntimeEntry = RuntimeSnapshot & {
   child: ChildProcess | null;
+  group: OwnedProcessGroup | null;
+  cleanup: Promise<void> | null;
   projectId: string;
   resourceTimer: NodeJS.Timeout | null;
   previousResourceSample: RawResourceSample | null;
@@ -52,6 +56,8 @@ function emptyRuntime(projectId = "unknown"): RuntimeEntry {
     logs: [],
     resources: emptyResources(),
     child: null,
+    group: null,
+    cleanup: null,
     resourceTimer: null,
     previousResourceSample: null,
   };
@@ -120,7 +126,7 @@ export class ProcessManager {
 
   async start(project: Project, worktreePath: string): Promise<void> {
     const current = this.runtimes.get(project.id) ?? emptyRuntime(project.id);
-    if (current.child) throw new Error("Serwer projektu już działa.");
+    if (current.group || current.cleanup) throw new Error("Serwer projektu już działa.");
     if (await isPortOpen(project.port)) {
       const runtime = { ...emptyRuntime(project.id), worktreePath, startedAt: new Date().toISOString() };
       this.runtimes.set(project.id, runtime);
@@ -151,34 +157,35 @@ export class ProcessManager {
       stdio: ["ignore", "pipe", "pipe"],
     });
     runtime.child = child;
+    runtime.group = new OwnedProcessGroup(child);
     runtime.pid = child.pid ?? null;
     runtime.resources = emptyResources(this.resourceSampler.supported ? "unavailable" : "unsupported", this.memoryWarningThresholdBytes);
     if (runtime.pid) this.startResourceMonitoring(runtime);
     child.stdout?.on("data", (chunk: Buffer) => this.appendChunk(runtime, chunk));
     child.stderr?.on("data", (chunk: Buffer) => this.appendChunk(runtime, chunk));
     child.once("error", (error) => {
-      this.stopResourceMonitoring(runtime);
-      runtime.child = null;
-      runtime.pid = null;
-      this.markFailed(runtime, spawnFailure(project, error));
+      if (!child.pid) {
+        runtime.group = null;
+        runtime.child = null;
+        runtime.pid = null;
+        this.markFailed(runtime, spawnFailure(project, error));
+      }
     });
     child.once("exit", (code, signal) => {
-      this.stopResourceMonitoring(runtime);
       runtime.child = null;
-      runtime.pid = null;
-      if (runtime.phase !== "stopping" && runtime.phase !== "stopped" && runtime.phase !== "failed") {
-        this.markFailed(runtime, processExitFailure(project, runtime.logs, code, signal));
-      } else {
-        runtime.phase = "stopped";
-        this.onChange();
-      }
+      if (runtime.cleanup || !runtime.group) return;
+      const failure = processExitFailure(project, runtime.logs, code, signal);
+      void this.cleanupRuntime(runtime).then(() => this.markFailed(runtime, failure), () => undefined);
     });
     this.onChange();
 
     const deadline = Date.now() + project.startupTimeoutMs;
     while (Date.now() < deadline) {
-      if (!runtime.child || runtime.phase === "failed") throw new Error(runtime.error ?? "Proces zakończył się podczas startu.");
-      if (await this.isHealthy(project)) {
+      if (!runtime.child || runtime.phase !== "starting") {
+        if (runtime.cleanup) await runtime.cleanup;
+        throw new Error(runtime.error ?? "Proces zakończył się podczas startu.");
+      }
+      if (await this.isHealthy(project) && runtime.child && runtime.phase === "starting") {
         runtime.phase = "running";
         runtime.error = null;
         runtime.failure = null;
@@ -194,38 +201,47 @@ export class ProcessManager {
 
   async stop(projectId: string): Promise<void> {
     const runtime = this.runtimes.get(projectId);
-    if (!runtime?.child || !runtime.pid) {
-      if (runtime) {
-        runtime.phase = "stopped";
-        runtime.pid = null;
-        runtime.child = null;
-        runtime.failure = null;
-        this.onChange();
-      }
-      return;
-    }
+    if (!runtime) return;
+    await this.cleanupRuntime(runtime);
+  }
+
+  private cleanupRuntime(runtime: RuntimeEntry): Promise<void> {
+    if (runtime.cleanup) return runtime.cleanup;
     runtime.phase = "stopping";
     this.onChange();
-    const child = runtime.child;
-    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-    this.signal(runtime.pid, "SIGTERM");
-    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 3500))]);
-    if (runtime.child && runtime.pid) {
-      this.signal(runtime.pid, "SIGKILL");
-      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 1000))]);
-    }
-    runtime.child = null;
-    runtime.pid = null;
-    runtime.phase = "stopped";
-    runtime.error = null;
-    runtime.failure = null;
-    this.stopResourceMonitoring(runtime);
-    this.append(runtime, "process_stopped_by=worktree-switcher");
-    this.onChange();
+    runtime.cleanup = (async () => {
+      try {
+        await runtime.group?.stop();
+        runtime.group = null;
+        runtime.child = null;
+        runtime.pid = null;
+        runtime.phase = "stopped";
+        runtime.error = null;
+        runtime.failure = null;
+        this.stopResourceMonitoring(runtime);
+        this.append(runtime, "process_stopped_by=worktree-switcher");
+      } catch (error) {
+        // Keep the group and PID, so capacity stays occupied and stop can be retried.
+        this.markFailed(runtime, {
+          code: "process_exit",
+          title: "Nie udało się zatrzymać grupy procesów",
+          message: error instanceof Error ? error.message : String(error),
+          technicalDetails: `process_group=${runtime.pid} cleanup=unconfirmed`,
+          suggestion: "Ponów zatrzymanie i sprawdź logi kontrolera.",
+        });
+        throw error;
+      } finally {
+        runtime.cleanup = null;
+        this.onChange();
+      }
+    })();
+    return runtime.cleanup;
   }
 
   async stopAll(): Promise<void> {
-    await Promise.all([...this.runtimes.keys()].map((id) => this.stop(id)));
+    const results = await Promise.allSettled([...this.runtimes.keys()].map((id) => this.stop(id)));
+    const failures = results.filter((result) => result.status === "rejected");
+    if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Nie zakończono wszystkich serwerów.");
   }
 
   private async isHealthy(project: Project): Promise<boolean> {
@@ -238,14 +254,6 @@ export class ProcessManager {
       // A dev server may intentionally expose HTTPS or bind only to a LAN address.
       // An owned child that has opened the configured TCP port is ready enough for switching.
       return isPortOpen(project.port);
-    }
-  }
-
-  private signal(pid: number, signal: NodeJS.Signals): void {
-    try {
-      process.kill(process.platform === "win32" ? pid : -pid, signal);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
     }
   }
 
