@@ -235,6 +235,27 @@
   "notes": [
     {
       "author": "agent:codex",
+      "created": "2026-09-07",
+      "files": [
+        "audit-and-plan.md",
+        "browser-probe.spec.ts.txt",
+        "measurements.json",
+        "server-probe.test.ts.txt"
+      ],
+      "id": "NOTE-20260907-dashboard-refresh-audit",
+      "path": "notes/NOTE-20260907-dashboard-refresh-audit",
+      "status": "active",
+      "tags": [
+        "audit",
+        "dashboard",
+        "git",
+        "performance",
+        "reliability"
+      ],
+      "title": "Dashboard refresh audit, measurements and implementation instructions"
+    },
+    {
+      "author": "agent:codex",
       "created": "2026-09-05",
       "files": [
         "integration-context.md",
