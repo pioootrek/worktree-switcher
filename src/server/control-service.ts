@@ -168,6 +168,7 @@ export class ControlService {
       );
       await this.processes.stop(projectId);
       this.store.removeProject(projectId, actor.owner);
+      await this.tests?.pruneLogs();
       this.logs.controller("project.removed", {
         projectId: project.id,
         repositoryPath: project.repositoryPath,

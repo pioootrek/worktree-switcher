@@ -281,6 +281,10 @@ export class SqliteStateStore implements StateStore {
     return this.testRuns.listTestRuns(projectId, limit);
   }
 
+  hasTestRun(id: string): boolean {
+    return this.testRuns.hasTestRun(id);
+  }
+
   getTestRun(id: string): TestRun | null {
     return this.testRuns.getTestRun(id);
   }

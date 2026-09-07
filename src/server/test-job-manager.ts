@@ -42,6 +42,9 @@ export interface EnqueueTestInput {
 
 export class TestJobManager {
   private readonly active = new Map<string, ActiveRun>();
+  private readonly finalizations = new Map<string, Promise<void>>();
+  private logMaintenance: Promise<void> = Promise.resolve();
+  private pruneOperation: Promise<void> | null = null;
   private pumping = false;
   private closed = false;
   private outputNotification: NodeJS.Timeout | null = null;
@@ -53,6 +56,7 @@ export class TestJobManager {
     private readonly onChange: () => void = () => undefined,
   ) {
     this.store.markInterruptedTestRuns();
+    void this.pruneLogs();
   }
 
   status(): TestQueueStatus {
@@ -73,6 +77,7 @@ export class TestJobManager {
   }
 
   enqueue(input: EnqueueTestInput): TestRun {
+    if (this.closed) throw new Error("Kolejka testów jest zamknięta.");
     if (input.idempotencyKey) {
       const repeated = this.store.findTestRunByIdempotency(input.actor, input.idempotencyKey);
       if (repeated) {
@@ -118,6 +123,7 @@ export class TestJobManager {
     this.store.saveTestRun(run, input.idempotencyKey);
     this.environments.set(run.id, input.environment.environment);
     this.timeouts.set(run.id, input.command.preset.timeoutMs);
+    this.logs.openTest(run.id);
     this.write(run, `$ ${run.executable} ${run.args.join(" ")}`);
     this.persistNow(run);
     this.pump();
@@ -133,10 +139,7 @@ export class TestJobManager {
     if (run.phase === "queued") {
       run.phase = "cancelled";
       run.finishedAt = new Date().toISOString();
-      this.persistNow(run);
-      this.cleanup(run.id);
-      this.pump();
-      this.onChange();
+      void this.finish(run);
       return run;
     }
     if (!active || run.phase !== "running") return run;
@@ -153,6 +156,8 @@ export class TestJobManager {
     const unfinished = this.store.listPendingTestRuns();
     for (const run of unfinished) this.cancel(run.id, "local-user");
     await Promise.all([...this.active.values()].map((active) => this.complete(active)));
+    await Promise.all(this.finalizations.values());
+    await this.logMaintenance;
     if (this.active.size) throw new Error("Nie potwierdzono zakończenia wszystkich grup procesów testowych.");
   }
 
@@ -167,7 +172,7 @@ export class TestJobManager {
         if (this.closed) return;
         const limit = this.store.getTestQueueSettings().limit;
         const queued = this.store.listPendingTestRuns()
-          .filter(({ phase }) => phase === "queued")
+          .filter(({ id, phase }) => phase === "queued" && !this.finalizations.has(id))
           .sort((left, right) => left.queuedAt.localeCompare(right.queuedAt));
         const occupiedWorktrees = new Set([...this.active.values()].map(({ worktreePath }) => worktreePath));
         while (this.active.size < limit) {
@@ -205,7 +210,7 @@ export class TestJobManager {
       run.phase = "failed";
       run.error = error instanceof Error ? error.message : String(error);
       run.finishedAt = new Date().toISOString();
-      this.finish(run);
+      void this.finish(run);
       return;
     }
     const timeout = setTimeout(() => {
@@ -251,7 +256,7 @@ export class TestJobManager {
         run.phase = active.cancellationRequested ? "cancelled" : active.timedOut ? "timed_out"
           : run.exitCode === 0 && !run.error ? "passed" : "failed";
         if (run.phase === "failed" && !run.error) run.error = `Proces testowy zakończył się z kodem ${run.exitCode ?? run.signal ?? "unknown"}.`;
-        this.finish(run);
+        await this.finish(run);
       } catch (error) {
         // Non-terminal: preserve the active slot and worktree exclusion until cleanup succeeds.
         run.error = `Nie potwierdzono sprzątania procesów: ${error instanceof Error ? error.message : String(error)}`;
@@ -297,15 +302,44 @@ export class TestJobManager {
     active.child.stderr?.destroy();
   }
 
-  private finish(run: TestRun): void {
+  pruneLogs(): Promise<void> {
+    const pruning = this.logs.pruneTests((id) => this.store.hasTestRun(id));
+    // The writer coalesces overlapping scans; keep only one maintenance waiter.
+    if (pruning !== this.pruneOperation) {
+      this.pruneOperation = pruning;
+      this.logMaintenance = pruning.catch((error: unknown) => {
+        this.logs.controller("test_log.cleanup_failed", { error: String(error) });
+      });
+    }
+    return this.logMaintenance;
+  }
+
+  private finish(run: TestRun): Promise<void> {
+    const existing = this.finalizations.get(run.id);
+    if (existing) return existing;
     const active = this.active.get(run.id);
     if (active) clearTimeout(active.timeout);
-    this.persistNow(run);
-    this.active.delete(run.id);
     this.cleanup(run.id);
-    this.logs.controller("test_run.finished", { runId: run.id, projectId: run.projectId, phase: run.phase, exitCode: run.exitCode });
-    this.pump();
-    this.onChange();
+    const completion = (async () => {
+      try {
+        await this.logs.finishTest(run.id);
+      } catch (error) {
+        const message = `Nie udało się zapisać lub zamknąć logu testu: ${String(error)}`;
+        run.error = run.error ? `${run.error} ${message}` : message;
+        if (run.phase === "passed") run.phase = "failed";
+        this.logs.controller("test_log.finalization_failed", { runId: run.id, error: String(error) });
+      }
+      this.persistNow(run);
+      this.active.delete(run.id);
+      this.logs.controller("test_run.finished", { runId: run.id, projectId: run.projectId, phase: run.phase, exitCode: run.exitCode });
+      void this.pruneLogs();
+    })().finally(() => {
+      this.finalizations.delete(run.id);
+      this.pump();
+      this.onChange();
+    });
+    this.finalizations.set(run.id, completion);
+    return completion;
   }
 
   private appendChunk(run: TestRun, chunk: Buffer): void {
@@ -323,7 +357,7 @@ export class TestJobManager {
 
   private updateQueuePositions(): void {
     const queued = this.store.listPendingTestRuns()
-      .filter(({ phase }) => phase === "queued")
+      .filter(({ id, phase }) => phase === "queued" && !this.finalizations.has(id))
       .sort((left, right) => left.queuedAt.localeCompare(right.queuedAt));
     queued.forEach((run, index) => {
       const position = index + 1;

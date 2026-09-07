@@ -102,6 +102,10 @@ export class TestRunQueries {
     return (rows as TestRunRow[]).map(mapTestRun);
   }
 
+  hasTestRun(id: string): boolean {
+    return this.database.prepare("SELECT 1 FROM test_runs WHERE id = ?").get(id) !== undefined;
+  }
+
   getTestRun(id: string): TestRun | null {
     const row = this.database.prepare("SELECT * FROM test_runs WHERE id = ?").get(id) as TestRunRow | undefined;
     return row ? mapTestRun(row) : null;
@@ -147,10 +151,20 @@ export class TestRunQueries {
 
   markInterruptedTestRuns(): void {
     const now = new Date().toISOString();
-    this.database.prepare(`
-      UPDATE test_runs SET phase = 'interrupted', finished_at = ?, queue_position = NULL,
-        error = 'Kontroler został zatrzymany przed zakończeniem testu.'
-      WHERE phase IN ('queued', 'running')
-    `).run(now);
+    this.database.transaction(() => {
+      this.database.prepare(`
+        UPDATE test_runs SET phase = 'interrupted', finished_at = ?, queue_position = NULL,
+          error = 'Kontroler został zatrzymany przed zakończeniem testu.'
+        WHERE phase IN ('queued', 'running')
+      `).run(now);
+      this.database.prepare(`
+        DELETE FROM test_runs WHERE id IN (
+          SELECT id FROM (
+            SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY queued_at DESC, id DESC) AS rank
+            FROM test_runs WHERE phase NOT IN ('queued', 'running')
+          ) WHERE rank > 50
+        )
+      `).run();
+    })();
   }
 }

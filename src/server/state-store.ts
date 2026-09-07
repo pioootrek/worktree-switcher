@@ -62,6 +62,7 @@ export interface StateStore {
   countTestRuns(phases: TestRun["phase"][], projectId?: string, worktreePath?: string): number;
   listPendingTestRuns(): PendingTestRun[];
   listTestRuns(projectId?: string, limit?: number): TestRun[];
+  hasTestRun(id: string): boolean;
   getTestRun(id: string): TestRun | null;
   findTestRunByIdempotency(actor: string, idempotencyKey: string): TestRun | null;
   saveTestRun(run: TestRun, idempotencyKey?: string): void;
