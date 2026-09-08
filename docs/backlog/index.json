@@ -112,16 +112,6 @@
       "type": "feature"
     },
     {
-      "area": "core",
-      "id": "FIX-20260905-cache-lifecycle-serialization",
-      "path": "fix/FIX-20260905-cache-lifecycle-serialization.json",
-      "priority": "next",
-      "risk_level": "medium",
-      "status": "open",
-      "title": "Serialize cache deletion with worktree runtime and test activity",
-      "type": "fix"
-    },
-    {
       "area": "process-manager",
       "id": "FIX-20260905-test-run-source-attribution",
       "path": "fix/FIX-20260905-test-run-source-attribution.json",
@@ -223,6 +213,23 @@
     }
   ],
   "notes": [
+    {
+      "author": "agent:codex",
+      "created": "2026-09-08",
+      "files": [
+        "implementation-plan.md"
+      ],
+      "id": "NOTE-20260908-cache-lifecycle-plan",
+      "path": "notes/NOTE-20260908-cache-lifecycle-plan",
+      "status": "archived",
+      "tags": [
+        "cache",
+        "lifecycle",
+        "plan",
+        "reliability"
+      ],
+      "title": "Cache deletion lifecycle coordination implementation plan"
+    },
     {
       "author": "agent:codex",
       "created": "2026-09-07",

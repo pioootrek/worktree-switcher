@@ -20,6 +20,7 @@ import { acquireControllerLock } from "../server/controller-lock";
 import { DirectoryBrowser } from "../server/directory-browser";
 import { EventStream } from "../server/events";
 import { FileLogWriter } from "../server/log-writer";
+import { ProjectLifecycle } from "../server/modules/lifecycle";
 import { createMcpControllerServer } from "../server/mcp-http-server";
 import { SystemGitWorktreeReader } from "../server/git-worktrees";
 import { createControllerServer } from "../server/http-server";
@@ -103,12 +104,13 @@ async function main(): Promise<void> {
   const processes = new ProcessManager((projectId) => events.publish({ kinds: ["runtime"], projectIds: [projectId] }), logs, {
     memoryWarningThresholdBytes: memoryWarningMiB === null ? null : Math.round(memoryWarningMiB * 1024 * 1024),
   });
-  const storage = new WorktreeStorageManager(store, undefined, (projectId) => events.publish({ kinds: ["storage"], projectIds: [projectId] }));
+  const lifecycle = new ProjectLifecycle(store, processes);
+  const storage = new WorktreeStorageManager(store, lifecycle, undefined, (projectId) => events.publish({ kinds: ["storage"], projectIds: [projectId] }));
   const tests = new TestJobManager(store, logs, (projectId) => events.publish({
     kinds: ["tests", "controller"],
     ...(projectId ? { projectIds: [projectId] } : {}),
   }));
-  const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs, undefined, storage, undefined, undefined, tests);
+  const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs, undefined, storage, undefined, undefined, tests, lifecycle);
   const accessToken = randomBytes(32).toString("base64url");
   const sessionId = randomBytes(8).toString("hex");
   const mcpSessions = new Set<string>();

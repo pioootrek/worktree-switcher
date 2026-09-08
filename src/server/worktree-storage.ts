@@ -3,6 +3,7 @@ import { dirname, relative, resolve, sep } from "node:path";
 
 import type { CacheDeletionResult, SafeCacheKind, WorktreeStorageSnapshot } from "@/shared/contracts";
 import type { StateStore, WorktreeStorageSample } from "./state-store";
+import type { WorktreeMaintenanceAccess } from "./modules/lifecycle";
 
 const AUTO_REFRESH_MS = 6 * 60 * 60_000;
 const FAILED_ATTEMPT_COOLDOWN_MS = 30_000;
@@ -116,6 +117,7 @@ export class WorktreeStorageManager {
 
   constructor(
     private readonly store: StateStore,
+    private readonly lifecycle: WorktreeMaintenanceAccess,
     private readonly scanner: WorktreeDiskScanner = new FilesystemWorktreeDiskScanner(),
     private readonly onChange: (projectId: string) => void = () => undefined,
   ) {}
@@ -146,36 +148,42 @@ export class WorktreeStorageManager {
     return this.queued.has(this.key(projectId, worktreePath));
   }
 
-  queue(projectId: string, worktreePath: string, force = false): void {
-    if (this.closing) return;
+  queue(projectId: string, worktreePath: string, force = false): boolean {
+    if (this.closing) return false;
     const key = this.key(projectId, worktreePath);
-    if (this.queued.has(key)) return;
+    if (this.queued.has(key)) return false;
     if (!force) {
       const current = this.store.getWorktreeStorage(projectId, worktreePath);
-      if (current?.measuredAt && Date.now() - new Date(current.measuredAt).getTime() < AUTO_REFRESH_MS) return;
+      if (current?.measuredAt && Date.now() - new Date(current.measuredAt).getTime() < AUTO_REFRESH_MS) return false;
       const lastAttempt = this.lastAttempts.get(key);
-      if (lastAttempt !== undefined && Date.now() - lastAttempt < FAILED_ATTEMPT_COOLDOWN_MS) return;
+      if (lastAttempt !== undefined && Date.now() - lastAttempt < FAILED_ATTEMPT_COOLDOWN_MS) return false;
     }
+    const releaseScan = this.lifecycle.acquireScan(projectId, worktreePath);
+    if (!releaseScan) return false;
     this.queued.add(key);
     this.states.set(key, { status: "pending", error: null });
     this.tail = this.tail.catch(() => undefined).then(async () => {
-      if (this.closing) return;
-      this.lastAttempts.set(key, Date.now());
-      this.states.set(key, { status: "scanning", error: null });
-      this.onChange(projectId);
       try {
-        const sample = await this.scanner.scan(worktreePath, this.abortController.signal);
-        if (this.closing) return;
-        this.store.saveWorktreeStorage({ ...sample, projectId, measuredAt: new Date().toISOString() });
-        this.states.delete(key);
-      } catch (error) {
         this.lastAttempts.set(key, Date.now());
-        if (!this.closing) this.states.set(key, { status: "unavailable", error: error instanceof Error ? error.message : String(error) });
+        if (this.closing) return;
+        this.states.set(key, { status: "scanning", error: null });
+        this.onChange(projectId);
+        try {
+          const sample = await this.scanner.scan(worktreePath, this.abortController.signal);
+          if (this.closing) return;
+          this.store.saveWorktreeStorage({ ...sample, projectId, measuredAt: new Date().toISOString() });
+          this.states.delete(key);
+        } catch (error) {
+          this.lastAttempts.set(key, Date.now());
+          if (!this.closing) this.states.set(key, { status: "unavailable", error: error instanceof Error ? error.message : String(error) });
+        }
       } finally {
         this.queued.delete(key);
+        releaseScan();
         if (!this.closing) this.onChange(projectId);
       }
     });
+    return true;
   }
 
   async close(): Promise<void> {

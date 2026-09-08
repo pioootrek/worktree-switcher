@@ -1,6 +1,6 @@
 ---
 audience: "contributors implementing the controller and user interface"
-last_reviewed: "2026-09-02"
+last_reviewed: "2026-09-08"
 source_of_truth: "runtime, persistence, configuration, and distribution decisions"
 status: "active"
 ---
@@ -150,6 +150,16 @@ running, reserved, or being scanned. Browser input selects the `next` cache
 kind and never supplies the deletion target. Successful, missing-directory,
 and rejected attempts are written to the project audit trail. Cache deletion
 is not exposed through read-only MCP.
+
+Cache deletion, runtime changes, reservations, project removal, and test
+admission use the same per-project lifecycle serialization. The lifecycle also
+owns synchronous worktree maintenance and storage-scan permits keyed by project
+and Git-discovered worktree path. A scan holds its permit while pending and
+running; destructive maintenance and scan admission exclude each other without
+blocking unrelated projects. Automatic scans skip admission during maintenance,
+while explicit refresh waits on project serialization. Shutdown closes new
+lifecycle admission and drains accepted work before storage and persistence are
+closed.
 
 ## Persistence
 

@@ -17,6 +17,9 @@ export function leaseTokenHash(token: string): string {
 export class ProjectLifecycle {
   private readonly locks = new Map<string, Promise<unknown>>();
   private readonly pendingStarts = new Set<string>();
+  private readonly maintenance = new Set<string>();
+  private readonly scans = new Set<string>();
+  private closing = false;
 
   constructor(
     private readonly store: Pick<StateStore, "getProject" | "listProjects" | "authorizeReservation" | "getServerCapacitySettings">,
@@ -89,6 +92,7 @@ export class ProjectLifecycle {
   }
 
   async serialized<T>(projectId: string, operation: () => Promise<T>): Promise<T> {
+    if (this.closing) throw new Error("Kontroler jest zamykany i nie przyjmuje nowych operacji.");
     const previous = this.locks.get(projectId) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(operation);
     this.locks.set(projectId, current);
@@ -99,6 +103,27 @@ export class ProjectLifecycle {
     }
   }
 
+  acquireMaintenance(projectId: string, worktreePath: string): (() => void) | null {
+    if (this.closing) return null;
+    const key = this.worktreeKey(projectId, worktreePath);
+    if (this.maintenance.has(key) || this.scans.has(key)) return null;
+    this.maintenance.add(key);
+    return this.releaseFrom(this.maintenance, key);
+  }
+
+  acquireScan(projectId: string, worktreePath: string): (() => void) | null {
+    if (this.closing) return null;
+    const key = this.worktreeKey(projectId, worktreePath);
+    if (this.maintenance.has(key) || this.scans.has(key)) return null;
+    this.scans.add(key);
+    return this.releaseFrom(this.scans, key);
+  }
+
+  async closeAndDrain(): Promise<void> {
+    this.closing = true;
+    await Promise.allSettled([...this.locks.values()]);
+  }
+
   isProjectActive(projectId: string): boolean {
     const phase = this.processes.snapshot(projectId).phase;
     return phase === "running" || phase === "starting" || phase === "stopping";
@@ -107,7 +132,21 @@ export class ProjectLifecycle {
   releaseCapacity(projectId: string): void {
     this.pendingStarts.delete(projectId);
   }
+
+  private releaseFrom(owners: Set<string>, key: string): () => void {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      owners.delete(key);
+    };
+  }
+
+  private worktreeKey(projectId: string, worktreePath: string): string {
+    return `${projectId}\0${worktreePath}`;
+  }
 }
 
 export type LifecycleAccess = Pick<ProjectLifecycle, "serialized" | "requireProject" | "resolveWorktree" | "assertReservationAllows">;
 export type RuntimeCapacity = Pick<ProjectLifecycle, "acquireCapacity" | "releaseCapacity" | "capacityStatus" | "isProjectActive">;
+export type WorktreeMaintenanceAccess = Pick<ProjectLifecycle, "acquireMaintenance" | "acquireScan">;
