@@ -19,6 +19,7 @@ let root;
 let controller;
 let client;
 let forcedCleanup = false;
+let failureMessage;
 
 function argument(name) {
   const index = process.argv.indexOf(name);
@@ -301,28 +302,28 @@ async function main() {
 try {
   await main();
 } catch (error) {
-  const message = redact(error instanceof Error ? error.message : String(error));
+  failureMessage = redact(error instanceof Error ? error.message : String(error));
+  process.stderr.write(`Portable package smoke failed: ${failureMessage}\n`);
+  process.exitCode = 1;
+} finally {
+  try { await client?.close(); } catch {}
+  try { await stopController(); } catch { forcedCleanup = true; }
+  if (root) await rm(root, { recursive: true, force: true });
   const reportPath = argument("--report");
-  if (reportPath) {
+  if (failureMessage && reportPath) {
     try {
       await writeFile(resolve(reportPath), `${JSON.stringify({
         ok: false,
-        error: message,
+        error: failureMessage,
         node: process.version,
         platform: `${process.platform}-${process.arch}`,
         steps,
-        cleanup: forcedCleanup ? "forced" : "pending",
+        cleanup: forcedCleanup ? "forced" : "graceful",
         durationMs: Date.now() - startedAt,
       }, null, 2)}\n`);
     } catch (reportError) {
       process.stderr.write(`Could not write failure report: ${redact(reportError instanceof Error ? reportError.message : String(reportError))}\n`);
     }
   }
-  process.stderr.write(`Portable package smoke failed: ${message}\n`);
-  process.exitCode = 1;
-} finally {
-  try { await client?.close(); } catch {}
-  try { await stopController(); } catch { forcedCleanup = true; }
-  if (root) await rm(root, { recursive: true, force: true });
   if (forcedCleanup) process.exitCode = 1;
 }
