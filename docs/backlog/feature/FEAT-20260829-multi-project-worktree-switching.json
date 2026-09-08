@@ -5,10 +5,13 @@
   "links": {
     "related_ids": [
       "FEAT-20260829-cli-project-management",
+      "FEAT-20260829-dev-server-capacity",
       "FEAT-20260829-license-and-package-release",
+      "FEAT-20260905-portable-verification",
       "FIX-20260905-dashboard-refresh-amplification",
       "FIX-20260905-owned-process-tree-stop",
       "NOTE-20260829-readiness-assessment",
+      "NOTE-20260908-multi-project-verification-plan",
       "RWK-20260829-idle-memory-budget"
     ]
   },
@@ -102,6 +105,11 @@
       "author": "agent:codex",
       "date": "2026-09-05",
       "text": "Owner prioritizes personal utility, time/token efficiency, and a reusable public experiment. Core implementation exists; this record now owns remaining integrated evidence only. Broad market validation and a runtime rewrite are not prerequisites."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-08",
+      "text": "Analysis and implementation instructions are recorded in NOTE-20260908-multi-project-verification-plan/analysis-and-plan.md at baseline 8cf25aa. Existing browser tests use fixture HTTP/EventSource; add separate real-controller integration and five true browser E2E scenarios with real SQLite, Git worktrees and owned Node processes. Jointly verify capacity, reservation authority, stale targets, dirty warnings, failure isolation and shutdown. Preserve the fast fixture suite. The memory item still needs a reproducible measured budget, and owner-workflow evidence remains distinct from fixture automation. Planning only: no application suites, measurements or service changes performed."
     }
   ],
   "priority": "next",
@@ -120,7 +128,8 @@
   "scope": [
     "After the linked process and refresh fixes, exercise independent switching, stable ports, reservations, failure isolation, and accurate status with multiple fixture repositories.",
     "Keep the current single-controller architecture and one runtime slot per project. Treat custom launch configuration, test jobs, and distribution through their own items.",
-    "Check the owner's normal workflow and one portable fixture workflow. Public adoption targets are not a completion requirement."
+    "Check the owner's normal workflow and one portable fixture workflow. Public adoption targets are not a completion requirement.",
+    "Follow NOTE-20260908-multi-project-verification-plan for fixture boundaries, the integration matrix, real browser scenarios, delivery order and evidence requirements; coordinate portable CI without coupling clean-consumer smoke to source-only helpers."
   ],
   "source": "Product planning conversation on 2026-08-29",
   "status": "open",
@@ -131,7 +140,8 @@
     "Verify failures, stale worktrees, concurrent requests, and unknown port owners produce truthful status without affecting another project.",
     "Use the measurement procedure from RWK-20260829-idle-memory-budget. The historical 50 MiB absolute threshold is superseded; record runtime baseline, controller overhead, idle CPU, and bounded growth.",
     "Verify affected dashboard controls, keyboard focus, non-color state labels, and persistent dirty-worktree warnings in one focused browser pass.",
-    "Verify shutdown and switch remove complete owned process groups using the linked cleanup fix."
+    "Verify shutdown and switch remove complete owned process groups using the linked cleanup fix.",
+    "Run the proposed integration and real browser suites against one reviewed build; retain actual endpoint/boot identity and owned cleanup evidence, not only mocked runtime phases. Keep controlled adapter-failure tests explicitly distinguished from black-box runtime evidence."
   ],
   "value": [
     "A developer can move an entire local stack between branches from one dashboard without repeatedly navigating directories or disturbing unrelated services."

@@ -6,8 +6,10 @@
     "related_ids": [
       "FEAT-20260829-monitor-managed-memory",
       "FEAT-20260829-multi-project-worktree-switching",
+      "FEAT-20260905-portable-verification",
       "FIX-20260905-owned-process-tree-stop",
-      "NOTE-20260829-readiness-assessment"
+      "NOTE-20260829-readiness-assessment",
+      "NOTE-20260908-multi-project-verification-plan"
     ]
   },
   "notes": [
@@ -25,6 +27,11 @@
       "author": "agent:codex",
       "date": "2026-09-05",
       "text": "Re-scoped from implementation to remaining validation. Earlier notes already record the implemented capacity contract. Run the dependent cleanup fix first; backlog work does not authorize restarting the installed service."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-08",
+      "text": "Joint analysis and exact test matrix are in NOTE-20260908-multi-project-verification-plan/analysis-and-plan.md. Source inspection found capacityStatusCompact drops failed runtimes whose PID/ownership is retained, while full capacity still counts them; reproduce and correct this shared status discrepancy first. Refine historical acceptance: a failed start releases capacity only after confirmed owned cleanup, and an MCP claim can remain held when its runtime start is denied. Compare full, compact and operation-result capacity at stable barriers. No runtime reproduction or application tests were run for this plan; keep the item open until isolated real-process acceptance passes."
     }
   ],
   "priority": "next",
@@ -43,17 +50,19 @@
   "schema_version": 1,
   "scope": [
     "Exercise the existing semaphore through HTTP and MCP after owned-process cleanup is fixed. Keep reservations independent of capacity and preserve slots during switches.",
-    "Record isolated runtime evidence and close this item only when its existing contention/failure acceptance checks pass. Do not reimplement the semaphore or add production mode here."
+    "Record isolated runtime evidence and close this item only when its existing contention/failure acceptance checks pass. Do not reimplement the semaphore or add production mode here.",
+    "Use NOTE-20260908-multi-project-verification-plan for shared real-controller fixtures and controlled cleanup regressions. Resolve confirmed compact/full capacity disagreement without adding a second capacity counter or hydrating rich snapshots for routine compact reads."
   ],
   "source": "Product discussion on 2026-08-29",
   "status": "open",
   "title": "Validate the implemented server capacity with owned process cleanup",
   "type": "feature",
   "validation": [
-    "With capacity two, start two projects concurrently and verify a third start or stopped-project claim is rejected without spawning a process.",
+    "With capacity two, start two projects and verify a third HTTP start or MCP claim/start cannot spawn a process. Report any retained agent claim separately from the runtime capacity rejection.",
     "Verify two simultaneous requests for the last slot cannot both start, including requests arriving through HTTP and MCP.",
-    "Verify switching an already running project retains its slot and a failed start releases its slot exactly once.",
-    "Verify lowering capacity never terminates current processes and status consistently identifies every slot holder."
+    "Verify switching a running project retains its slot. A failed start releases that slot exactly once only after owned cleanup is confirmed; unconfirmed cleanup continues to occupy capacity and blocks a competing start.",
+    "Verify lowering capacity never terminates current processes and status consistently identifies every slot holder.",
+    "At stable barriers, full capacity, compact project status and runtime-operation results agree after unconfirmed cleanup and after successful recovery; persisted capacity settings survive an isolated controller restart."
   ],
   "value": [
     "Worktree Switcher remains an unobtrusive helper and prevents concurrent agents or projects from exhausting the development machine."
