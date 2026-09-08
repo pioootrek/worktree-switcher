@@ -45,6 +45,22 @@ export class ProjectLifecycle {
     }
   }
 
+  requireAgentClaim(projectId: string, reservationId: string, actor: OperationActor): import("@/shared/contracts").Reservation {
+    if (!actor.owner.startsWith("agent:mcp:") || !actor.leaseToken) {
+      throw new Error("An active MCP agent claim is required.");
+    }
+    let reservation;
+    try {
+      reservation = this.store.authorizeReservation(projectId, actor.owner, leaseTokenHash(actor.leaseToken));
+    } catch {
+      throw new Error("The MCP claim is stale, expired, or no longer active.");
+    }
+    if (!reservation || reservation.kind !== "agent" || reservation.id !== reservationId || reservation.projectId !== projectId) {
+      throw new Error("The MCP claim is stale, expired, or no longer active.");
+    }
+    return reservation;
+  }
+
   requireProject(id: string): Project {
     const project = this.store.getProject(id);
     if (!project) throw new Error("Nie znaleziono projektu.");
@@ -162,6 +178,6 @@ export class ProjectLifecycle {
   }
 }
 
-export type LifecycleAccess = Pick<ProjectLifecycle, "serialized" | "requireProject" | "resolveWorktree" | "assertReservationAllows">;
+export type LifecycleAccess = Pick<ProjectLifecycle, "serialized" | "requireProject" | "resolveWorktree" | "assertReservationAllows" | "requireAgentClaim">;
 export type RuntimeCapacity = Pick<ProjectLifecycle, "acquireCapacity" | "releaseCapacity" | "capacityStatus" | "isProjectActive">;
 export type WorktreeMaintenanceAccess = Pick<ProjectLifecycle, "acquireMaintenance" | "acquireScan">;

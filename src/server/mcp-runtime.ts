@@ -6,7 +6,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod/v4";
 
-import type { ProjectSnapshot } from "@/shared/contracts";
+import type { ClaimedRuntimeAction, ClaimedRuntimeReceipt, ProjectSnapshot } from "@/shared/contracts";
 import { localizeServerMessage } from "../i18n/server-errors";
 import type { ControlService } from "./control-service";
 
@@ -25,6 +25,15 @@ interface McpSession {
   claims: Map<string, ClaimSecret>;
   idempotencyTokens: Map<string, string>;
   lifetimeTimer: NodeJS.Timeout | null;
+  runtimeOperations: Map<string, RuntimeOperationEntry>;
+  closed: boolean;
+}
+
+interface RuntimeOperationEntry {
+  fingerprint: string;
+  promise: Promise<ClaimedRuntimeReceipt>;
+  settled: boolean;
+  counted: boolean;
 }
 
 function header(request: IncomingMessage, name: string): string | undefined {
@@ -72,6 +81,7 @@ function agentSnapshot(snapshot: ProjectSnapshot) {
 
 export class McpRuntime {
   private readonly sessions = new Map<string, McpSession>();
+  private runtimeOperationCount = 0;
 
   constructor(
     private readonly service: ControlService,
@@ -107,7 +117,10 @@ export class McpRuntime {
   async close(): Promise<void> {
     const sessions = [...this.sessions.values()];
     this.sessions.clear();
-    for (const session of sessions) this.clearTimers(session);
+    for (const session of sessions) {
+      this.clearTimers(session);
+      this.disposeRuntimeOperations(session);
+    }
     await Promise.allSettled(sessions.map((session) => session.server.close()));
   }
 
@@ -119,6 +132,8 @@ export class McpRuntime {
       claims: new Map(),
       idempotencyTokens: new Map(),
       lifetimeTimer: null,
+      runtimeOperations: new Map(),
+      closed: false,
     };
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: randomUUID,
@@ -137,6 +152,7 @@ export class McpRuntime {
       const sessionId = transport.sessionId;
       if (sessionId) this.sessions.delete(sessionId);
       this.clearTimers(session);
+      this.disposeRuntimeOperations(session);
       this.diagnostic("mcp.session_closed", { sessionId });
     };
     return session;
@@ -451,6 +467,27 @@ export class McpRuntime {
       });
     });
 
+    const registerRuntimeTool = (name: `${ClaimedRuntimeAction}_project`, action: ClaimedRuntimeAction, description: string) => {
+      server.registerTool(name, {
+        description,
+        inputSchema: {
+          projectId: z.string().uuid(),
+          reservationId: z.string().uuid(),
+          idempotencyKey: z.string().min(1).max(120),
+        },
+        annotations: { destructiveHint: true, idempotentHint: true },
+      }, async ({ projectId, reservationId, idempotencyKey }, extra) => {
+        const claim = this.requireClaim(session, projectId, reservationId);
+        const receipt = await english(() => this.runRuntimeOperation(
+          session, idempotencyKey, projectId, reservationId, action, claim, extra.signal,
+        ));
+        return jsonContent(receipt);
+      });
+    };
+    registerRuntimeTool("start_project", "start", "Start the managed server on this session's actively claimed worktree. Already running is a no-op.");
+    registerRuntimeTool("restart_project", "restart", "Restart the managed server on this session's actively claimed worktree while retaining its claim and capacity slot.");
+    registerRuntimeTool("stop_project", "stop", "Stop the managed server owned by this session's active claim. The claim remains held.");
+
     server.registerTool("renew_project_claim", {
       description: "Renew a claim owned by this MCP session without exposing its lease secret.",
       inputSchema: {
@@ -485,6 +522,56 @@ export class McpRuntime {
     const claim = session.claims.get(reservationId);
     if (!claim || claim.projectId !== projectId) throw new Error("This MCP session does not own the requested claim.");
     return claim;
+  }
+
+  private async runRuntimeOperation(
+    session: McpSession,
+    idempotencyKey: string,
+    projectId: string,
+    reservationId: string,
+    action: ClaimedRuntimeAction,
+    claim: ClaimSecret,
+    signal?: AbortSignal,
+  ): Promise<ClaimedRuntimeReceipt> {
+    const fingerprint = `${action}\0${projectId}\0${reservationId}`;
+    const existing = session.runtimeOperations.get(idempotencyKey);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) throw new Error("The idempotency key was already used for a different runtime operation.");
+      return { ...(await existing.promise), replayed: true };
+    }
+    if (session.closed) throw new Error("The MCP session is closed.");
+    if (session.runtimeOperations.size >= 64 || this.runtimeOperationCount >= 512) {
+      throw new Error("The runtime operation retry ledger is full. Start a new MCP session before submitting another operation.");
+    }
+    const entry: RuntimeOperationEntry = { fingerprint, promise: null as unknown as Promise<ClaimedRuntimeReceipt>, settled: false, counted: true };
+    this.runtimeOperationCount += 1;
+    entry.promise = this.service.operateClaimedRuntime(
+      projectId, reservationId, action, { owner: session.owner, leaseToken: claim.token }, signal, () => session.closed,
+    ).then((receipt) => {
+      entry.settled = true;
+      return receipt;
+    }, (error) => {
+      entry.settled = true;
+      throw error;
+    }).finally(() => {
+      if (session.closed) this.releaseRuntimeOperationEntry(session, idempotencyKey, entry);
+    });
+    session.runtimeOperations.set(idempotencyKey, entry);
+    return entry.promise;
+  }
+
+  private disposeRuntimeOperations(session: McpSession): void {
+    session.closed = true;
+    for (const [key, entry] of session.runtimeOperations) {
+      if (entry.settled) this.releaseRuntimeOperationEntry(session, key, entry);
+    }
+  }
+
+  private releaseRuntimeOperationEntry(session: McpSession, key: string, entry: RuntimeOperationEntry): void {
+    if (!entry.counted) return;
+    entry.counted = false;
+    session.runtimeOperations.delete(key);
+    this.runtimeOperationCount -= 1;
   }
 
   private scheduleRenewal(session: McpSession, claim: ClaimSecret): void {

@@ -74,9 +74,45 @@ describe("ControlService agent claims", () => {
     await expect(service.setProjectEnvironment(project.id, { FEATURE_MODE: "local" })).rejects.toThrow("agent:mcp:session-1");
     expect(stop).not.toHaveBeenCalled();
 
-    service.releaseAgentClaim(project.id, claim.reservation.id, "agent:mcp:session-1", claim.leaseToken);
+    await service.releaseAgentClaim(project.id, claim.reservation.id, "agent:mcp:session-1", claim.leaseToken);
     await service.operate(project.id, "stop");
     expect(stop).toHaveBeenCalledOnce();
+    store.close();
+  });
+
+  it("starts, restarts, and stops only the exact active agent claim", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-claimed-runtime-"));
+    directories.push(directory);
+    const store = new SqliteStateStore(join(directory, "state.sqlite3"));
+    const project = store.addProject({ name: "Web", repositoryPath: "/code/web", port: 3220, executable: "pnpm", args: ["run", "dev"] });
+    const worktree: Worktree = { path: "/code/web", head: "abc", shortHead: "abc", branch: "main", detached: false, locked: false, prunable: false, dirty: false };
+    const runtime: RuntimeSnapshot = {
+      phase: "stopped", pid: null, worktreePath: null, startedAt: null, error: null, failure: null, logs: [],
+      resources: { status: "idle", currentRssBytes: null, peakRssBytes: null, cpuPercent: null, processCount: null, sampledAt: null, sampleAgeSeconds: null, warningThresholdBytes: null, history: [] },
+    };
+    let nextPid = 100;
+    const start = vi.fn(async (_project, path: string, beforeSpawn?: () => void) => {
+      beforeSpawn?.(); runtime.phase = "running"; runtime.pid = nextPid++; runtime.worktreePath = path; runtime.startedAt = new Date().toISOString();
+    });
+    const stop = vi.fn(async () => { runtime.phase = "stopped"; runtime.pid = null; runtime.worktreePath = null; runtime.startedAt = null; });
+    const service = new ControlService(store, { list: vi.fn(async () => [worktree]) } as unknown as GitWorktreeReader,
+      { snapshot: () => ({ ...runtime }), start, stop } as unknown as ProcessManager, undefined,
+      { resolve: () => ({ preset: "node", executable: "pnpm", args: ["run", "dev"], portMethod: "environment", tls: { mode: "off", keyPath: null, certPath: null, caPath: null } }) });
+    const claim = await service.claimProject({ projectId: project.id, worktreePath: worktree.path, owner: "agent:mcp:runtime", reason: "Runtime test", idempotencyKey: "claim" });
+    const actor = { owner: "agent:mcp:runtime", leaseToken: claim.leaseToken };
+
+    const noop = await service.operateClaimedRuntime(project.id, claim.reservation.id, "start", actor);
+    expect(noop.outcome).toBe("noop");
+    expect(start).toHaveBeenCalledOnce();
+    const restarted = await service.operateClaimedRuntime(project.id, claim.reservation.id, "restart", actor);
+    expect(restarted).toMatchObject({ outcome: "completed", leaseHeld: true, occupiesCapacity: true });
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(stop).toHaveBeenCalledOnce();
+    const stopped = await service.operateClaimedRuntime(project.id, claim.reservation.id, "stop", actor);
+    expect(stopped).toMatchObject({ outcome: "completed", leaseHeld: true, occupiesCapacity: false });
+    expect((await service.operateClaimedRuntime(project.id, claim.reservation.id, "stop", actor)).outcome).toBe("noop");
+    await service.releaseAgentClaim(project.id, claim.reservation.id, actor.owner, claim.leaseToken);
+    await expect(service.operateClaimedRuntime(project.id, claim.reservation.id, "start", actor)).rejects.toThrow("stale");
     store.close();
   });
 

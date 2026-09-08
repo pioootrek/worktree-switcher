@@ -75,6 +75,23 @@ If another owner holds the project, do not stop its process, take its port, or
 try to bypass the reservation. Report the owner and conflict. Force release is
 intentionally unavailable through MCP.
 
+## Control a claimed runtime
+
+Use `start_project`, `restart_project`, or `stop_project` only when the task
+authorizes changing the development server. Each operation requires the active
+claim's project and reservation IDs plus an idempotency key. Reuse the same key
+only when retrying the same request after transport uncertainty; use a new key
+for a deliberate second restart or retry after a reported failure.
+
+The controller always targets the worktree pinned by the active claim. Start is
+a no-op when that runtime is already healthy, restart retains one capacity slot
+across its controlled stop/start, and stop retains the claim while releasing
+capacity after confirmed process-tree cleanup. A failed start or stop may retain
+both the claim and capacity, so inspect compact status and bounded runtime logs
+before deciding on another operation. Verify placement, phase, failure code,
+capacity, and `leaseHeld` after every operation; a replayed receipt is historical
+and should be followed by a current status read.
+
 ## Renew and release
 
 The MCP session renews its claims automatically. Use `renew_project_claim` only

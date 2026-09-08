@@ -13,6 +13,8 @@ import type {
   DashboardResponse,
   DashboardSection,
   ProjectSnapshot,
+  ClaimedRuntimeAction,
+  ClaimedRuntimeReceipt,
   ProjectSummary,
   ProjectView,
   RedactedTestEnvironmentProfile,
@@ -233,6 +235,13 @@ export class ControlService {
     return this.runtime.operate(projectId, operation, worktreePath, actor);
   }
 
+  async operateClaimedRuntime(
+    projectId: string, reservationId: string, action: ClaimedRuntimeAction, actor: OperationActor,
+    signal?: AbortSignal, sessionClosed?: () => boolean,
+  ): Promise<ClaimedRuntimeReceipt> {
+    return this.runtime.operateClaimed(projectId, reservationId, action, actor, signal, sessionClosed);
+  }
+
   async setProjectTls(projectId: string, input: NextTlsConfiguration): Promise<void> {
     await this.runtime.setProjectTls(projectId, input);
     this.invalidateDashboardMetadata(projectId);
@@ -398,9 +407,13 @@ export class ControlService {
     return reservation;
   }
 
-  releaseAgentClaim(projectId: string, reservationId: string, owner: string, leaseToken: string): void {
-    this.store.releaseAgentReservation(projectId, reservationId, owner, leaseTokenHash(leaseToken));
-    this.logs.controller("agent.claim_released", { projectId, reservationId, owner });
+  async releaseAgentClaim(projectId: string, reservationId: string, owner: string, leaseToken: string): Promise<void> {
+    await this.lifecycle.serialized(projectId, async () => {
+      this.lifecycle.requireProject(projectId);
+      this.lifecycle.requireAgentClaim(projectId, reservationId, { owner, leaseToken });
+      this.store.releaseAgentReservation(projectId, reservationId, owner, leaseTokenHash(leaseToken));
+      this.logs.controller("agent.claim_released", { projectId, reservationId, owner });
+    });
   }
 
   async projectSnapshot(projectId: string): Promise<ProjectSnapshot> {
