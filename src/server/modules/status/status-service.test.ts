@@ -35,7 +35,7 @@ function fixture(reservation: Reservation | null = null) {
     getTestQueueSettings: vi.fn(() => ({ limit: 1 })),
   };
   const processes = {
-    statusSummary: vi.fn(() => ({ phase, worktreePath: phase === "running" ? "/code/web" : null, startedAt: null, failureCode: null })),
+    statusSummary: vi.fn(() => ({ phase, worktreePath: phase === "running" ? "/code/web" : null, startedAt: null, failureCode: null, ownsProcess: phase === "running" })),
     logTail: vi.fn((_projectId: string, limit: number) => ({ lines: ["a", "b", "secret-ish detail"].slice(-limit), retainedLines: 3, truncated: limit < 3 })),
   };
   const service = new StatusService(store, processes,

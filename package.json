@@ -42,7 +42,9 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "test:modules": "vitest run src/server/modules src/server/infrastructure src/architecture.test.ts",
-    "test:ui": "playwright test"
+    "test:ui": "playwright test",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:e2e": "playwright test --config playwright.e2e.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
