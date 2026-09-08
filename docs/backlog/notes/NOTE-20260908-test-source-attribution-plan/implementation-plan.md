@@ -278,7 +278,7 @@ Focused tests cover clean/dirty real Git observations, A-to-B rejection without
 spawn, equal dirty evidence with command success, classification, persistence,
 migration recovery, and queue regressions. Completed verification:
 
-- `pnpm check`: 39 files and 215 tests passed.
+- `pnpm check`: 39 files and 221 tests passed after review follow-up.
 - `pnpm build`: static Next.js export and CLI bundle passed.
 - `pnpm test:ui`: 5 dashboard tests passed in English and Polish.
 

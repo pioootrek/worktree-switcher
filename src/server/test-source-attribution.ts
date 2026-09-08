@@ -14,7 +14,10 @@ export function pendingSourceEvidence(enqueue: TestSourceObservation): TestSourc
 
 export function compareSource(left: TestSourceObservation | null, right: TestSourceObservation | null): TestSourceComparison {
   if (!left || !right) return "unknown";
-  if (left.head !== right.head || left.branch !== right.branch || left.statusDigest !== right.statusDigest || left.dirty !== right.dirty) return "changed";
+  if ((left.head !== null && right.head !== null && left.head !== right.head)
+    || (left.branch !== null && right.branch !== null && left.branch !== right.branch)
+    || (left.statusDigest !== null && right.statusDigest !== null && left.statusDigest !== right.statusDigest)
+    || (left.dirty !== null && right.dirty !== null && left.dirty !== right.dirty)) return "changed";
   return left.complete && right.complete ? "match" : "unknown";
 }
 
@@ -31,7 +34,7 @@ function observationReasons(...observations: Array<TestSourceObservation | null>
 export function qualifySource(evidence: TestSourceEvidence): TestSourceEvidence {
   const queueComparison = compareSource(evidence.enqueue, evidence.preflight);
   const executionComparison = compareSource(evidence.preflight, evidence.finish);
-  const reasonCodes = new Set(observationReasons(evidence.enqueue, evidence.preflight, evidence.finish));
+  const reasonCodes = new Set([...evidence.reasonCodes, ...observationReasons(evidence.enqueue, evidence.preflight, evidence.finish)]);
   if (queueComparison === "changed") reasonCodes.add("source_changed_before_start");
   if (executionComparison === "changed") reasonCodes.add("source_changed_during_execution");
   const complete = evidence.enqueue?.complete && evidence.preflight?.complete && evidence.finish?.complete;

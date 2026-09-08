@@ -83,7 +83,7 @@ export class TestJobManager {
     return {
       ...settings,
       running: this.active.size + this.preparing.size,
-      queued: this.store.countTestRuns(["queued"]),
+      queued: Math.max(0, this.store.countTestRuns(["queued"]) - this.preparing.size),
     };
   }
 
@@ -236,6 +236,8 @@ export class TestJobManager {
       this.start(run);
     } catch (error) {
       if (this.store.getTestRun(run.id)?.phase === "queued") {
+        run.source.reasonCodes = [...new Set([...run.source.reasonCodes, "source_preflight_failed"])];
+        run.source = qualifySource(run.source);
         run.phase = "failed";
         run.finishedAt = new Date().toISOString();
         run.error = `Nie udało się sprawdzić źródła testu: ${String(error)}`;
@@ -317,7 +319,14 @@ export class TestJobManager {
           : run.exitCode === 0 && !run.error ? "passed" : "failed";
         run.source.processOutcome = run.phase;
         if (this.sourceObserver && run.source.enqueue) {
-          run.source.finish = await this.sourceObserver(run, "finish");
+          try {
+            run.source.finish = await this.sourceObserver(run, "finish");
+          } catch {
+            run.source.finish = {
+              observedAt: new Date().toISOString(), head: null, branch: null, dirty: null,
+              statusDigest: null, statusEntries: null, complete: false, errorCode: "source_finish_failed",
+            };
+          }
           run.source = qualifySource(run.source);
           if (run.phase === "passed" && run.source.attribution !== "observed_match") {
             run.phase = "failed";

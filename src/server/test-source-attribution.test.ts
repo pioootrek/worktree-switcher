@@ -22,4 +22,9 @@ describe("test source attribution", () => {
     source.finish = observation({ dirty: true, statusDigest: "modified", statusEntries: 1 });
     expect(qualifySource(source)).toMatchObject({ attribution: "uncertain", reasonCodes: ["dirty_source"] });
   });
+
+  it("does not call unavailable fields a detected source change", () => {
+    const unavailable = observation({ head: null, branch: null, dirty: null, statusDigest: null, statusEntries: null, complete: false, errorCode: "source_finish_failed" });
+    expect(compareSource(observation(), unavailable)).toBe("unknown");
+  });
 });

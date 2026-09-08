@@ -151,11 +151,19 @@ export class SystemGitWorktreeReader implements GitWorktreeReader {
       const read = (args: string[]) => this.admission.run("operational", (signal) => execute(
         "git", ["-C", canonical, ...args], { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024, signal },
       ));
+      const optionalRead = async (args: string[], fallback: string) => {
+        try {
+          return (await read(args)).stdout;
+        } catch (error) {
+          if ((error as { code?: string | number }).code === 1) return fallback;
+          throw error;
+        }
+      };
       const before = (await read(["rev-parse", "HEAD"])).stdout.trim();
-      const branch = (await read(["symbolic-ref", "--quiet", "--short", "HEAD"]).catch(() => ({ stdout: "" }))).stdout.trim() || null;
+      const branch = (await optionalRead(["symbolic-ref", "--quiet", "--short", "HEAD"], "")).trim() || null;
       const status = (await read(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"])).stdout;
       const indexFlags = (await read(["ls-files", "-v", "-z"])).stdout.split("\0").filter(Boolean);
-      const sparse = (await read(["config", "--bool", "core.sparseCheckout"]).catch(() => ({ stdout: "false" }))).stdout.trim() === "true";
+      const sparse = (await optionalRead(["config", "--bool", "core.sparseCheckout"], "false")).trim() === "true";
       const after = (await read(["rev-parse", "HEAD"])).stdout.trim();
       const records = status.split("\0").filter(Boolean).sort();
       const unsupportedIndex = indexFlags.some((record) => record.startsWith("S ") || /^[a-z] /.test(record));

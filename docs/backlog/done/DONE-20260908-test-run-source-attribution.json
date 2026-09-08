@@ -22,7 +22,7 @@
   ],
   "title": "Attributed queued verification to observed source state",
   "validation": [
-    "pnpm check passed ESLint, TypeScript, and 215 tests in 39 files.",
+    "pnpm check passed ESLint, TypeScript, and 221 tests in 39 files.",
     "pnpm build completed the static Next.js export and controller CLI bundle; pnpm test:ui passed all five English and Polish dashboard fixtures.",
     "Focused regressions cover real clean and dirty Git observations, queued A-to-B rejection without spawn, equal dirty observations with command success, classification, persistence, migration recovery, and queue behavior.",
     "Backlog formatting and validation and git diff --check passed. No production controller restart or deployment was performed."

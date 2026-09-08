@@ -60,6 +60,37 @@ describe("SqliteStateStore", () => {
     store.close();
   });
 
+  it("migrates legacy test runs to explicit unknown source evidence and replays migration 12", () => {
+    const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-source-migration-"));
+    directories.push(directory);
+    const databasePath = join(directory, "state.sqlite3");
+    const store = new SqliteStateStore(databasePath);
+    const project = store.addProject(projectInput("Legacy", "/code/legacy", 3220));
+    const run: TestRun = {
+      id: "legacy-run", projectId: project.id, worktreePath: "/code/legacy", worktreeHead: "abc123",
+      worktreeBranch: "main", worktreeDirty: false, presetId: "node:test", presetName: "test",
+      adapter: "node", actor: "local-user", phase: "passed", queuePosition: null,
+      executable: "pnpm", args: ["test"], cwd: "/code/legacy", queuedAt: "2026-09-01T00:00:00.000Z",
+      startedAt: "2026-09-01T00:00:01.000Z", finishedAt: "2026-09-01T00:00:02.000Z", exitCode: 0,
+      signal: null, error: null, logs: [], environmentMode: "clean", environmentProfile: "unit",
+      inheritedServerProfile: null, environmentVariableNames: [], source: legacySourceEvidence(),
+    };
+    store.saveTestRun(run);
+    store.close();
+
+    const database = new Database(databasePath);
+    database.exec("ALTER TABLE test_runs DROP COLUMN source_json");
+    database.prepare("DELETE FROM schema_migrations WHERE version = 12").run();
+    database.close();
+
+    const migrated = new SqliteStateStore(databasePath);
+    expect(migrated.getTestRun(run.id)?.source).toMatchObject({ attribution: "legacy_unknown", enqueue: null, processOutcome: null });
+    migrated.close();
+    const replay = new SqliteStateStore(databasePath);
+    expect(replay.getTestRun(run.id)?.source.attribution).toBe("legacy_unknown");
+    replay.close();
+  });
+
   it("removes a project, releases its port, and preserves a controller audit event", () => {
     const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-store-remove-"));
     directories.push(directory);
