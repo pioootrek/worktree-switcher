@@ -22,7 +22,7 @@
   ],
   "title": "Serialized cache deletion with worktree lifecycle activity",
   "validation": [
-    "pnpm check passed ESLint, TypeScript, and 209 tests in 38 files.",
+    "pnpm check passed ESLint, TypeScript, and 210 tests in 38 files.",
     "pnpm build completed the static Next.js export and bundled controller CLI; pnpm test:ui passed all five browser fixtures; git diff --check passed.",
     "Deterministic deferred-cleaner regressions cover runtime start, human reservation, test admission, explicit refresh, automatic scan admission, cleaner rejection, and shutdown persistence ordering.",
     "Lifecycle and storage fixtures cover scan/maintenance exclusion, idempotent release, shutdown admission closure, queued scan ownership, project independence, and existing runtime, reservation, path, symlink, and cache refusal behavior.",

@@ -35,6 +35,8 @@ describe("server error localization", () => {
       .toBe("The Git command queue is busy. Try again later.");
     expect(localizeServerMessage("Pamięć projekcji panelu jest zajęta. Spróbuj ponownie później.", "en"))
       .toBe("The dashboard projection cache is busy. Try again later.");
+    expect(localizeServerMessage("Kontroler jest zamykany i nie przyjmuje nowych operacji.", "en"))
+      .toBe("The controller is shutting down and is not accepting new operations.");
     expect(localizeServerMessage("Metadane worktree przekraczają limit projekcji panelu.", "en"))
       .toBe("The worktree metadata exceeds the dashboard projection limit.");
     expect(localizeServerMessage("Nie udało się potwierdzić stanu co najmniej jednego worktree. Przyjęto bezpiecznie, że zawiera zmiany.", "en"))

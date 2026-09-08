@@ -62,6 +62,7 @@ const exactEnglish = new Map<string, string>([
   ["Obsługa poleceń Git została zamknięta.", "Git command handling was closed."],
   ["Kolejka poleceń Git jest zajęta. Spróbuj ponownie później.", "The Git command queue is busy. Try again later."],
   ["Projekcja panelu jest zamknięta.", "The dashboard projection is closed."],
+  ["Kontroler jest zamykany i nie przyjmuje nowych operacji.", "The controller is shutting down and is not accepting new operations."],
   ["Metadane worktree przekraczają limit projekcji panelu.", "The worktree metadata exceeds the dashboard projection limit."],
   ["Nie udało się potwierdzić stanu co najmniej jednego worktree. Przyjęto bezpiecznie, że zawiera zmiany.", "The status of at least one worktree could not be confirmed. It is conservatively treated as having changes."],
   ["Pamięć projekcji panelu jest zajęta. Spróbuj ponownie później.", "The dashboard projection cache is busy. Try again later."],

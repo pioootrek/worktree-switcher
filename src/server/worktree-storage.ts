@@ -122,6 +122,12 @@ export class WorktreeStorageManager {
     private readonly onChange: (projectId: string) => void = () => undefined,
   ) {}
 
+  assertLifecycle(lifecycle: WorktreeMaintenanceAccess): void {
+    if (this.lifecycle !== lifecycle) {
+      throw new Error("WorktreeStorageManager and ControlService must share one ProjectLifecycle instance.");
+    }
+  }
+
   snapshots(projectId: string, worktreePaths: string[]): WorktreeStorageSnapshot[] {
     return worktreePaths.map((worktreePath) => {
       const stored = this.store.getWorktreeStorage(projectId, worktreePath);

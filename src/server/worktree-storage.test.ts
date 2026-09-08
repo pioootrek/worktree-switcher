@@ -123,6 +123,18 @@ describe("FilesystemWorktreeDiskScanner", () => {
     store.close();
   });
 
+  it("rejects a facade lifecycle that differs from its scan authority", async () => {
+    const root = mkdtempSync(join(tmpdir(), "worktree-storage-lifecycle-"));
+    directories.push(root);
+    const store = new SqliteStateStore(join(root, "state.sqlite3"));
+    const manager = new WorktreeStorageManager(store, lifecycle(store));
+
+    expect(() => manager.assertLifecycle(lifecycle(store))).toThrow("must share one ProjectLifecycle");
+
+    await manager.close();
+    store.close();
+  });
+
   it("removes only a regular .next directory and never follows a root symlink", async () => {
     const root = mkdtempSync(join(tmpdir(), "worktree-cache-cleaner-"));
     const external = mkdtempSync(join(tmpdir(), "worktree-cache-external-"));

@@ -40,7 +40,7 @@ describe("ControlService worktree storage", () => {
     const snapshot = vi.fn(() => ({ phase: "stopped", worktreePath: worktree.path }));
     const processes = { snapshot } as unknown as ProcessManager;
     const queue = vi.fn();
-    const storage = { queue, isBusy: vi.fn(() => false) } as unknown as WorktreeStorageManager;
+    const storage = { queue, isBusy: vi.fn(() => false), assertLifecycle: vi.fn() } as unknown as WorktreeStorageManager;
     const remove = vi.fn(async () => ({ cache: "next" as const, worktreePath: worktree.path, removed: true }));
     const cleaner = { remove } as unknown as WorktreeCacheCleaner;
     const service = new ControlService(store, git, processes, undefined, undefined, storage, cleaner);
@@ -106,7 +106,7 @@ describe("ControlService worktree storage", () => {
         await gate;
         return { cache: "next" as const, worktreePath: worktree.path, removed: true };
       }) };
-      const storage = { queue: vi.fn(), isBusy: vi.fn(() => false) } as unknown as WorktreeStorageManager;
+      const storage = { queue: vi.fn(), isBusy: vi.fn(() => false), assertLifecycle: vi.fn() } as unknown as WorktreeStorageManager;
       const commands = { resolve: vi.fn(() => ({
         preset: "node" as const, executable: "pnpm", args: ["run", "dev"], portMethod: "environment" as const,
         tls: { mode: "off" as const, keyPath: null, certPath: null, caPath: null },
@@ -196,6 +196,7 @@ describe("ControlService worktree storage", () => {
     const shutdown = service.shutdown();
 
     await Promise.resolve();
+    expect(processes.stopAll).toHaveBeenCalledOnce();
     expect(close).not.toHaveBeenCalled();
     releaseCleaner();
     await deletion;

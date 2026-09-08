@@ -71,6 +71,7 @@ export class ControlService {
     lifecycle?: ProjectLifecycle,
   ) {
     this.lifecycle = lifecycle ?? new ProjectLifecycle(store, processes);
+    this.storage?.assertLifecycle(this.lifecycle);
     this.runtime = new RuntimeService(store, git, processes, logs, commands, this.lifecycle);
     this.environments = new EnvironmentService(store, logs, this.lifecycle, this.runtime);
     this.verification = new VerificationService(store, git, logs, testCommands, this.lifecycle, tests);
@@ -439,9 +440,10 @@ export class ControlService {
 
   async shutdown(): Promise<void> {
     const failures: unknown[] = [];
-    await this.lifecycle.closeAndDrain();
+    const drain = this.lifecycle.closeAndDrain();
     const cleanup = await Promise.allSettled([this.tests?.shutdown(), this.processes.stopAll()]);
     failures.push(...cleanup.filter((result) => result.status === "rejected").map((result) => result.reason));
+    await drain;
     try {
       await this.storage?.close();
     } catch (error) {
