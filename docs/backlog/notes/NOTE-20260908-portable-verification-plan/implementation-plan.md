@@ -338,5 +338,7 @@ Action tag commits were checked against their upstream Git repositories. A
 controlled installed-index removal scenario was then added so every smoke run
 also proves the damaged package cannot fall back to checkout assets. The final
 post-change smoke passed all ten stages in 22.7 seconds with graceful cleanup.
-Actual GitHub-hosted producer/consumer job evidence remains to be recorded before
-this feature item is closed.
+GitHub Actions run 34261645309 then passed `check-build` in 1 minute 22 seconds
+and the checkout-free `package-smoke` consumer in 50 seconds for fix commit
+`b7cf866`. Both review findings were corrected and their threads resolved. This
+provides the final hosted evidence required to close the feature item.
