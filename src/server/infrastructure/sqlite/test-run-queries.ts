@@ -1,4 +1,4 @@
-import type { PendingTestRun } from "@/server/state-store";
+import type { PendingTestRun, TestRunStatusRecord } from "@/server/state-store";
 import type { TestEnvironmentMode, TestRun, TestRunPhase } from "@/shared/contracts";
 import Database from "better-sqlite3";
 import { legacySourceEvidence } from "@/server/test-source-attribution";
@@ -112,6 +112,25 @@ export class TestRunQueries {
   getTestRun(id: string): TestRun | null {
     const row = this.database.prepare("SELECT * FROM test_runs WHERE id = ?").get(id) as TestRunRow | undefined;
     return row ? mapTestRun(row) : null;
+  }
+
+  getTestRunStatus(id: string): TestRunStatusRecord | null {
+    const row = this.database.prepare(`
+      SELECT id, project_id AS projectId, worktree_path AS worktreePath,
+             worktree_head AS worktreeHead, worktree_branch AS worktreeBranch,
+             worktree_dirty AS worktreeDirty, preset_id AS presetId, phase,
+             queue_position AS queuePosition, queued_at AS queuedAt,
+             started_at AS startedAt, finished_at AS finishedAt,
+             exit_code AS exitCode, signal, error, source_json AS sourceJson
+      FROM test_runs WHERE id = ?
+    `).get(id) as (Omit<TestRunStatusRecord, "worktreeDirty" | "source"> & { worktreeDirty: number; sourceJson: string | null }) | undefined;
+    if (!row) return null;
+    const { sourceJson, ...status } = row;
+    return {
+      ...status,
+      worktreeDirty: row.worktreeDirty === 1,
+      source: sourceJson ? JSON.parse(sourceJson) as TestRun["source"] : legacySourceEvidence(),
+    };
   }
 
   findTestRunByIdempotency(actor: string, idempotencyKey: string): TestRun | null {

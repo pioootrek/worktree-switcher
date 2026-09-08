@@ -72,16 +72,6 @@
       "type": "feature"
     },
     {
-      "area": "core",
-      "id": "FEAT-20260905-compact-mcp-status",
-      "path": "feature/FEAT-20260905-compact-mcp-status.json",
-      "priority": "next",
-      "risk_level": "medium",
-      "status": "open",
-      "title": "Offer compact MCP status and fetch details only when needed",
-      "type": "feature"
-    },
-    {
       "area": "distribution",
       "id": "FEAT-20260905-portable-verification",
       "path": "feature/FEAT-20260905-portable-verification.json",

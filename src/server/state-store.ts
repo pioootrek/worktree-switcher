@@ -28,6 +28,12 @@ export interface ProjectLaunchUpdate {
 }
 
 export type PendingTestRun = Pick<TestRun, "id" | "projectId" | "worktreePath" | "phase" | "queuePosition" | "queuedAt">;
+export type TestRunStatusRecord = Pick<TestRun,
+  "id" | "projectId" | "worktreePath" | "worktreeHead" | "worktreeBranch" | "worktreeDirty"
+  | "presetId" | "phase" | "queuePosition" | "queuedAt" | "startedAt" | "finishedAt"
+  | "exitCode" | "signal" | "error"
+  | "source"
+>;
 
 export interface ReservationRequest {
   projectId: string;
@@ -64,6 +70,7 @@ export interface StateStore {
   listTestRuns(projectId?: string, limit?: number): TestRun[];
   hasTestRun(id: string): boolean;
   getTestRun(id: string): TestRun | null;
+  getTestRunStatus(id: string): TestRunStatusRecord | null;
   findTestRunByIdempotency(actor: string, idempotencyKey: string): TestRun | null;
   saveTestRun(run: TestRun, idempotencyKey?: string): void;
   markInterruptedTestRuns(): void;
@@ -71,6 +78,7 @@ export interface StateStore {
   saveWorktreeStorage(sample: WorktreeStorageSample): void;
   recordProjectEvent(projectId: string, eventType: string, actor: string, details: unknown): void;
   getActiveReservation(projectId: string): Reservation | null;
+  getEffectiveReservation(projectId: string, observedAt: string): Reservation | null;
   acquireReservation(input: ReservationRequest): Reservation;
   authorizeReservation(projectId: string, owner: string, leaseTokenHash?: string): Reservation | null;
   renewAgentReservation(projectId: string, reservationId: string, owner: string, leaseTokenHash: string, ttlSeconds: number): Reservation;

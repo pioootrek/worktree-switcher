@@ -247,11 +247,15 @@ Available tools:
 | `get_server_capacity` | Reads the global server limit, usage, and slot holders |
 | `get_test_queue` | Reads the global test limit and current queue usage |
 | `get_project_status` | Reads runtime, claim, and selected-worktree state |
+| `get_project_status_compact` | Reads bounded placement, ownership, phase, capacity, and an opaque cursor |
+| `get_runtime_logs` | Reads an explicit bounded runtime log tail |
 | `get_project_storage` | Reads cached disk usage and history for project worktrees |
 | `list_worktrees` | Lists worktrees discovered for a project |
 | `list_test_presets` | Lists safe presets discovered for each project worktree |
 | `run_test` | Queues a preset for an exact worktree with an idempotency key |
 | `get_test_run` | Reads one run and its bounded output tail |
+| `get_test_run_status` | Reads compact process and source-attribution status without logs |
+| `wait_for_status_change` | Waits up to 20 seconds for a project or run cursor to change |
 | `cancel_test_run` | Cancels a run created by the current MCP session |
 | `set_project_environment` | Replaces the selected profile's literal variables while the server is stopped |
 | `list_environment_profiles` | Lists named profiles and the selected profile |

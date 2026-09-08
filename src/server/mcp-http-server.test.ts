@@ -123,6 +123,8 @@ describe("MCP loopback server", () => {
     const enqueueTest = vi.fn(async () => queuedRun);
     const testRun = vi.fn(() => queuedRun);
     const cancelTest = vi.fn(() => ({ ...queuedRun, phase: "cancelled" as const }));
+    const compactProjectStatus = vi.fn(() => ({ schemaVersion: 1, epoch: "epoch", cursor: "project-cursor", observedAt: "2026-09-08T00:00:00.000Z", retryAfterMs: 5000, status: { projectId } }));
+    const compactTestRunStatus = vi.fn(() => ({ schemaVersion: 1, epoch: "epoch", cursor: "run-cursor", observedAt: "2026-09-08T00:00:00.000Z", retryAfterMs: 1000, status: { runId: queuedRun.id } }));
     const service = {
       dashboard,
       projectSummaries,
@@ -132,6 +134,10 @@ describe("MCP loopback server", () => {
       enqueueTest,
       testRun,
       cancelTest,
+      compactProjectStatus,
+      compactTestRunStatus,
+      runtimeLogs: vi.fn(() => ({ projectId, lines: ["ready"], retainedLines: 1, truncated: false })),
+      waitForStatusChange: vi.fn(() => ({ changed: false, epoch: "epoch", cursor: "project-cursor", retryAfterMs: 5000 })),
       claimProject,
       renewAgentClaim: vi.fn(() => reservation),
       releaseAgentClaim,
@@ -192,11 +198,15 @@ describe("MCP loopback server", () => {
       "get_server_capacity",
       "get_test_queue",
       "get_project_status",
+      "get_project_status_compact",
+      "get_runtime_logs",
       "get_project_storage",
       "list_worktrees",
       "list_test_presets",
       "run_test",
       "get_test_run",
+      "get_test_run_status",
+      "wait_for_status_change",
       "cancel_test_run",
       "set_project_environment",
       "list_environment_profiles",
@@ -234,6 +244,11 @@ describe("MCP loopback server", () => {
     expect(enqueueTest).toHaveBeenCalledWith(projectId, "/code/web", "node:test", {
       owner: expect.stringMatching(/^agent:mcp:/), leaseToken: undefined,
     }, "test-job-1");
+    const compactEnqueue = await client.callTool({
+      name: "run_test",
+      arguments: { projectId, worktreePath: "/code/web", presetId: "node:test", idempotencyKey: "test-job-compact", responseMode: "compact" },
+    });
+    expect(JSON.stringify(compactEnqueue)).toContain("run-cursor");
     await client.callTool({ name: "get_test_run", arguments: { runId: queuedRun.id } });
     expect(testRun).toHaveBeenCalledWith(queuedRun.id);
     await client.callTool({ name: "cancel_test_run", arguments: { runId: queuedRun.id } });
@@ -266,6 +281,11 @@ describe("MCP loopback server", () => {
       cpuPercent: 12.5,
       processCount: 3,
     });
+    const compactStatus = await client.callTool({ name: "get_project_status_compact", arguments: { projectId } });
+    expect(JSON.stringify(compactStatus)).toContain("project-cursor");
+    expect(compactProjectStatus).toHaveBeenCalledWith(projectId, expect.stringMatching(/^agent:mcp:/));
+    const compactRun = await client.callTool({ name: "get_test_run_status", arguments: { runId: queuedRun.id } });
+    expect(JSON.stringify(compactRun)).toContain("run-cursor");
     const storageResult = await client.callTool({ name: "get_project_storage", arguments: { projectId } });
     const storageText = (storageResult as { content: Array<{ type: "text"; text: string }> }).content[0].text;
     expect(JSON.parse(storageText)[0]).toMatchObject({ worktreePath: "/code/web", nextCacheBytes: 300_000 });
@@ -302,6 +322,13 @@ describe("MCP loopback server", () => {
     });
     expect(JSON.stringify(claim)).not.toContain("never-return-this-lease-secret");
     expect(JSON.stringify(claim)).toContain("leaseHeld");
+    const compactClaim = await client.callTool({
+      name: "claim_project",
+      arguments: { projectId, worktreePath: "/code/web", reason: "Run tests", idempotencyKey: "test-run-compact", responseMode: "compact" },
+    });
+    expect(JSON.stringify(compactClaim)).toContain("project-cursor");
+    expect(JSON.stringify(compactClaim)).not.toContain("never-return-this-lease-secret");
+    expect(claimProject).toHaveBeenLastCalledWith(expect.objectContaining({ idempotencyKey: "test-run-compact" }), undefined, false);
     await client.callTool({ name: "save_environment_profile", arguments: { projectId, name: "claimed", environment: { PLAYWRIGHT_E2E: "2" } } });
     expect(saveEnvironmentProfile).toHaveBeenLastCalledWith(projectId, "claimed", { PLAYWRIGHT_E2E: "2" }, {
       owner: expect.stringMatching(/^agent:mcp:/),

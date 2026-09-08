@@ -232,6 +232,18 @@ export class McpRuntime {
       annotations: { readOnlyHint: true, idempotentHint: true },
     }, async ({ projectId }) => jsonContent(agentSnapshot(await english(() => this.service.projectSnapshot(projectId)))));
 
+    server.registerTool("get_project_status_compact", {
+      description: "Read cheap bounded project placement, ownership, runtime, and capacity status without discovery or histories.",
+      inputSchema: { projectId: z.string().uuid() },
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    }, async ({ projectId }) => jsonContent(await english(() => this.service.compactProjectStatus(projectId, owner()))));
+
+    server.registerTool("get_runtime_logs", {
+      description: "Read a bounded tail of the managed runtime's in-memory logs.",
+      inputSchema: { projectId: z.string().uuid(), limit: z.number().int().min(1).max(100).optional() },
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    }, async ({ projectId, limit }) => jsonContent(await english(() => this.service.runtimeLogs(projectId, limit))));
+
     server.registerTool("get_project_storage", {
       description: "Read cached disk-usage snapshots and bounded history for every discovered worktree in one project.",
       inputSchema: { projectId: z.string().uuid() },
@@ -257,11 +269,13 @@ export class McpRuntime {
         worktreePath: z.string().min(1).max(4096),
         presetId: z.string().min(1).max(160),
         idempotencyKey: z.string().min(1).max(120),
+        responseMode: z.enum(["full", "compact"]).optional(),
       },
       annotations: { destructiveHint: true, idempotentHint: true },
-    }, async ({ projectId, worktreePath, presetId, idempotencyKey }) => jsonContent(await english(() => this.service.enqueueTest(
-      projectId, worktreePath, presetId, actorFor(projectId), idempotencyKey,
-    ))));
+    }, async ({ projectId, worktreePath, presetId, idempotencyKey, responseMode }) => {
+      const run = await english(() => this.service.enqueueTest(projectId, worktreePath, presetId, actorFor(projectId), idempotencyKey));
+      return jsonContent(responseMode === "compact" ? await english(() => this.service.compactTestRunStatus(run.id)) : run);
+    });
 
     server.registerTool("get_test_run", {
       description: "Read one queued, active, or completed test run including its bounded output tail.",
@@ -270,6 +284,28 @@ export class McpRuntime {
     }, async ({ runId }) => {
       const run = await english(() => this.service.testRun(runId));
       return jsonContent({ ...run, error: run.error ? localizeServerMessage(run.error, "en") : null });
+    });
+
+    server.registerTool("get_test_run_status", {
+      description: "Read a cheap bounded test phase, placement, process result, and explicitly qualified source summary.",
+      inputSchema: { runId: z.string().uuid() },
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    }, async ({ runId }) => jsonContent(await english(() => this.service.compactTestRunStatus(runId))));
+
+    server.registerTool("wait_for_status_change", {
+      description: "Wait up to 20 seconds for one compact project or test status cursor to change.",
+      inputSchema: {
+        projectId: z.string().uuid().optional(),
+        runId: z.string().uuid().optional(),
+        cursor: z.string().min(1).max(128),
+        timeoutMs: z.number().int().min(1).max(20_000).optional(),
+      },
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    }, async ({ projectId, runId, cursor, timeoutMs }, extra) => {
+      if ((projectId ? 1 : 0) + (runId ? 1 : 0) !== 1) throw new Error("Exactly one of projectId or runId is required.");
+      return jsonContent(await english(() => this.service.waitForStatusChange(
+        { projectId, runId, cursor, timeoutMs }, owner(), extra.signal,
+      )));
     });
 
     server.registerTool("cancel_test_run", {
@@ -375,9 +411,10 @@ export class McpRuntime {
         reason: z.string().min(1).max(240),
         idempotencyKey: z.string().min(1).max(120),
         ttlSeconds: z.number().int().min(30).max(1800).optional(),
+        responseMode: z.enum(["full", "compact"]).optional(),
       },
       annotations: { destructiveHint: true, idempotentHint: true },
-    }, async ({ projectId, worktreePath, reason, idempotencyKey, ttlSeconds }) => {
+    }, async ({ projectId, worktreePath, reason, idempotencyKey, ttlSeconds, responseMode }) => {
       const idempotencyScope = `${projectId}:${idempotencyKey}`;
       const existingToken = session.idempotencyTokens.get(idempotencyScope);
       const result = await english(() => this.service.claimProject({
@@ -387,7 +424,7 @@ export class McpRuntime {
         idempotencyKey,
         ttlSeconds,
         owner: owner(),
-      }, existingToken));
+      }, existingToken, responseMode !== "compact"));
       session.idempotencyTokens.set(idempotencyScope, result.leaseToken);
       const claim: ClaimSecret = {
         projectId,
@@ -398,9 +435,17 @@ export class McpRuntime {
       };
       session.claims.set(result.reservation.id, claim);
       this.scheduleRenewal(session, claim);
+      if (responseMode === "compact") return jsonContent({
+        reservationId: result.reservation.id,
+        projectId,
+        worktreePath: result.reservation.worktreePath,
+        operationErrorCode: result.operationError ? "runtime_operation_failed" : null,
+        leaseHeld: true,
+        status: await english(() => this.service.compactProjectStatus(projectId, owner())),
+      });
       return jsonContent({
         reservation: result.reservation,
-        runtime: agentSnapshot(result.snapshot).runtime,
+        runtime: agentSnapshot(result.snapshot!).runtime,
         operationError: result.operationError ? localizeServerMessage(result.operationError, "en") : null,
         leaseHeld: true,
       });

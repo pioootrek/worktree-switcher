@@ -55,6 +55,14 @@ describe("SqliteStateStore", () => {
       queuedAt: run.queuedAt,
     }]);
     expect(store.findTestRunByIdempotency("agent:mcp:test", "attempt-1")).toEqual(run);
+    expect(store.getTestRunStatus(run.id)).toEqual({
+      id: run.id, projectId: run.projectId, worktreePath: run.worktreePath,
+      worktreeHead: run.worktreeHead, worktreeBranch: run.worktreeBranch,
+      worktreeDirty: true, presetId: run.presetId, phase: "running", queuePosition: null,
+      queuedAt: run.queuedAt, startedAt: run.startedAt, finishedAt: null,
+      exitCode: null, signal: null, error: null,
+      source: run.source,
+    });
     store.markInterruptedTestRuns();
     expect(store.getTestRun(run.id)).toMatchObject({ phase: "interrupted", queuePosition: null });
     store.close();
