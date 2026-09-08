@@ -1,6 +1,6 @@
 ---
 audience: "product owner and contributors discussing agent coordination"
-last_reviewed: "2026-09-04"
+last_reviewed: "2026-09-08"
 source_of_truth: "implemented reservation and local MCP integration design"
 status: "active"
 ---
@@ -118,11 +118,15 @@ list_projects
 get_server_capacity
 get_test_queue
 get_project_status
+get_project_status_compact
+get_runtime_logs
 get_project_storage
 list_worktrees
 list_test_presets
 run_test
 get_test_run
+get_test_run_status
+wait_for_status_change
 cancel_test_run
 set_project_environment
 list_environment_profiles
@@ -150,6 +154,31 @@ requested TTL, and idempotency key. It atomically acquires an agent lease and,
 when needed, switches the server. Its result contains an explicit lease handle
 but never exposes the raw lease token. The MCP session retains that secret and
 uses it for explicit and automatic renewals and release operations.
+
+`claim_project` and `run_test` optionally accept `responseMode: compact`; their
+default full response remains compatible. Projection happens after the same
+single idempotent mutation, and a failed start still returns its reservation
+handle and `leaseHeld` state.
+
+`get_project_status_compact` returns an allowlisted, versioned projection with
+an opaque controller-epoch cursor: project and placement IDs, runtime phase and
+failure code, a non-identifying owner label/relation, and server/test capacity
+counts. It performs no Git or preset discovery and omits logs, storage, history,
+environment values, free-form reasons, and raw MCP session owners.
+
+`get_test_run_status` reads projected SQLite columns without decoding retained
+logs. It reports queued, preflight, and finish HEAD observations together with
+the source attribution, comparisons, reason codes, and process outcome. Only an
+`observed_match` result supports a verified-source claim. `get_runtime_logs` is an
+explicit in-memory tail read, defaulting to 40 and allowing at most 100 lines
+within 16 KiB.
+
+`wait_for_status_change` accepts exactly one project or run and a previous
+cursor. It samples compact state only while waiters exist, every second, with a
+10-second default and 20-second maximum. Limits are 128 global waiters, four per
+MCP session, and 64 targets. Timeout returns no repeated snapshot and includes
+retry advice; cancellation, session disconnect, and shutdown dispose the waiter
+without mutating claims, runtimes, or tests.
 
 If controller-wide server capacity is exhausted, a new claim remains held but
 reports the startup error explicitly. Agents can call `get_server_capacity`

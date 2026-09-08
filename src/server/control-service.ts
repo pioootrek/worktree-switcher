@@ -4,6 +4,7 @@ import { DashboardQueryService } from "./modules/dashboard";
 import { EnvironmentService, redactProject } from "./modules/environments";
 import { leaseTokenHash, type OperationActor, ProjectLifecycle } from "./modules/lifecycle";
 import { RuntimeService } from "./modules/runtime";
+import { StatusService, type CompactProjectStatus, type CompactTestStatus, type CompactEnvelope } from "./modules/status";
 import { VerificationService } from "./modules/verification";
 
 import type {
@@ -47,8 +48,9 @@ export interface AgentClaimRequest {
 export interface AgentClaimResult {
   reservation: Reservation;
   leaseToken: string;
-  snapshot: ProjectSnapshot;
+  snapshot: ProjectSnapshot | null;
   operationError: string | null;
+  operationErrorCode: string | null;
 }
 
 export class ControlService {
@@ -57,6 +59,7 @@ export class ControlService {
   private readonly environments: EnvironmentService;
   private readonly verification: VerificationService;
   private readonly dashboardQueries: DashboardQueryService;
+  private readonly statusQueries: StatusService;
 
   constructor(
     private readonly store: StateStore,
@@ -84,6 +87,8 @@ export class ControlService {
       capacity: (projects) => this.lifecycle.capacityStatus(projects),
       testQueue: () => this.testQueueStatus(),
     });
+    this.statusQueries = new StatusService(store, processes,
+      () => this.lifecycle.capacityStatusCompact(), () => this.testQueueStatus());
   }
 
   async dashboard(): Promise<DashboardResponse> {
@@ -144,6 +149,23 @@ export class ControlService {
 
   testRun(runId: string): TestRun {
     return this.verification.testRun(runId);
+  }
+
+  compactProjectStatus(projectId: string, owner: string): CompactEnvelope<CompactProjectStatus> {
+    return this.statusQueries.project(projectId, owner);
+  }
+
+  compactTestRunStatus(runId: string): CompactEnvelope<CompactTestStatus> {
+    return this.statusQueries.test(runId);
+  }
+
+  runtimeLogs(projectId: string, limit?: number) {
+    return this.statusQueries.logs(projectId, limit);
+  }
+
+  waitForStatusChange(input: { projectId?: string; runId?: string; cursor: string; timeoutMs?: number }, owner: string, signal?: AbortSignal) {
+    const target = input.projectId ? { kind: "project" as const, id: input.projectId } : { kind: "run" as const, id: input.runId! };
+    return this.statusQueries.wait(target, input.cursor, owner, input.timeoutMs, signal);
   }
 
   async addProject(input: NewProject): Promise<ProjectView> {
@@ -288,7 +310,7 @@ export class ControlService {
     });
   }
 
-  async claimProject(input: AgentClaimRequest, existingLeaseToken?: string): Promise<AgentClaimResult> {
+  async claimProject(input: AgentClaimRequest, existingLeaseToken?: string, includeSnapshot = true): Promise<AgentClaimResult> {
     return this.lifecycle.serialized(input.projectId, async () => {
       const ttlSeconds = input.ttlSeconds ?? AGENT_LEASE_DEFAULT_SECONDS;
       if (!Number.isInteger(ttlSeconds) || ttlSeconds < 30 || ttlSeconds > AGENT_LEASE_DEFAULT_SECONDS) {
@@ -315,12 +337,16 @@ export class ControlService {
       });
 
       let operationError: string | null = null;
+      let operationErrorCode: string | null = null;
+      let operationStage: "reservation" | "capacity" | "runtime" = "reservation";
       try {
         this.lifecycle.assertReservationAllows(input.projectId, selected.path, { owner: input.owner, leaseToken });
         const runtime = this.processes.snapshot(input.projectId);
         if (runtime.phase !== "running" || runtime.worktreePath !== selected.path) {
+          operationStage = "capacity";
           this.lifecycle.acquireCapacity(project);
           try {
+            operationStage = "runtime";
             if (runtime.phase !== "stopped") await this.processes.stop(input.projectId);
             if (project.selectedWorktreePath !== selected.path) this.store.setSelectedWorktree(input.projectId, selected.path);
             await this.processes.start(this.lifecycle.requireProject(input.projectId), selected.path);
@@ -330,6 +356,10 @@ export class ControlService {
         }
       } catch (error) {
         operationError = error instanceof Error ? error.message : String(error);
+        operationErrorCode = (this.processes.statusSummary?.(input.projectId).failureCode
+          ?? this.processes.snapshot(input.projectId).failure?.code)
+          ?? (operationStage === "capacity" ? "capacity_exhausted"
+            : operationStage === "reservation" ? "reservation_conflict" : "runtime_operation_failed");
         this.logs.controller("agent.claim_switch_failed", {
           projectId: input.projectId,
           reservationId: reservation.id,
@@ -346,8 +376,9 @@ export class ControlService {
       return {
         reservation,
         leaseToken,
-        snapshot: await this.dashboardQueries.projectSnapshot(this.lifecycle.requireProject(input.projectId)),
+        snapshot: includeSnapshot ? await this.dashboardQueries.projectSnapshot(this.lifecycle.requireProject(input.projectId)) : null,
         operationError,
+        operationErrorCode,
       };
     });
   }
@@ -449,6 +480,7 @@ export class ControlService {
     } catch (error) {
       failures.push(error);
     }
+    this.statusQueries.close();
     this.dashboardQueries.close();
     this.git.close?.();
     try {

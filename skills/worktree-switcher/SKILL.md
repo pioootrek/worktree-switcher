@@ -36,8 +36,10 @@ managed project with `pnpm`, `npm`, `yarn`, `bun`, or a framework CLI.
 ## Inspect before acting
 
 Use `list_projects` to find the registered project. Use `list_worktrees` to
-match the current checkout to an exact controller-discovered path, then read
-`get_project_status`.
+match the current checkout to an exact controller-discovered path, then prefer
+`get_project_status_compact`. Fall back to `get_project_status` when the compact
+tool is absent. Fetch full status, storage, presets, worktrees, or bounded
+`get_runtime_logs` only when that detail is needed.
 
 Read-only status requests do not need a claim.
 
@@ -64,6 +66,10 @@ After claiming, call `get_project_status` and verify the worktree, runtime
 phase, and port. If `claim_project` returns an operation error, the claim is
 still held. Inspect the returned failure and logs before deciding whether to
 retry or release it.
+
+Newer controllers accept `responseMode: compact` for `claim_project`. The
+compact result still returns the reservation ID, exact placement, failure code,
+and `leaseHeld`; it never changes claim semantics.
 
 If another owner holds the project, do not stop its process, take its port, or
 try to bypass the reservation. Report the owner and conflict. Force release is
@@ -110,6 +116,15 @@ its preset assignment when the user asks for that change.
 Do not bypass an available managed test preset by starting the same command in
 a terminal. If test-queue tools are unavailable, follow the repository's own
 finite verification command and host resource policy.
+
+Newer controllers accept `responseMode: compact` for `run_test`. Follow a
+pending project or run cursor with `wait_for_status_change` (10-second default,
+20-second maximum), then verify with `get_project_status_compact` or
+`get_test_run_status`. Verify both the process outcome and source attribution;
+only `observed_match` supports a verified-source claim.
+On timeout, use `retryAfterMs`; on a lost session, inspect again and never repeat
+a mutation solely because waiting failed. Older controllers can be polled with
+the legacy status tools.
 
 ## Report the result
 

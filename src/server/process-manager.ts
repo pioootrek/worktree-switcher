@@ -23,6 +23,10 @@ type RuntimeEntry = RuntimeSnapshot & {
   previousResourceSample: RawResourceSample | null;
 };
 
+export type RuntimeStatusSummary = Pick<RuntimeSnapshot, "phase" | "worktreePath" | "startedAt"> & {
+  failureCode: string | null;
+};
+
 export interface ProcessManagerOptions {
   resourceSampler?: ProcessResourceSampler;
   resourceSampleIntervalMs?: number;
@@ -122,6 +126,22 @@ export class ProcessManager {
         history: [...runtime.resources.history],
       },
     };
+  }
+
+  statusSummary(projectId: string): RuntimeStatusSummary {
+    const runtime = this.runtimes.get(projectId) ?? emptyRuntime();
+    return {
+      phase: runtime.phase,
+      worktreePath: runtime.worktreePath,
+      startedAt: runtime.startedAt,
+      failureCode: runtime.failure?.code ?? (runtime.error ? "runtime_error" : null),
+    };
+  }
+
+  logTail(projectId: string, limit: number): { lines: string[]; retainedLines: number; truncated: boolean } {
+    const logs = this.runtimes.get(projectId)?.logs ?? [];
+    const bounded = Math.max(1, Math.min(100, limit));
+    return { lines: logs.slice(-bounded), retainedLines: logs.length, truncated: logs.length > bounded };
   }
 
   async start(project: Project, worktreePath: string): Promise<void> {

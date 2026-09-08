@@ -1,4 +1,4 @@
-import type { PendingTestRun, ProjectRegistration, ReservationRequest, StateStore, WorktreeStorageSample } from "@/server/state-store";
+import type { PendingTestRun, ProjectRegistration, ReservationRequest, StateStore, TestRunStatusRecord, WorktreeStorageSample } from "@/server/state-store";
 import type { Project, Reservation, ServerCapacitySettings, TestEnvironmentProfile, TestQueueSettings, TestRun, TestRunPhase, WorktreeStorageSnapshot } from "@/shared/contracts";
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
@@ -289,6 +289,10 @@ export class SqliteStateStore implements StateStore {
     return this.testRuns.getTestRun(id);
   }
 
+  getTestRunStatus(id: string): TestRunStatusRecord | null {
+    return this.testRuns.getTestRunStatus(id);
+  }
+
   findTestRunByIdempotency(actor: string, idempotencyKey: string): TestRun | null {
     return this.testRuns.findTestRunByIdempotency(actor, idempotencyKey);
   }
@@ -320,6 +324,17 @@ export class SqliteStateStore implements StateStore {
              maximum_expires_at, token_hash, idempotency_key, released_at
       FROM reservations WHERE project_id = ? AND released_at IS NULL
     `).get(projectId) as ReservationRow | undefined;
+    return row ? mapReservation(row) : null;
+  }
+
+  getEffectiveReservation(projectId: string, observedAt: string): Reservation | null {
+    const row = this.database.prepare(`
+      SELECT id, project_id, worktree_path, kind, owner, reason, created_at, expires_at,
+             maximum_expires_at, token_hash, idempotency_key, released_at
+      FROM reservations
+      WHERE project_id = ? AND released_at IS NULL
+        AND (expires_at IS NULL OR expires_at > ?)
+    `).get(projectId, observedAt) as ReservationRow | undefined;
     return row ? mapReservation(row) : null;
   }
 
