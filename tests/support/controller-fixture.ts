@@ -74,33 +74,34 @@ export async function startControllerFixture(projectCount = 3): Promise<Controll
   const repositories = await Promise.all(Array.from({ length: projectCount }, (_, index) => createRepository(base, `project-${String.fromCharCode(97 + index)}`)));
   const ports = await Promise.all(Array.from({ length: projectCount + 1 }, () => freePort()));
   const controllerPort = ports.pop()!;
-  const child = spawn(process.execPath, [join(root, "dist/cli/index.js"), "start", "--host", "127.0.0.1", "--port", String(controllerPort), "--no-mcp", "--no-open", "--data-dir", data, "--state-dir", state, "--browse-root", base, "--web-root", join(root, "out")], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
-  let output = "";
-  child.stdout?.on("data", (chunk) => { output += chunk.toString(); });
-  child.stderr?.on("data", (chunk) => { output += chunk.toString(); });
-  const accessUrl = await waitFor(() => output.match(/https?:\/\/[^\s]+#token=[^\s]+/)?.[0] ?? null, 15_000, () => `Controller did not publish an access URL.\n${output}`);
-  const parsed = new URL(accessUrl);
-  const token = new URLSearchParams(parsed.hash.slice(1)).get("token")!;
-  const endpoint = parsed.origin;
-  const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
-    const response = await fetch(`${endpoint}${path}`, { ...init, headers: { "content-type": "application/json", origin: endpoint, "x-worktree-switcher-token": token, ...init.headers } });
-    const body = await response.json() as T & { error?: string };
-    if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
-    return body;
-  };
-  const projects: FixtureProject[] = [];
+  let child: ChildProcess | undefined;
   try {
+    child = spawn(process.execPath, [join(root, "dist/cli/index.js"), "start", "--host", "127.0.0.1", "--port", String(controllerPort), "--no-mcp", "--no-open", "--data-dir", data, "--state-dir", state, "--browse-root", base, "--web-root", join(root, "out")], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    child.stdout?.on("data", (chunk) => { output += chunk.toString(); });
+    child.stderr?.on("data", (chunk) => { output += chunk.toString(); });
+    const accessUrl = await waitFor(() => output.match(/https?:\/\/[^\s]+#token=[^\s]+/)?.[0] ?? null, 15_000, () => `Controller did not publish an access URL.\n${output}`);
+    const parsed = new URL(accessUrl);
+    const token = new URLSearchParams(parsed.hash.slice(1)).get("token")!;
+    const endpoint = parsed.origin;
+    const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+      const response = await fetch(`${endpoint}${path}`, { ...init, headers: { "content-type": "application/json", origin: endpoint, "x-worktree-switcher-token": token, ...init.headers } });
+      const body = await response.json() as T & { error?: string };
+      if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+      return body;
+    };
+    const projects: FixtureProject[] = [];
     for (let index = 0; index < repositories.length; index += 1) {
       const name = `project-${String.fromCharCode(97 + index)}`;
       const result = await request<{ project: { id: string } }>("/api/projects", { method: "POST", body: JSON.stringify({ name, repositoryPath: repositories[index]!.main, port: ports[index], launchPreset: "node" }) });
       projects.push({ id: result.project.id, name, port: ports[index]!, ...repositories[index]! });
     }
+    return { endpoint, accessUrl, projects, request, close: async () => { await closeChild(child!); await rm(base, { recursive: true, force: true }); } };
   } catch (error) {
-    await closeChild(child);
+    if (child) await closeChild(child);
     await rm(base, { recursive: true, force: true });
     throw error;
   }
-  return { endpoint, accessUrl, projects, request, close: async () => { await closeChild(child); await rm(base, { recursive: true, force: true }); } };
 }
 
 export async function endpointIdentity(project: FixtureProject, expectedIdentity?: string): Promise<{ identity: string; boot: string; pid: number }> {

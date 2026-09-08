@@ -32,7 +32,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "next build && tsup src/cli/index.ts --format esm --platform node --target node22 --clean --out-dir dist/cli",
+    "build": "next build && tsup src/cli/index.ts --format esm --platform node --target node22 --clean --out-dir dist/cli && node scripts/build-fingerprint.mjs --write",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
     "dev": "tsx src/cli/index.ts start --web-root out",
     "dev:web": "next dev",
@@ -43,8 +43,8 @@
     "typecheck": "tsc --noEmit",
     "test:modules": "vitest run src/server/modules src/server/infrastructure src/architecture.test.ts",
     "test:ui": "playwright test",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
-    "test:e2e": "playwright test --config playwright.e2e.config.ts"
+    "test:integration": "node scripts/build-fingerprint.mjs --check && vitest run --config vitest.integration.config.ts",
+    "test:e2e": "node scripts/build-fingerprint.mjs --check && playwright test --config playwright.e2e.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
