@@ -320,3 +320,23 @@ the item. Rollback removes the added workflow/smoke command and reverts any focu
 packaging fix, without touching installed services, leases, databases or published
 packages. Plan-only validation is Hub fmt/validate and git diff --check. No consumer
 smoke or CI execution is claimed by this planning update.
+
+## Implementation evidence, 2026-09-08
+
+Implemented the two-job workflow and `scripts/package-smoke.mjs`. Local source
+typechecking and all 234 Vitest tests passed, followed sequentially by `pnpm build`.
+The first complete local package smoke passed on Linux x64 with Node v24.19.0 and
+npm 11.17.0: a 522,398-byte tarball with 47 entries was installed into a fresh
+consumer, native SQLite loaded, packaged assets and authenticated HTTP were served,
+offline and live CLI identities matched, the MCP claim/start/stop/restart/release
+flow passed, and shutdown removed the access record and controller lock without
+forced cleanup. The observed tarball digest was
+`d35468e69e3740d4fe497e87c3baceb331086f9387ca7092f571ba0967b6be72`; it is build
+specific and not a release checksum.
+
+Action tag commits were checked against their upstream Git repositories. A
+controlled installed-index removal scenario was then added so every smoke run
+also proves the damaged package cannot fall back to checkout assets. The final
+post-change smoke passed all ten stages in 22.7 seconds with graceful cleanup.
+Actual GitHub-hosted producer/consumer job evidence remains to be recorded before
+this feature item is closed.

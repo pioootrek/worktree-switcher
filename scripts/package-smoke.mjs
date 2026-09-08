@@ -1,0 +1,312 @@
+#!/usr/bin/env node
+import { createHash, randomUUID } from "node:crypto";
+import { execFile, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdtemp, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
+
+const exec = promisify(execFile);
+const INSTALL_TIMEOUT = 300_000;
+const STEP_TIMEOUT = 45_000;
+const SENTINEL = "portable-smoke-secret-must-not-leak";
+const startedAt = Date.now();
+const steps = [];
+let root;
+let controller;
+let client;
+let forcedCleanup = false;
+
+function argument(name) {
+  const index = process.argv.indexOf(name);
+  return index < 0 ? undefined : process.argv[index + 1];
+}
+
+function check(value, message) {
+  if (!value) throw new Error(message);
+  return value;
+}
+
+async function step(name, task) {
+  const start = Date.now();
+  try {
+    const result = await task();
+    steps.push({ name, ok: true, durationMs: Date.now() - start });
+    return result;
+  } catch (error) {
+    steps.push({ name, ok: false, durationMs: Date.now() - start, error: redact(error instanceof Error ? error.message : String(error)) });
+    throw error;
+  }
+}
+
+function redact(value) {
+  return value.replaceAll(SENTINEL, "[REDACTED]").replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, "Bearer [REDACTED]");
+}
+
+async function run(file, args, options = {}) {
+  const env = options.env ?? process.env;
+  try {
+    return await exec(file, args, { cwd: options.cwd, env, encoding: "utf8", timeout: options.timeout ?? STEP_TIMEOUT, maxBuffer: 2_000_000 });
+  } catch (error) {
+    throw new Error(`${basename(file)} ${args[0] ?? ""} failed: ${redact(error.stderr || error.message)}`);
+  }
+}
+
+async function freePort() {
+  return await new Promise((accept, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close((error) => error ? reject(error) : accept(address.port));
+    });
+  });
+}
+
+async function waitFor(task, description, timeout = STEP_TIMEOUT) {
+  const deadline = Date.now() + timeout;
+  let last;
+  while (Date.now() < deadline) {
+    try { return await task(); } catch (error) { last = error; }
+    await new Promise((accept) => setTimeout(accept, 100));
+  }
+  throw new Error(`${description}: ${last instanceof Error ? last.message : "timed out"}`);
+}
+
+async function sha256(path) {
+  return createHash("sha256").update(await readFile(path)).digest("hex");
+}
+
+async function stopController() {
+  if (!controller || controller.exitCode !== null) return;
+  controller.kill("SIGTERM");
+  const exited = await Promise.race([
+    new Promise((accept) => controller.once("exit", (code, signal) => accept({ code, signal }))),
+    new Promise((accept) => setTimeout(() => accept(null), 15_000)),
+  ]);
+  if (!exited) {
+    forcedCleanup = true;
+    controller.kill("SIGKILL");
+    await new Promise((accept) => controller.once("exit", accept));
+  }
+  controller = undefined;
+}
+
+async function main() {
+  root = await mkdtemp(join(tmpdir(), "worktree-switcher-package-smoke-"));
+  const artifacts = join(root, "artifacts");
+  const consumer = join(root, "consumer");
+  const fixture = join(root, "fixture");
+  const data = join(root, "data");
+  const state = join(root, "state");
+  await Promise.all([mkdir(artifacts), mkdir(consumer), mkdir(fixture), mkdir(data), mkdir(state)]);
+
+  let tarball = argument("--tarball");
+  if (!tarball) {
+    check(existsSync(resolve("dist/cli/index.js")) && existsSync(resolve("out/index.html")), "Build artifacts are missing; run pnpm build first.");
+    tarball = await step("pack", async () => {
+      const result = await run("npm", ["pack", "--json", "--pack-destination", artifacts], { cwd: process.cwd() });
+      const packed = JSON.parse(result.stdout);
+      check(Array.isArray(packed) && packed.length === 1 && packed[0].filename, "npm pack did not return exactly one artifact.");
+      return join(artifacts, packed[0].filename);
+    });
+  }
+  tarball = resolve(tarball);
+  check(existsSync(tarball), `Tarball does not exist: ${tarball}`);
+  const checksum = await sha256(tarball);
+  const expectedChecksum = argument("--sha256");
+  check(!expectedChecksum || expectedChecksum === checksum, "Tarball checksum mismatch.");
+
+  const archiveFiles = await step("archive-manifest", async () => {
+    const { stdout } = await run("tar", ["-tzf", tarball]);
+    const files = stdout.trim().split("\n");
+    for (const required of ["package/dist/cli/index.js", "package/out/index.html", "package/LICENSE", "package/THIRD_PARTY_NOTICES.md"]) {
+      check(files.includes(required), `Packed artifact is missing ${required}.`);
+    }
+    const forbidden = /(^|\/)(\.git|node_modules|\.env(?:\.|$)|state\.sqlite3(?:-|$)|mcp-token|service-access\.json|controller\.lock)(\/|$)/;
+    check(!files.some((file) => file.startsWith("/") || file.split("/").includes("..") || forbidden.test(file)), "Packed artifact contains forbidden or escaping paths.");
+    return files;
+  });
+
+  await writeFile(join(consumer, "package.json"), JSON.stringify({ private: true }, null, 2));
+  const npmCache = join(root, "npm-cache");
+  const installEnv = { PATH: process.env.PATH, LANG: "C.UTF-8", npm_config_cache: npmCache, npm_config_userconfig: join(root, "empty-npmrc") };
+  await writeFile(installEnv.npm_config_userconfig, "");
+  await step("production-install", () => run("npm", ["install", "--omit=dev", "--no-audit", "--no-fund", tarball], { cwd: consumer, env: installEnv, timeout: INSTALL_TIMEOUT }));
+
+  const packageRoot = join(consumer, "node_modules", "worktree-switcher");
+  const cli = join(consumer, "node_modules", ".bin", "worktree-switcher");
+  check((await stat(cli)).isFile(), "Installed CLI is missing.");
+  const metadata = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
+  await step("native-sqlite", async () => {
+    const sqlite = await import(pathToFileURL(join(consumer, "node_modules", "better-sqlite3", "lib", "index.js")));
+    const database = new sqlite.default(":memory:");
+    database.exec("select 1");
+    database.close();
+  });
+
+  await step("damaged-asset-rejected", async () => {
+    const index = join(packageRoot, "out", "index.html");
+    const damaged = `${index}.damaged`;
+    const negativeData = join(root, "negative-data");
+    const negativeState = join(root, "negative-state");
+    await Promise.all([mkdir(negativeData), mkdir(negativeState), rename(index, damaged)]);
+    const port = await freePort();
+    const mcp = await freePort();
+    const child = spawn(cli, ["start", "--service-mode", "--no-open", "--host", "127.0.0.1", "--port", String(port), "--mcp-port", String(mcp), "--data-dir", negativeData, "--state-dir", negativeState], {
+      cwd: root, env: { PATH: process.env.PATH, LANG: "C.UTF-8" }, stdio: "ignore",
+    });
+    try {
+      await waitFor(async () => {
+        check(child.exitCode === null, "Damaged controller exited before its HTTP behavior could be checked.");
+        const response = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1_000) });
+        check(response.status >= 400, "Damaged package served an index from outside the installed artifact.");
+        return true;
+      }, "Damaged asset scenario did not become observable");
+    } finally {
+      if (child.exitCode === null) child.kill("SIGTERM");
+      await Promise.race([new Promise((accept) => child.once("exit", accept)), new Promise((accept) => setTimeout(accept, 15_000))]);
+      if (child.exitCode === null) {
+        child.kill("SIGKILL");
+        forcedCleanup = true;
+      }
+      await rename(damaged, index);
+    }
+  });
+
+  const fixturePort = await freePort();
+  const dashboardPort = await freePort();
+  const mcpPort = await freePort();
+  const marker = `portable-${randomUUID()}`;
+  await writeFile(join(fixture, "package.json"), JSON.stringify({ name: "portable-fixture", private: true, scripts: { dev: "node server.mjs" } }, null, 2));
+  await writeFile(join(fixture, "server.mjs"), `import {createServer} from "node:http";\nconst marker=${JSON.stringify(marker)};\ncreateServer((_,r)=>{r.setHeader("content-type","application/json");r.end(JSON.stringify({marker,pid:process.pid}))}).listen(Number(process.env.PORT),"127.0.0.1");\n`);
+  await run("git", ["init", "-q"], { cwd: fixture });
+  await run("git", ["-c", "user.name=Portable Smoke", "-c", "user.email=smoke@example.invalid", "-c", "commit.gpgsign=false", "add", "."], { cwd: fixture });
+  await run("git", ["-c", "user.name=Portable Smoke", "-c", "user.email=smoke@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "fixture"], { cwd: fixture });
+  const common = ["--data-dir", data, "--state-dir", state];
+  await step("offline-cli", async () => {
+    await run(cli, ["project", "add", fixture, "--name", "Portable fixture", "--port", String(fixturePort), "--preset", "node", ...common], { cwd: root });
+    const listed = JSON.parse((await run(cli, ["project", "list", "--json", ...common], { cwd: root })).stdout);
+    check(listed.length === 1 && listed[0].repositoryPath === fixture && listed[0].port === fixturePort, "Offline CLI registration mismatch.");
+  });
+  const project = JSON.parse((await run(cli, ["project", "list", "--json", ...common], { cwd: root })).stdout)[0];
+
+  let stdout = "";
+  let stderr = "";
+  controller = spawn(cli, ["start", "--service-mode", "--no-open", "--host", "127.0.0.1", "--port", String(dashboardPort), "--mcp-port", String(mcpPort), "--browse-root", fixture, ...common], {
+    cwd: root, env: { PATH: process.env.PATH, LANG: "C.UTF-8" }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  controller.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+  controller.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+
+  const access = await step("controller-readiness", () => waitFor(async () => {
+    check(controller.exitCode === null, `Controller exited early: ${redact(stderr)}`);
+    const value = JSON.parse(await readFile(join(state, "service-access.json"), "utf8"));
+    const response = await fetch(`http://127.0.0.1:${dashboardPort}/`, { signal: AbortSignal.timeout(1_000) });
+    check(response.ok, `Dashboard returned ${response.status}.`);
+    return value;
+  }, "Controller did not become ready"));
+  check(!stdout.includes("#token=") && !stdout.includes(SENTINEL), "Controller output exposed a secret.");
+
+  const accessUrl = new URL(access.accessUrl);
+  const dashboardToken = check(new URLSearchParams(accessUrl.hash.slice(1)).get("token"), "Dashboard token missing from private access record.");
+  await step("packaged-assets", async () => {
+    const htmlResponse = await fetch(`http://127.0.0.1:${dashboardPort}/`);
+    const html = await htmlResponse.text();
+    check(htmlResponse.ok && html.length > 100, "Packaged index was not served.");
+    const paths = [...html.matchAll(/(?:src|href)="([^"]+\.(?:js|css))"/g)].map((match) => match[1]);
+    check(paths.length > 0, "No packaged JS/CSS assets found in index.");
+    for (const path of paths) {
+      const response = await fetch(new URL(path, `http://127.0.0.1:${dashboardPort}/`));
+      const body = await response.text();
+      check(response.ok && body.length > 0 && !response.headers.get("content-type")?.includes("text/html"), `Invalid packaged asset: ${path}`);
+    }
+    const denied = await fetch(`http://127.0.0.1:${dashboardPort}/api/dashboard`);
+    check(denied.status === 401, "Dashboard API accepted a missing token.");
+    const allowed = await fetch(`http://127.0.0.1:${dashboardPort}/api/dashboard`, { headers: { "X-Worktree-Switcher-Token": dashboardToken } });
+    check(allowed.ok && (await allowed.json()).projects.length === 1, "Authenticated dashboard API failed.");
+  });
+
+  await step("live-cli-forwarding", async () => {
+    const listed = JSON.parse((await run(cli, ["project", "list", "--json", ...common], { cwd: root })).stdout);
+    check(listed[0].id === project.id, "Live CLI did not forward to the singleton controller.");
+  });
+
+  const token = (await readFile(join(data, "mcp-token"), "utf8")).trim();
+  const unauthorized = await fetch(`http://127.0.0.1:${mcpPort}/mcp`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  check(unauthorized.status === 401, "MCP accepted an unauthorized request.");
+  const { Client } = await import(pathToFileURL(join(consumer, "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm", "client", "index.js")));
+  const { StreamableHTTPClientTransport } = await import(pathToFileURL(join(consumer, "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm", "client", "streamableHttp.js")));
+  client = new Client({ name: "portable-package-smoke", version: "1.0.0" });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${mcpPort}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+  const call = async (name, args = {}) => {
+    const result = await client.callTool({ name, arguments: args });
+    check(!result.isError, `${name} returned an MCP error.`);
+    return JSON.parse(result.content.find((part) => part.type === "text").text);
+  };
+  await step("mcp-runtime", async () => {
+    const tools = (await client.listTools()).tools.map(({ name }) => name);
+    for (const name of ["list_projects", "list_worktrees", "claim_project", "start_project", "restart_project", "stop_project", "release_project_claim"]) check(tools.includes(name), `MCP tool missing: ${name}`);
+    const projects = await call("list_projects");
+    check(projects[0].id === project.id, "MCP project identity mismatch.");
+    const worktrees = await call("list_worktrees", { projectId: project.id });
+    const worktreePath = check(worktrees.find((item) => item.path === fixture)?.path, "Fixture worktree was not discovered.");
+    const claim = await call("claim_project", { projectId: project.id, worktreePath, reason: "Portable package verification", idempotencyKey: "claim-1", responseMode: "compact" });
+    const reservationId = claim.reservationId;
+    const health = async () => {
+      const response = await fetch(`http://127.0.0.1:${fixturePort}/`, { signal: AbortSignal.timeout(1_000) });
+      const value = await response.json();
+      check(value.marker === marker, "Wrong fixture health identity.");
+      return value;
+    };
+    const first = await waitFor(health, "Fixture did not start");
+    await call("stop_project", { projectId: project.id, reservationId, idempotencyKey: "stop-1" });
+    await waitFor(async () => { try { await health(); } catch { return true; } throw new Error("fixture still running"); }, "Fixture did not stop");
+    await call("start_project", { projectId: project.id, reservationId, idempotencyKey: "start-1" });
+    const second = await waitFor(health, "Fixture did not restart after start");
+    await call("start_project", { projectId: project.id, reservationId, idempotencyKey: "start-noop" });
+    await call("restart_project", { projectId: project.id, reservationId, idempotencyKey: "restart-1" });
+    const replay = await call("restart_project", { projectId: project.id, reservationId, idempotencyKey: "restart-1" });
+    const third = await waitFor(async () => { const value = await health(); check(value.pid !== second.pid, "Restart retained the old PID."); return value; }, "Fixture restart did not replace process");
+    check(replay.replayed === true && first.pid !== second.pid && third.pid !== second.pid, "Runtime idempotency/PID assertions failed.");
+    await call("stop_project", { projectId: project.id, reservationId, idempotencyKey: "stop-2" });
+    await call("release_project_claim", { projectId: project.id, reservationId });
+    const status = await call("get_project_status_compact", { projectId: project.id });
+    check(!status.reservation || status.reservation.owner === null, "Claim remained after release.");
+  });
+
+  await client.close();
+  client = undefined;
+  await stopController();
+  check(!existsSync(join(state, "service-access.json")), "Service access record survived graceful shutdown.");
+  check(!existsSync(join(state, "controller.lock")), "Controller lock survived graceful shutdown.");
+  check(!forcedCleanup, "Forced cleanup was required.");
+
+  const dependencyTree = JSON.parse((await run("npm", ["ls", "--omit=dev", "--json", "--depth=0"], { cwd: consumer })).stdout);
+  const report = {
+    ok: true, package: `${metadata.name}@${metadata.version}`, tarball: basename(tarball), sha256: checksum,
+    bytes: (await stat(tarball)).size, archiveEntries: archiveFiles.length, node: process.version,
+    npm: (await run("npm", ["--version"])).stdout.trim(), platform: `${process.platform}-${process.arch}`,
+    dependencies: Object.fromEntries(Object.entries(dependencyTree.dependencies ?? {}).map(([name, value]) => [name, value.version])),
+    steps, cleanup: "graceful", durationMs: Date.now() - startedAt,
+  };
+  const reportPath = argument("--report");
+  if (reportPath) await writeFile(resolve(reportPath), `${JSON.stringify(report, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+}
+
+try {
+  await main();
+} catch (error) {
+  const message = redact(error instanceof Error ? error.message : String(error));
+  process.stderr.write(`Portable package smoke failed: ${message}\n`);
+  process.exitCode = 1;
+} finally {
+  try { await client?.close(); } catch {}
+  try { await stopController(); } catch { forcedCleanup = true; }
+  if (root) await rm(root, { recursive: true, force: true });
+  if (forcedCleanup) process.exitCode = 1;
+}
