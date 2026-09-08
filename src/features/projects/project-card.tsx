@@ -44,6 +44,22 @@ export function ProjectCard({
   const selectedWorktree = worktrees.find((worktree) => worktree.path === selected);
   const isBusy = runtime.phase === "starting" || runtime.phase === "stopping" || pending !== null;
   const failureCopy = runtime.failure ? localizedFailure(project, runtime.failure, t) : null;
+  const metadata = snapshot.metadata;
+
+  const refreshMetadata = async () => {
+    setPending("metadata");
+    try {
+      await mutate(
+        `/api/projects/${project.id}/metadata/refresh`,
+        {},
+        t("metadata.refreshed", { name: project.name }),
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPending(null);
+    }
+  };
 
   const act = async (operation: "start" | "stop" | "restart" | "switch") => {
     setPending(operation);
@@ -91,6 +107,20 @@ export function ProjectCard({
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => void refreshMetadata()}
+                  disabled={pending !== null || metadata?.status === "refreshing"}
+                  aria-label={t("metadata.refresh")}
+                >
+                  <RefreshCw className={metadata?.status === "refreshing" ? "animate-spin motion-reduce:animate-none" : undefined} aria-hidden />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("metadata.refresh")}</TooltipContent>
+            </Tooltip>
             <EnvironmentSettingsDialog
               project={project}
               phase={runtime.phase}
@@ -111,6 +141,17 @@ export function ProjectCard({
         </div>
       </CardHeader>
       <CardContent>
+        {metadata && metadata.status !== "fresh" && (
+          <Alert className="mb-4 border-amber-400/20 bg-amber-400/5 text-amber-100">
+            <AlertTriangle aria-hidden />
+            <AlertTitle>{t(`metadata.${metadata.status}`)}</AlertTitle>
+            <AlertDescription>
+              {metadata.lastSuccessfulAt
+                ? t("metadata.lastSuccess", { time: new Date(metadata.lastSuccessfulAt).toLocaleString(locale === "pl" ? "pl-PL" : "en-US") })
+                : t("metadata.noSuccess")}
+            </AlertDescription>
+          </Alert>
+        )}
         {snapshot.discoveryError && (
           <Alert variant="destructive" className="mb-4"><AlertTriangle aria-hidden /><AlertDescription>{snapshot.discoveryError}</AlertDescription></Alert>
         )}

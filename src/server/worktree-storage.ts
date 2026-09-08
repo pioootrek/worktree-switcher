@@ -5,6 +5,7 @@ import type { CacheDeletionResult, SafeCacheKind, WorktreeStorageSnapshot } from
 import type { StateStore, WorktreeStorageSample } from "./state-store";
 
 const AUTO_REFRESH_MS = 6 * 60 * 60_000;
+const FAILED_ATTEMPT_COOLDOWN_MS = 30_000;
 
 export interface WorktreeDiskScanner {
   scan(worktreePath: string, signal?: AbortSignal): Promise<Omit<WorktreeStorageSample, "projectId" | "measuredAt">>;
@@ -109,13 +110,14 @@ export class WorktreeStorageManager {
   private tail: Promise<void> = Promise.resolve();
   private readonly queued = new Set<string>();
   private readonly states = new Map<string, { status: "pending" | "scanning" | "unavailable"; error: string | null }>();
+  private readonly lastAttempts = new Map<string, number>();
   private readonly abortController = new AbortController();
   private closing = false;
 
   constructor(
     private readonly store: StateStore,
     private readonly scanner: WorktreeDiskScanner = new FilesystemWorktreeDiskScanner(),
-    private readonly onChange: () => void = () => undefined,
+    private readonly onChange: (projectId: string) => void = () => undefined,
   ) {}
 
   snapshots(projectId: string, worktreePaths: string[]): WorktreeStorageSnapshot[] {
@@ -151,23 +153,27 @@ export class WorktreeStorageManager {
     if (!force) {
       const current = this.store.getWorktreeStorage(projectId, worktreePath);
       if (current?.measuredAt && Date.now() - new Date(current.measuredAt).getTime() < AUTO_REFRESH_MS) return;
+      const lastAttempt = this.lastAttempts.get(key);
+      if (lastAttempt !== undefined && Date.now() - lastAttempt < FAILED_ATTEMPT_COOLDOWN_MS) return;
     }
     this.queued.add(key);
     this.states.set(key, { status: "pending", error: null });
     this.tail = this.tail.catch(() => undefined).then(async () => {
       if (this.closing) return;
+      this.lastAttempts.set(key, Date.now());
       this.states.set(key, { status: "scanning", error: null });
-      this.onChange();
+      this.onChange(projectId);
       try {
         const sample = await this.scanner.scan(worktreePath, this.abortController.signal);
         if (this.closing) return;
         this.store.saveWorktreeStorage({ ...sample, projectId, measuredAt: new Date().toISOString() });
         this.states.delete(key);
       } catch (error) {
+        this.lastAttempts.set(key, Date.now());
         if (!this.closing) this.states.set(key, { status: "unavailable", error: error instanceof Error ? error.message : String(error) });
       } finally {
         this.queued.delete(key);
-        if (!this.closing) this.onChange();
+        if (!this.closing) this.onChange(projectId);
       }
     });
   }
@@ -176,6 +182,9 @@ export class WorktreeStorageManager {
     this.closing = true;
     this.abortController.abort();
     await this.tail.catch(() => undefined);
+    this.queued.clear();
+    this.states.clear();
+    this.lastAttempts.clear();
   }
 
   private empty(worktreePath: string, status: "unmeasured" | "pending" | "scanning" | "unavailable"): WorktreeStorageSnapshot {

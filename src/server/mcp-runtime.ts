@@ -152,8 +152,7 @@ export class McpRuntime {
       const claim = [...session.claims.values()].find((candidate) => candidate.projectId === projectId);
       return { owner: owner(), leaseToken: claim?.token };
     };
-    const dashboard = () => english(() => this.service.dashboard());
-    const projectList = async () => (await dashboard()).projects.map(({ project, runtime, reservation }) => ({
+    const projectList = async () => (await english(() => this.service.projectSummaries())).map(({ project, runtime, reservation }) => ({
       id: project.id,
       name: project.name,
       port: project.port,

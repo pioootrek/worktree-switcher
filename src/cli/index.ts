@@ -100,11 +100,14 @@ async function main(): Promise<void> {
   const logs = new FileLogWriter(paths.logDirectory);
   const store = new SqliteStateStore(paths.databasePath);
   const memoryWarningMiB = optionalPositiveNumber(option("--memory-warning-mib"), "Memory warning threshold");
-  const processes = new ProcessManager(events.publish, logs, {
+  const processes = new ProcessManager((projectId) => events.publish({ kinds: ["runtime"], projectIds: [projectId] }), logs, {
     memoryWarningThresholdBytes: memoryWarningMiB === null ? null : Math.round(memoryWarningMiB * 1024 * 1024),
   });
-  const storage = new WorktreeStorageManager(store, undefined, events.publish);
-  const tests = new TestJobManager(store, logs, events.publish);
+  const storage = new WorktreeStorageManager(store, undefined, (projectId) => events.publish({ kinds: ["storage"], projectIds: [projectId] }));
+  const tests = new TestJobManager(store, logs, (projectId) => events.publish({
+    kinds: ["tests", "controller"],
+    ...(projectId ? { projectIds: [projectId] } : {}),
+  }));
   const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs, undefined, storage, undefined, undefined, tests);
   const accessToken = randomBytes(32).toString("base64url");
   const sessionId = randomBytes(8).toString("hex");
@@ -118,10 +121,10 @@ async function main(): Promise<void> {
       const mcpSessionId = typeof details?.sessionId === "string" ? details.sessionId : null;
       if (message === "mcp.session_started" && mcpSessionId) {
         mcpSessions.add(mcpSessionId);
-        events.publish();
+        events.publish({ kinds: ["controller"] });
       } else if (message === "mcp.session_closed" && mcpSessionId) {
         mcpSessions.delete(mcpSessionId);
-        events.publish();
+        events.publish({ kinds: ["controller"] });
       }
       logs.controller(message, details);
     },

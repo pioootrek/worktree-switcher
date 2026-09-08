@@ -31,6 +31,7 @@ export function dashboardFixture(): ControllerDashboardResponse {
       storage: [],
       testPresets: [{ worktreePath, presets: [{ id: "node:test", name: "test", adapter: "node", profile: "unit", timeoutMs: 30_000 }], error: null }],
       testRuns: [],
+      metadata: { status: "fresh", lastSuccessfulAt: now, lastAttemptAt: now, retryAt: null, error: null },
     }],
   };
 }
@@ -45,11 +46,22 @@ export async function mountDashboard(page: Page) {
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => {
     // The fixture owns event delivery; count subscriptions to catch accidental duplication.
-    const events = { active: 0 };
+    const sources = new Set<EventTarget>();
+    const events = {
+      active: 0,
+      emit(type: string, data: unknown = {}) {
+        for (const source of sources) source.dispatchEvent(new MessageEvent(type, { data: JSON.stringify(data) }));
+      },
+    };
     Object.assign(window, { fixtureEvents: events });
     window.EventSource = class extends EventTarget {
-      constructor() { super(); events.active += 1; }
-      close() { events.active -= 1; }
+      constructor() {
+        super();
+        events.active += 1;
+        sources.add(this);
+        queueMicrotask(() => this.dispatchEvent(new MessageEvent("ready", { data: JSON.stringify({ epoch: "fixture", revision: 0 }) })));
+      }
+      close() { events.active -= 1; sources.delete(this); }
     } as unknown as typeof EventSource;
   });
   await page.route("**/*", async (route) => {
@@ -62,6 +74,20 @@ export async function mountDashboard(page: Page) {
       }
       if (request.method() === "GET") {
         if (url.pathname === "/api/dashboard") return route.fulfill({ json: data });
+        if (url.pathname === "/api/dashboard/live") {
+          const sections = new Set(url.searchParams.getAll("section"));
+          const snapshot = data.projects[0];
+          return route.fulfill({ json: {
+            projects: [{
+              projectId: snapshot.project.id,
+              ...(sections.has("runtime") ? { runtime: snapshot.runtime } : {}),
+              ...(sections.has("reservation") ? { reservation: snapshot.reservation } : {}),
+              ...(sections.has("tests") ? { testRuns: snapshot.testRuns } : {}),
+              ...(sections.has("storage") ? { storage: snapshot.storage } : {}),
+            }],
+            ...(sections.has("controller") ? { capacity: data.capacity, testQueue: data.testQueue } : {}),
+          } });
+        }
         if (url.pathname === "/api/metrics") return route.fulfill({ json: { projects: [] } });
         return route.fulfill({ status: 404, json: { error: "Unconfigured fixture read" } });
       }
@@ -69,6 +95,7 @@ export async function mountDashboard(page: Page) {
       requests.push({ path: url.pathname, method: request.method(), body });
       const snapshot = data.projects[0];
       switch (url.pathname) {
+        case "/api/projects/web/metadata/refresh": break;
         case "/api/settings/capacity": Object.assign(data.capacity, body); break;
         case "/api/settings/test-queue": Object.assign(data.testQueue, body); break;
         case "/api/projects/web/tls": snapshot.project.tlsMode = body.mode; break;

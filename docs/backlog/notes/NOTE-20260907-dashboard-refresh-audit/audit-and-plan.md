@@ -315,6 +315,31 @@ probe **1/1 passed** (Playwright, one worker, 1.2 s overall). Browser verificati
 reused an existing export of identical dashboard source. No controller restart,
 deployment, production load experiment or production fix was performed.
 
+### Implementation measurement (2026-09-07)
+
+The implementation worktree repeated the real Git fixture with two repositories,
+three worktrees per repository and 101 tracked files per worktree. A cold phase
+issued three concurrent full-dashboard requests; repository single-flight
+produced two `git worktree` and six `git status` commands, six preset discoveries
+and 17,121 serialized response bytes. It completed in 25 ms with 17.537 ms Node
+user CPU, 4.925 ms Node system CPU, and RSS 85,487,616 before / 86,536,192 sampled
+peak / 87,060,480 bytes after.
+
+The separate warm phase issued 12 full-dashboard requests, matching three
+clients receiving four events. It produced **zero Git commands and zero preset
+discoveries**, 68,484 serialized response bytes, and completed in 9 ms with
+8.246 ms Node user CPU, 1.01 ms Node system CPU, and RSS 87,060,480 before /
+87,060,480 sampled peak / 88,895,488 bytes after. Git child CPU was not available.
+Node figures include Vitest and are one run, so they remain diagnostic rather
+than release budgets. The permanent regression separately advances beyond the
+30-second metadata TTL and confirms the same zero-additional-work result,
+including zero storage scheduling.
+
+The final admission boundary keeps the four-process global execution cap but
+applies the 128-waiter bound independently to operational and background work.
+This bounded headroom lets fresh lifecycle and detailed MCP validation enter
+when display discovery has saturated its own queue.
+
 ## Delivery and rollback
 
 Implement this item before broader compact MCP work. Review the cache boundary,

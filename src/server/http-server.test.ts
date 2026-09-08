@@ -21,7 +21,12 @@ async function fixture() {
   const capacity = { enabled: true, limit: 2, used: 0, available: 2, holders: [] };
   const testQueue = { limit: 1, running: 0, queued: 0 };
   const dashboard = vi.fn(async () => ({ projects: [], capacity, testQueue }));
-  const addProject = vi.fn(async () => undefined);
+  const dashboardLive = vi.fn(() => ({ projects: [], capacity, testQueue }));
+  const refreshProjectMetadata = vi.fn(async () => ({
+    project: { id: "project-1" }, runtime: { error: null }, reservation: null,
+    worktrees: [], storage: [], testPresets: [], testRuns: [],
+  }));
+  const addProject = vi.fn(async () => ({ id: "project-1" }));
   const removeProject = vi.fn(async () => ({ id: "project-1", name: "App" }));
   const setProjectTls = vi.fn(async () => undefined);
   const setProjectEnvironment = vi.fn(() => ({ id: "project-1" }));
@@ -51,7 +56,7 @@ async function fixture() {
     directories: [{ name: "code", path: "/home/test/code" }],
     files: [],
   }));
-  const service = { addProject, assignTestPresetProfile, cancelTest, dashboard, deleteEnvironmentProfile, deleteTestEnvironmentProfile, saveTestEnvironmentProfile, testEnvironmentProfiles, deleteWorktreeCache, enqueueTest, refreshWorktreeStorage, removeProject, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity, setTestQueueLimit, testRun } as unknown as ControlService;
+  const service = { addProject, assignTestPresetProfile, cancelTest, dashboard, dashboardLive, deleteEnvironmentProfile, deleteTestEnvironmentProfile, saveTestEnvironmentProfile, testEnvironmentProfiles, deleteWorktreeCache, enqueueTest, refreshProjectMetadata, refreshWorktreeStorage, removeProject, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity, setTestQueueLimit, testRun } as unknown as ControlService;
   const controller = createControllerServer({
     service,
     directoryBrowser: { list: listDirectories } as unknown as DirectoryBrowser,
@@ -75,7 +80,7 @@ async function fixture() {
     controller.server.listen(0, "127.0.0.1", resolve);
   });
   const address = controller.server.address() as AddressInfo;
-  return { addProject, assignTestPresetProfile, base: `http://127.0.0.1:${address.port}`, cancelTest, deleteTestEnvironmentProfile, saveTestEnvironmentProfile, testEnvironmentProfiles, dashboard, deleteEnvironmentProfile, deleteWorktreeCache, enqueueTest, listDirectories, refreshWorktreeStorage, removeProject, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity, setTestQueueLimit, testRun };
+  return { addProject, assignTestPresetProfile, base: `http://127.0.0.1:${address.port}`, cancelTest, deleteTestEnvironmentProfile, saveTestEnvironmentProfile, testEnvironmentProfiles, dashboard, dashboardLive, deleteEnvironmentProfile, deleteWorktreeCache, enqueueTest, listDirectories, refreshProjectMetadata, refreshWorktreeStorage, removeProject, runtimeMetrics, saveEnvironmentProfile, selectEnvironmentProfile, setProjectEnvironment, setProjectTls, setServerCapacity, setTestQueueLimit, testRun };
 }
 
 afterEach(async () => {
@@ -124,6 +129,40 @@ describe("controller access boundary", () => {
     expect(await response.json()).toEqual({ projects: [] });
     expect(runtimeMetrics).toHaveBeenCalledOnce();
     expect(dashboard).not.toHaveBeenCalled();
+  });
+
+  it("serves bounded authenticated live sections without invoking the full dashboard", async () => {
+    const { base, dashboard, dashboardLive } = await fixture();
+    const response = await fetch(`${base}/api/dashboard/live?project=project-1&section=runtime&section=controller`, {
+      headers: { "X-Worktree-Switcher-Token": "test-access-token" },
+    });
+    expect(response.status).toBe(200);
+    expect(dashboardLive).toHaveBeenCalledWith(["project-1"], ["runtime", "controller"]);
+    expect(dashboard).not.toHaveBeenCalled();
+    expect((await response.json()).version).toMatchObject({ revision: 0 });
+
+    const invalid = await fetch(`${base}/api/dashboard/live?section=metadata`, {
+      headers: { "X-Worktree-Switcher-Token": "test-access-token" },
+    });
+    expect(invalid.status).toBe(400);
+  });
+
+  it("validates and authorizes explicit metadata refresh", async () => {
+    const { base, refreshProjectMetadata } = await fixture();
+    expect((await fetch(`${base}/api/projects/project-1/metadata/refresh`, { method: "POST", body: "{}" })).status).toBe(401);
+    const foreign = await fetch(`${base}/api/projects/project-1/metadata/refresh`, {
+      method: "POST",
+      headers: { Origin: "http://attacker.invalid", "Content-Type": "application/json", "X-Worktree-Switcher-Token": "test-access-token" },
+      body: "{}",
+    });
+    expect(foreign.status).toBe(403);
+    const response = await fetch(`${base}/api/projects/project-1/metadata/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Worktree-Switcher-Token": "test-access-token" },
+      body: "{}",
+    });
+    expect(response.status).toBe(200);
+    expect(refreshProjectMetadata).toHaveBeenCalledWith("project-1");
   });
 
   it("localizes API errors from Accept-Language", async () => {
