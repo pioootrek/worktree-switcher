@@ -51,6 +51,26 @@ function fixture() {
 }
 
 describe("TestJobManager", () => {
+  it("rejects a queued source change before spawning the command", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    const enqueueSource = { observedAt: new Date().toISOString(), head: "aaa", branch: "main", dirty: false, statusDigest: "empty", statusEntries: 0, complete: true, errorCode: null };
+    manager.configureSourceObserver(async () => ({ ...enqueueSource, observedAt: new Date().toISOString(), head: "bbb" }));
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(10), environment: resolved(), actor: "local-user", sourceObservation: enqueueSource });
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("failed"));
+    expect(store.getTestRun(run.id)).toMatchObject({ startedAt: null, source: { attribution: "changed", queueComparison: "changed", processOutcome: null } });
+  });
+
+  it("preserves command success but does not green-light equal dirty observations", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    const dirtySource = { observedAt: new Date().toISOString(), head: "aaa", branch: "main", dirty: true, statusDigest: "dirty", statusEntries: 1, complete: true, errorCode: null };
+    manager.configureSourceObserver(async () => ({ ...dirtySource, observedAt: new Date().toISOString() }));
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(10), environment: resolved(), actor: "local-user", sourceObservation: dirtySource });
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("failed"), { timeout: 2_000 });
+    expect(store.getTestRun(run.id)).toMatchObject({ exitCode: 0, source: { attribution: "uncertain", processOutcome: "passed" } });
+  });
+
   it("does not inherit production NODE_ENV from the controller", async () => {
     vi.stubEnv("NODE_ENV", "production");
     const { store, project, manager, worktree, command } = fixture();

@@ -3,6 +3,33 @@ export type DevServerTlsMode = "off" | "generated" | "custom";
 export type LaunchPreset = "auto" | "node" | "django";
 export type TestAdapterKind = "node" | "django";
 export type TestRunPhase = "queued" | "running" | "passed" | "failed" | "cancelled" | "timed_out" | "interrupted";
+export type TestSourceComparison = "match" | "changed" | "unknown";
+export type TestSourceAttribution = "pending" | "observed_match" | "changed" | "uncertain" | "legacy_unknown";
+export type TestProcessOutcome = "passed" | "failed" | "cancelled" | "timed_out" | "interrupted";
+
+export interface TestSourceObservation {
+  observedAt: string;
+  head: string | null;
+  branch: string | null;
+  dirty: boolean | null;
+  statusDigest: string | null;
+  statusEntries: number | null;
+  complete: boolean;
+  errorCode: string | null;
+}
+
+export interface TestSourceEvidence {
+  version: 1;
+  scope: "git-observations";
+  enqueue: TestSourceObservation | null;
+  preflight: TestSourceObservation | null;
+  finish: TestSourceObservation | null;
+  queueComparison: TestSourceComparison;
+  executionComparison: TestSourceComparison;
+  attribution: TestSourceAttribution;
+  reasonCodes: string[];
+  processOutcome: TestProcessOutcome | null;
+}
 
 export interface TestPreset {
   id: string;
@@ -68,6 +95,7 @@ export interface TestRun {
   environmentProfile: string;
   inheritedServerProfile: string | null;
   environmentVariableNames: string[];
+  source: TestSourceEvidence;
 }
 
 export interface TestQueueSettings {

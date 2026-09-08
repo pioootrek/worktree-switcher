@@ -114,6 +114,7 @@ export async function mountDashboard(page: Page) {
             executable: "pnpm", args: ["run", "test"], cwd: worktreePath, queuedAt: now, startedAt: null, finishedAt: null,
             exitCode: null, signal: null, error: null, logs: ["fixture test output"], environmentMode: "clean", environmentProfile: "unit",
             inheritedServerProfile: null, environmentVariableNames: ["NODE_ENV"],
+            source: { version: 1, scope: "git-observations", enqueue: null, preflight: null, finish: null, queueComparison: "unknown", executionComparison: "unknown", attribution: "legacy_unknown", reasonCodes: ["legacy_evidence_unavailable"], processOutcome: null },
           };
           snapshot.testRuns = [run];
           break;

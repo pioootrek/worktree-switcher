@@ -110,7 +110,8 @@ const schema = `
     environment_mode TEXT NOT NULL DEFAULT 'clean' CHECK(environment_mode IN ('clean', 'inherit-server-profile')),
     environment_profile TEXT NOT NULL DEFAULT 'unit',
     inherited_server_profile TEXT,
-    environment_variable_names_json TEXT NOT NULL DEFAULT '[]'
+    environment_variable_names_json TEXT NOT NULL DEFAULT '[]',
+    source_json TEXT
   );
 
   CREATE INDEX IF NOT EXISTS test_runs_project_history ON test_runs(project_id, queued_at DESC);
@@ -287,6 +288,13 @@ function applyMigrations(database: Database.Database): void {
         database.exec("ALTER TABLE test_runs ADD COLUMN environment_variable_names_json TEXT NOT NULL DEFAULT '[]'");
       }
       recordMigration(database, 11);
+    })();
+  }
+  if (!hasMigration(database, 12)) {
+    database.transaction(() => {
+      const columns = new Set((database.prepare("PRAGMA table_info(test_runs)").all() as Array<{ name: string }>).map(({ name }) => name));
+      if (!columns.has("source_json")) database.exec("ALTER TABLE test_runs ADD COLUMN source_json TEXT");
+      recordMigration(database, 12);
     })();
   }
 }

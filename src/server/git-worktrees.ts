@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
 
-import type { Worktree } from "@/shared/contracts";
+import type { TestSourceObservation, Worktree } from "@/shared/contracts";
 
 export type GitCommandPriority = "operational" | "background";
 
@@ -73,6 +74,7 @@ function execute(
 export interface GitWorktreeReader {
   canonicalRepositoryPath(path: string): Promise<string>;
   list(repositoryPath: string, options?: { priority?: GitCommandPriority }): Promise<Worktree[]>;
+  observe(worktreePath: string): Promise<TestSourceObservation>;
   close?(): void;
 }
 export function parseWorktreePorcelain(output: string): Omit<Worktree, "dirty">[] {
@@ -140,6 +142,30 @@ export class SystemGitWorktreeReader implements GitWorktreeReader {
       }
       return { ...worktree, dirty, ...(statusError ? { statusError } : {}) };
     }));
+  }
+
+  async observe(worktreePath: string): Promise<TestSourceObservation> {
+    const observedAt = new Date().toISOString();
+    try {
+      const canonical = await realpath(worktreePath);
+      const read = (args: string[]) => this.admission.run("operational", (signal) => execute(
+        "git", ["-C", canonical, ...args], { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024, signal },
+      ));
+      const before = (await read(["rev-parse", "HEAD"])).stdout.trim();
+      const branch = (await read(["symbolic-ref", "--quiet", "--short", "HEAD"]).catch(() => ({ stdout: "" }))).stdout.trim() || null;
+      const status = (await read(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"])).stdout;
+      const indexFlags = (await read(["ls-files", "-v", "-z"])).stdout.split("\0").filter(Boolean);
+      const sparse = (await read(["config", "--bool", "core.sparseCheckout"]).catch(() => ({ stdout: "false" }))).stdout.trim() === "true";
+      const after = (await read(["rev-parse", "HEAD"])).stdout.trim();
+      const records = status.split("\0").filter(Boolean).sort();
+      const unsupportedIndex = indexFlags.some((record) => record.startsWith("S ") || /^[a-z] /.test(record));
+      const complete = before === after && !sparse && !unsupportedIndex;
+      const errorCode = before !== after ? "unstable_head" : sparse ? "sparse_checkout_unsupported" : unsupportedIndex ? "index_flags_unsupported" : null;
+      return { observedAt, head: after || null, branch, dirty: records.length > 0, statusDigest: createHash("sha256").update(records.join("\0")).digest("hex"), statusEntries: records.length, complete, errorCode };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      return { observedAt, head: null, branch: null, dirty: null, statusDigest: null, statusEntries: null, complete: false, errorCode: code === "ENOENT" ? "missing_worktree" : code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" ? "status_limit_exceeded" : "source_observation_failed" };
+    }
   }
 
   close(): void {

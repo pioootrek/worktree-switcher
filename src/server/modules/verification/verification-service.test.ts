@@ -4,6 +4,7 @@ import type { Project, TestRun, Worktree } from "@/shared/contracts";
 import { BUILT_IN_TEST_PROFILES } from "../environments";
 import { ProjectLifecycle } from "../lifecycle";
 import { VerificationService } from "./index";
+import { legacySourceEvidence } from "@/server/test-source-attribution";
 
 function fixture() {
   const worktree: Worktree = {
@@ -25,7 +26,7 @@ function fixture() {
     adapter: "node", actor: "agent:test", phase: "queued", queuePosition: 1,
     executable: "pnpm", args: ["run", "test"], cwd: worktree.path, queuedAt: project.createdAt,
     startedAt: null, finishedAt: null, exitCode: null, signal: null, error: null, logs: [],
-    environmentMode: "clean", environmentProfile: "unit", inheritedServerProfile: null, environmentVariableNames: [],
+    environmentMode: "clean", environmentProfile: "unit", inheritedServerProfile: null, environmentVariableNames: [], source: legacySourceEvidence(),
   };
   const authorize = vi.fn(() => null);
   const lifecycle = new ProjectLifecycle({

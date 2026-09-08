@@ -11,12 +11,25 @@ import { type LifecycleAccess, type OperationActor } from "../lifecycle";
 export class VerificationService {
   constructor(
     private readonly store: Pick<StateStore, "getTestQueueSettings" | "countTestRuns" | "getTestRun">,
-    private readonly git: Pick<GitWorktreeReader, "list">,
+    private readonly git: Pick<GitWorktreeReader, "list"> & Partial<Pick<GitWorktreeReader, "observe">>,
     private readonly logs: Pick<LogWriter, "controller">,
     private readonly testCommands: Pick<ProjectTestCommandResolver, "resolve" | "discover">,
     private readonly lifecycle: LifecycleAccess,
-    private readonly tests?: Pick<TestJobManager, "status" | "setLimit" | "enqueue" | "cancel">,
-  ) {}
+    private readonly tests?: Pick<TestJobManager, "status" | "setLimit" | "enqueue" | "cancel"> & Partial<Pick<TestJobManager, "configureSourceObserver" | "replay">>,
+  ) {
+    if (this.git.observe && this.tests?.configureSourceObserver) {
+      this.tests.configureSourceObserver(async (run) => this.lifecycle.serialized(run.projectId, async () => {
+        const project = this.lifecycle.requireProject(run.projectId);
+        const worktrees = await this.git.list(project.repositoryPath);
+        const worktree = this.lifecycle.resolveWorktree(project, worktrees, run.worktreePath);
+        const command = this.testCommands.resolve(worktree.path, run.presetId);
+        if (command.cwd !== run.cwd || command.executable !== run.executable || JSON.stringify(command.args) !== JSON.stringify(run.args)) {
+          throw new Error("Definicja polecenia testowego zmieniła się po dodaniu do kolejki.");
+        }
+        return this.git.observe!(worktree.path);
+      }));
+    }
+  }
 
   testQueueStatus(): TestQueueStatus {
     if (this.tests) return this.tests.status();
@@ -45,12 +58,17 @@ export class VerificationService {
       const worktrees = await this.git.list(project.repositoryPath);
       const worktree = this.lifecycle.resolveWorktree(project, worktrees, worktreePath);
       this.lifecycle.assertReservationAllows(projectId, worktree.path, actor);
+      if (idempotencyKey && this.tests?.replay) {
+        const repeated = this.tests.replay(actor.owner, idempotencyKey, projectId, worktree.path, presetId);
+        if (repeated) return repeated;
+      }
       const command = this.testCommands.resolve(worktree.path, presetId);
       const environment = resolveTestEnvironment({
         project,
         worktree,
         profile: testProfileFor(project, command.preset),
       });
+      const sourceObservation = this.git.observe ? await this.git.observe(worktree.path) : undefined;
       const run = this.requireTests().enqueue({
         projectId,
         worktree,
@@ -58,6 +76,7 @@ export class VerificationService {
         environment,
         actor: actor.owner,
         idempotencyKey,
+        sourceObservation,
       });
       this.logs.controller("test_run.queued", {
         runId: run.id,

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { GitCommandAdmission, parseWorktreePorcelain } from "./git-worktrees";
+import { GitCommandAdmission, parseWorktreePorcelain, SystemGitWorktreeReader } from "./git-worktrees";
 
 describe("parseWorktreePorcelain", () => {
   it("parses branches, detached worktrees, and flags from nul-delimited output", () => {
@@ -69,5 +73,31 @@ describe("GitCommandAdmission", () => {
     admission.close();
     await expect(running).rejects.toThrow("aborted");
     await expect(queued).rejects.toThrow("zamknięta");
+  });
+});
+
+describe("SystemGitWorktreeReader.observe", () => {
+  it("records bounded clean and dirty status evidence without paths", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-source-"));
+    try {
+      execFileSync("git", ["init", "-q", "-b", "main", directory]);
+      execFileSync("git", ["-C", directory, "config", "user.email", "test@example.invalid"]);
+      execFileSync("git", ["-C", directory, "config", "user.name", "Test"]);
+      writeFileSync(join(directory, "tracked.txt"), "one\n");
+      execFileSync("git", ["-C", directory, "add", "tracked.txt"]);
+      execFileSync("git", ["-C", directory, "commit", "-qm", "fixture"]);
+      const reader = new SystemGitWorktreeReader();
+      const clean = await reader.observe(directory);
+      writeFileSync(join(directory, "tracked.txt"), "two\n");
+      writeFileSync(join(directory, "untracked.txt"), "new\n");
+      const dirty = await reader.observe(directory);
+      expect(clean).toMatchObject({ branch: "main", dirty: false, statusEntries: 0, complete: true, errorCode: null });
+      expect(dirty).toMatchObject({ head: clean.head, branch: "main", dirty: true, statusEntries: 2, complete: true, errorCode: null });
+      expect(dirty.statusDigest).not.toBe(clean.statusDigest);
+      expect(JSON.stringify(dirty)).not.toContain("tracked.txt");
+      reader.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

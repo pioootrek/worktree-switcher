@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { TestRun } from "@/shared/contracts";
+import { legacySourceEvidence } from "@/server/test-source-attribution";
 import { SqliteStateStore } from "./index";
 
 const directories: string[] = [];
@@ -37,7 +38,7 @@ describe("SqliteStateStore", () => {
       queuedAt: "2026-09-02T10:00:00.000Z", startedAt: "2026-09-02T10:00:01.000Z",
       finishedAt: null, exitCode: null, signal: null, error: null, logs: ["starting"],
       environmentMode: "clean", environmentProfile: "unit", inheritedServerProfile: null,
-      environmentVariableNames: ["NODE_ENV", "PATH"],
+      environmentVariableNames: ["NODE_ENV", "PATH"], source: legacySourceEvidence(),
     };
     store.setTestQueueSettings({ limit: 3 });
     store.saveTestRun(run, "attempt-1");

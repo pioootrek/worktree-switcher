@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 
-import type { TestQueueStatus, TestRun, Worktree } from "@/shared/contracts";
+import type { TestQueueStatus, TestRun, TestSourceObservation, Worktree } from "@/shared/contracts";
 import type { LogWriter } from "./log-writer";
 import type { StateStore } from "./state-store";
 import type { ResolvedTestEnvironment } from "@/server/modules/environments";
 import type { TestCommand } from "./test-command";
 
 import { OwnedProcessGroup } from "./owned-process-group";
+import { compareSource, legacySourceEvidence, pendingSourceEvidence, qualifySource, type TestSourceObserver } from "./test-source-attribution";
 
 const MAX_LOG_LINES = 200;
 const MAX_LOG_LINE_LENGTH = 2_000;
@@ -38,11 +39,15 @@ export interface EnqueueTestInput {
   environment: ResolvedTestEnvironment;
   actor: string;
   idempotencyKey?: string;
+  sourceObservation?: TestSourceObservation;
 }
 
 export class TestJobManager {
   private readonly active = new Map<string, ActiveRun>();
   private readonly finalizations = new Map<string, Promise<void>>();
+  private readonly preparing = new Set<string>();
+  private readonly preparationPromises = new Set<Promise<void>>();
+  private sourceObserver: TestSourceObserver | null = null;
   private logMaintenance: Promise<void> = Promise.resolve();
   private pruneOperation: Promise<void> | null = null;
   private pumping = false;
@@ -60,11 +65,24 @@ export class TestJobManager {
     void this.pruneLogs();
   }
 
+  configureSourceObserver(observer: TestSourceObserver): void {
+    this.sourceObserver = observer;
+  }
+
+  replay(actor: string, idempotencyKey: string, projectId: string, worktreePath: string, presetId: string): TestRun | null {
+    const repeated = this.store.findTestRunByIdempotency(actor, idempotencyKey);
+    if (!repeated) return null;
+    if (repeated.projectId !== projectId || repeated.worktreePath !== worktreePath || repeated.presetId !== presetId) {
+      throw new Error("Klucz idempotencji jest już używany przez inne uruchomienie testu.");
+    }
+    return repeated;
+  }
+
   status(): TestQueueStatus {
     const settings = this.store.getTestQueueSettings();
     return {
       ...settings,
-      running: this.active.size,
+      running: this.active.size + this.preparing.size,
       queued: this.store.countTestRuns(["queued"]),
     };
   }
@@ -80,15 +98,8 @@ export class TestJobManager {
   enqueue(input: EnqueueTestInput): TestRun {
     if (this.closed) throw new Error("Kolejka testów jest zamknięta.");
     if (input.idempotencyKey) {
-      const repeated = this.store.findTestRunByIdempotency(input.actor, input.idempotencyKey);
-      if (repeated) {
-        if (
-          repeated.projectId !== input.projectId
-          || repeated.worktreePath !== input.worktree.path
-          || repeated.presetId !== input.command.preset.id
-        ) throw new Error("Klucz idempotencji jest już używany przez inne uruchomienie testu.");
-        return repeated;
-      }
+      const repeated = this.replay(input.actor, input.idempotencyKey, input.projectId, input.worktree.path, input.command.preset.id);
+      if (repeated) return repeated;
     }
     if (this.store.countTestRuns(["queued"]) >= MAX_QUEUED_RUNS) {
       throw new Error(`Kolejka testów może zawierać najwyżej ${MAX_QUEUED_RUNS} oczekujących zadań.`);
@@ -120,6 +131,7 @@ export class TestJobManager {
       environmentProfile: input.environment.profile,
       inheritedServerProfile: input.environment.inheritedServerProfile,
       environmentVariableNames: input.environment.variableNames,
+      source: input.sourceObservation ? pendingSourceEvidence(input.sourceObservation) : legacySourceEvidence(),
     };
     this.store.saveTestRun(run, input.idempotencyKey);
     this.environments.set(run.id, input.environment.environment);
@@ -138,6 +150,7 @@ export class TestJobManager {
     const run = active?.run ?? persisted;
     if (actor !== "local-user" && run.actor !== actor) throw new Error("Tylko autor testu może go anulować.");
     if (run.phase === "queued") {
+      this.preparing.delete(run.id);
       run.phase = "cancelled";
       run.finishedAt = new Date().toISOString();
       await this.finish(run);
@@ -156,6 +169,7 @@ export class TestJobManager {
     this.outputNotification = null;
     const unfinished = this.store.listPendingTestRuns();
     const cancellations = await Promise.allSettled(unfinished.map((run) => this.cancel(run.id, "local-user")));
+    await Promise.allSettled(this.preparationPromises);
     await Promise.all([...this.active.values()].map((active) => this.complete(active)));
     await Promise.all(this.finalizations.values());
     await this.logMaintenance;
@@ -178,18 +192,59 @@ export class TestJobManager {
           .filter(({ id, phase }) => phase === "queued" && !this.finalizations.has(id))
           .sort((left, right) => left.queuedAt.localeCompare(right.queuedAt));
         const occupiedWorktrees = new Set([...this.active.values()].map(({ worktreePath }) => worktreePath));
-        while (this.active.size < limit) {
+        for (const id of this.preparing) occupiedWorktrees.add(this.requireRun(id).worktreePath);
+        while (this.active.size + this.preparing.size < limit) {
           const next = queued.find(({ worktreePath }) => !occupiedWorktrees.has(worktreePath));
           if (!next) break;
           queued.splice(queued.indexOf(next), 1);
           occupiedWorktrees.add(next.worktreePath);
-          this.start(this.requireRun(next.id));
+          const run = this.requireRun(next.id);
+          this.preparing.add(run.id);
+          const preparation = this.prepare(run);
+          this.preparationPromises.add(preparation);
+          void preparation.finally(() => this.preparationPromises.delete(preparation));
         }
         this.updateQueuePositions();
       } finally {
         this.pumping = false;
       }
     });
+  }
+
+  private async prepare(run: TestRun): Promise<void> {
+    try {
+      if (!this.sourceObserver || !run.source.enqueue) {
+        this.preparing.delete(run.id);
+        this.start(run);
+        return;
+      }
+      run.source.preflight = await this.sourceObserver(run, "preflight");
+      run.source.queueComparison = compareSource(run.source.enqueue, run.source.preflight);
+      if (this.closed || this.store.getTestRun(run.id)?.phase !== "queued") return;
+      this.persistNow(run);
+      if (run.source.queueComparison !== "match") {
+        run.source = qualifySource(run.source);
+        run.phase = "failed";
+        run.finishedAt = new Date().toISOString();
+        run.error = run.source.queueComparison === "changed" ? "Źródło testu zmieniło się podczas oczekiwania w kolejce." : "Nie udało się potwierdzić źródła testu przed uruchomieniem.";
+        this.preparing.delete(run.id);
+        await this.finish(run);
+        return;
+      }
+      this.preparing.delete(run.id);
+      if (this.closed || this.store.getTestRun(run.id)?.phase !== "queued") return;
+      this.start(run);
+    } catch (error) {
+      if (this.store.getTestRun(run.id)?.phase === "queued") {
+        run.phase = "failed";
+        run.finishedAt = new Date().toISOString();
+        run.error = `Nie udało się sprawdzić źródła testu: ${String(error)}`;
+        await this.finish(run);
+      }
+    } finally {
+      this.preparing.delete(run.id);
+      this.pump();
+    }
   }
 
   private start(run: TestRun): void {
@@ -260,6 +315,15 @@ export class TestJobManager {
         run.finishedAt = new Date().toISOString();
         run.phase = active.cancellationRequested ? "cancelled" : active.timedOut ? "timed_out"
           : run.exitCode === 0 && !run.error ? "passed" : "failed";
+        run.source.processOutcome = run.phase;
+        if (this.sourceObserver && run.source.enqueue) {
+          run.source.finish = await this.sourceObserver(run, "finish");
+          run.source = qualifySource(run.source);
+          if (run.phase === "passed" && run.source.attribution !== "observed_match") {
+            run.phase = "failed";
+            run.error = "Polecenie zakończyło się powodzeniem, ale źródło nie zostało potwierdzone.";
+          }
+        }
         if (run.phase === "failed" && !run.error) run.error = `Proces testowy zakończył się z kodem ${run.exitCode ?? run.signal ?? "unknown"}.`;
         await this.finish(run);
       } catch (error) {
@@ -336,6 +400,7 @@ export class TestJobManager {
       }
       this.persistNow(run);
       this.active.delete(run.id);
+      this.preparing.delete(run.id);
       this.logs.controller("test_run.finished", { runId: run.id, projectId: run.projectId, phase: run.phase, exitCode: run.exitCode });
       void this.pruneLogs();
     })().finally(() => {
