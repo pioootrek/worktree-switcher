@@ -5,9 +5,14 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SqliteStateStore } from "./sqlite-store";
+import { ProjectLifecycle } from "./modules/lifecycle";
 import { AllowlistedWorktreeCacheCleaner, FilesystemWorktreeDiskScanner, WorktreeStorageManager, type WorktreeDiskScanner } from "./worktree-storage";
 
 const directories: string[] = [];
+
+function lifecycle(store: SqliteStateStore): ProjectLifecycle {
+  return new ProjectLifecycle(store, { snapshot: vi.fn() });
+}
 
 afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
@@ -58,7 +63,7 @@ describe("FilesystemWorktreeDiskScanner", () => {
         return { worktreePath, totalBytes: 100, nextBytes: 40, nextCacheBytes: 30, nodeModulesBytes: 20, topDirectories: [] };
       },
     };
-    const manager = new WorktreeStorageManager(store, scanner);
+    const manager = new WorktreeStorageManager(store, lifecycle(store), scanner);
     manager.queue(project.id, "/code/app", true);
     manager.queue(project.id, "/code/app-feature", true);
     const deadline = Date.now() + 2_000;
@@ -80,7 +85,7 @@ describe("FilesystemWorktreeDiskScanner", () => {
     const second = store.addProject({ name: "Two", repositoryPath: "/code/two", port: 3301, executable: "pnpm", args: [] });
     const paths = new Map([[first.id, ["/code/one"]], [second.id, ["/code/two"]]]);
     const scan = vi.fn(async () => { throw new Error("fixture unavailable"); });
-    const manager = new WorktreeStorageManager(store, { scan }, (projectId) => {
+    const manager = new WorktreeStorageManager(store, lifecycle(store), { scan }, (projectId) => {
       manager.ensureFresh(projectId, paths.get(projectId) ?? []);
     });
 
@@ -92,6 +97,40 @@ describe("FilesystemWorktreeDiskScanner", () => {
 
     manager.queue(first.id, "/code/one", true);
     await vi.waitFor(() => expect(scan).toHaveBeenCalledTimes(3));
+    await manager.close();
+    store.close();
+  });
+
+  it("does not publish or invoke an automatic scan while maintenance owns the worktree", async () => {
+    const root = mkdtempSync(join(tmpdir(), "worktree-storage-maintenance-"));
+    directories.push(root);
+    const store = new SqliteStateStore(join(root, "state.sqlite3"));
+    const project = store.addProject({ name: "App", repositoryPath: "/code/app", port: 3300, executable: "pnpm", args: [] });
+    const authority = lifecycle(store);
+    const scan = vi.fn(async (worktreePath: string) => ({ worktreePath, totalBytes: 1, nextBytes: 0, nextCacheBytes: 0, nodeModulesBytes: 0, topDirectories: [] }));
+    const manager = new WorktreeStorageManager(store, authority, { scan });
+    const release = authority.acquireMaintenance(project.id, "/code/app");
+
+    manager.ensureFresh(project.id, ["/code/app"]);
+
+    expect(scan).not.toHaveBeenCalled();
+    expect(manager.isBusy(project.id, "/code/app")).toBe(false);
+    expect(manager.snapshots(project.id, ["/code/app"])[0].status).toBe("unmeasured");
+    release?.();
+    expect(manager.queue(project.id, "/code/app", true)).toBe(true);
+    await vi.waitFor(() => expect(scan).toHaveBeenCalledOnce());
+    await manager.close();
+    store.close();
+  });
+
+  it("rejects a facade lifecycle that differs from its scan authority", async () => {
+    const root = mkdtempSync(join(tmpdir(), "worktree-storage-lifecycle-"));
+    directories.push(root);
+    const store = new SqliteStateStore(join(root, "state.sqlite3"));
+    const manager = new WorktreeStorageManager(store, lifecycle(store));
+
+    expect(() => manager.assertLifecycle(lifecycle(store))).toThrow("must share one ProjectLifecycle");
+
     await manager.close();
     store.close();
   });

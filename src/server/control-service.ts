@@ -68,8 +68,10 @@ export class ControlService {
     private readonly cacheCleaner: WorktreeCacheCleaner = new AllowlistedWorktreeCacheCleaner(),
     testCommands: ProjectTestCommandResolver = new ProjectTestCommandResolver(),
     private readonly tests?: TestJobManager,
+    lifecycle?: ProjectLifecycle,
   ) {
-    this.lifecycle = new ProjectLifecycle(store, processes);
+    this.lifecycle = lifecycle ?? new ProjectLifecycle(store, processes);
+    this.storage?.assertLifecycle(this.lifecycle);
     this.runtime = new RuntimeService(store, git, processes, logs, commands, this.lifecycle);
     this.environments = new EnvironmentService(store, logs, this.lifecycle, this.runtime);
     this.verification = new VerificationService(store, git, logs, testCommands, this.lifecycle, tests);
@@ -379,54 +381,69 @@ export class ControlService {
   }
 
   async refreshWorktreeStorage(projectId: string, worktreePath: string): Promise<void> {
-    const project = this.lifecycle.requireProject(projectId);
-    const worktrees = await this.git.list(project.repositoryPath);
-    const selected = this.lifecycle.resolveWorktree(project, worktrees, worktreePath);
-    this.storage?.queue(project.id, selected.path, true);
-    this.logs.controller("worktree_storage.refresh_requested", { projectId, worktreePath: selected.path });
+    await this.lifecycle.serialized(projectId, async () => {
+      const project = this.lifecycle.requireProject(projectId);
+      const worktrees = await this.git.list(project.repositoryPath);
+      const selected = this.lifecycle.resolveWorktree(project, worktrees, worktreePath);
+      this.storage?.queue(project.id, selected.path, true);
+      this.logs.controller("worktree_storage.refresh_requested", { projectId, worktreePath: selected.path });
+    });
   }
 
   async deleteWorktreeCache(projectId: string, worktreePath: string, cache: SafeCacheKind): Promise<CacheDeletionResult> {
-    const project = this.lifecycle.requireProject(projectId);
-    const worktrees = await this.git.list(project.repositoryPath);
-    const selected = this.lifecycle.resolveWorktree(project, worktrees, worktreePath);
-    const auditDetails = { worktreePath: selected.path, cache, target: `${selected.path}/.next` };
-    try {
-      const runtime = this.processes.snapshot(projectId);
-      if (
-        runtime.worktreePath === selected.path
-        && (runtime.phase === "starting" || runtime.phase === "running" || runtime.phase === "stopping")
-      ) {
-        throw new Error("Zatrzymaj serwer tego worktree przed usunięciem katalogu .next.");
+    return this.lifecycle.serialized(projectId, async () => {
+      const project = this.lifecycle.requireProject(projectId);
+      const worktrees = await this.git.list(project.repositoryPath);
+      const selected = this.lifecycle.resolveWorktree(project, worktrees, worktreePath);
+      const auditDetails = { worktreePath: selected.path, cache, target: `${selected.path}/.next` };
+      let releaseMaintenance: (() => void) | null = null;
+      try {
+        const runtime = this.processes.snapshot(projectId);
+        if (
+          runtime.worktreePath === selected.path
+          && (runtime.phase === "starting" || runtime.phase === "running" || runtime.phase === "stopping")
+        ) {
+          throw new Error("Zatrzymaj serwer tego worktree przed usunięciem katalogu .next.");
+        }
+        const reservation = this.store.getActiveReservation(projectId);
+        if (reservation?.worktreePath === selected.path) {
+          throw new Error("Zwolnij blokadę tego worktree przed usunięciem katalogu .next.");
+        }
+        if (this.storage?.isBusy(projectId, selected.path)) {
+          throw new Error("Poczekaj na zakończenie pomiaru dysku przed usunięciem katalogu .next.");
+        }
+        if (this.store.countTestRuns(["queued", "running"], projectId, selected.path) > 0) {
+          throw new Error("Poczekaj na zakończenie testów tego worktree przed usunięciem katalogu .next.");
+        }
+        releaseMaintenance = this.lifecycle.acquireMaintenance(projectId, selected.path);
+        if (!releaseMaintenance) {
+          throw new Error("Poczekaj na zakończenie pomiaru dysku przed usunięciem katalogu .next.");
+        }
+        const result = await this.cacheCleaner.remove(selected.path, cache);
+        this.store.recordProjectEvent(projectId, "worktree_cache.delete_succeeded", "local-user", { ...auditDetails, removed: result.removed });
+        releaseMaintenance();
+        releaseMaintenance = null;
+        this.storage?.queue(projectId, selected.path, true);
+        this.logs.controller("worktree_cache.deleted", { projectId, ...auditDetails, removed: result.removed });
+        return result;
+      } catch (error) {
+        this.store.recordProjectEvent(projectId, "worktree_cache.delete_failed", "local-user", {
+          ...auditDetails,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      } finally {
+        releaseMaintenance?.();
       }
-      const reservation = this.store.getActiveReservation(projectId);
-      if (reservation?.worktreePath === selected.path) {
-        throw new Error("Zwolnij blokadę tego worktree przed usunięciem katalogu .next.");
-      }
-      if (this.storage?.isBusy(projectId, selected.path)) {
-        throw new Error("Poczekaj na zakończenie pomiaru dysku przed usunięciem katalogu .next.");
-      }
-      if (this.store.countTestRuns(["queued", "running"], projectId, selected.path) > 0) {
-        throw new Error("Poczekaj na zakończenie testów tego worktree przed usunięciem katalogu .next.");
-      }
-      const result = await this.cacheCleaner.remove(selected.path, cache);
-      this.store.recordProjectEvent(projectId, "worktree_cache.delete_succeeded", "local-user", { ...auditDetails, removed: result.removed });
-      this.storage?.queue(projectId, selected.path, true);
-      this.logs.controller("worktree_cache.deleted", { projectId, ...auditDetails, removed: result.removed });
-      return result;
-    } catch (error) {
-      this.store.recordProjectEvent(projectId, "worktree_cache.delete_failed", "local-user", {
-        ...auditDetails,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
+    });
   }
 
   async shutdown(): Promise<void> {
     const failures: unknown[] = [];
+    const drain = this.lifecycle.closeAndDrain();
     const cleanup = await Promise.allSettled([this.tests?.shutdown(), this.processes.stopAll()]);
     failures.push(...cleanup.filter((result) => result.status === "rejected").map((result) => result.reason));
+    await drain;
     try {
       await this.storage?.close();
     } catch (error) {

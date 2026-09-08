@@ -28,4 +28,49 @@ describe("shared project lifecycle", () => {
     await lifecycle.serialized("web", async () => { order.push("web:third"); });
     expect(order).toEqual(["web:first", "api", "web:second", "web:third"]);
   });
+
+  it("coordinates maintenance and scan admission per worktree and releases permits idempotently", () => {
+    const lifecycle = new ProjectLifecycle({
+      getProject: () => null,
+      listProjects: () => [],
+      authorizeReservation: () => null,
+      getServerCapacitySettings: () => ({ enabled: false, limit: 2 }),
+    }, { snapshot: vi.fn() });
+
+    const releaseScan = lifecycle.acquireScan("web", "/code/web");
+    expect(releaseScan).not.toBeNull();
+    expect(lifecycle.acquireMaintenance("web", "/code/web")).toBeNull();
+    expect(lifecycle.acquireMaintenance("api", "/code/api")).not.toBeNull();
+
+    releaseScan?.();
+    releaseScan?.();
+    const releaseMaintenance = lifecycle.acquireMaintenance("web", "/code/web");
+    expect(releaseMaintenance).not.toBeNull();
+    expect(lifecycle.acquireScan("web", "/code/web")).toBeNull();
+    releaseMaintenance?.();
+    expect(lifecycle.acquireScan("web", "/code/web")).not.toBeNull();
+  });
+
+  it("closes admission and drains accepted serialized work", async () => {
+    const lifecycle = new ProjectLifecycle({
+      getProject: () => null,
+      listProjects: () => [],
+      authorizeReservation: () => null,
+      getServerCapacitySettings: () => ({ enabled: false, limit: 2 }),
+    }, { snapshot: vi.fn() });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const accepted = lifecycle.serialized("web", async () => gate);
+    const draining = lifecycle.closeAndDrain();
+
+    expect(lifecycle.acquireScan("web", "/code/web")).toBeNull();
+    await expect(lifecycle.serialized("api", async () => undefined)).rejects.toThrow("zamykany");
+    let drained = false;
+    void draining.then(() => { drained = true; });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    release();
+    await accepted;
+    await draining;
+  });
 });

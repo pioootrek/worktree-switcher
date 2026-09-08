@@ -47,7 +47,7 @@ describe("ControlService dashboard projection", () => {
     })));
     const git = { list } as unknown as GitWorktreeReader;
     const ensureFresh = vi.fn();
-    const storage = { ensureFresh, snapshots: vi.fn(() => []) } as unknown as WorktreeStorageManager;
+    const storage = { ensureFresh, snapshots: vi.fn(() => []), assertLifecycle: vi.fn() } as unknown as WorktreeStorageManager;
     const testCommands = new ProjectTestCommandResolver();
     const discover = vi.spyOn(testCommands, "discover").mockReturnValue([]);
     const service = new ControlService(store, git, new ProcessManager(), undefined, undefined, storage, undefined, testCommands);
