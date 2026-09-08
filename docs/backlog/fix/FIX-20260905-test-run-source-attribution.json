@@ -5,7 +5,9 @@
   "links": {
     "related_ids": [
       "FEAT-20260902-managed-test-queue",
-      "NOTE-20260829-readiness-assessment"
+      "NOTE-20260829-readiness-assessment",
+      "NOTE-20260908-test-source-attribution-plan",
+      "FEAT-20260905-compact-mcp-status"
     ]
   },
   "notes": [
@@ -13,6 +15,11 @@
       "author": "agent:codex",
       "date": "2026-09-05",
       "text": "Static finding at d4a2c8d: src/server/test-job-manager.ts enqueue copies input.worktree.head/branch/dirty; start only updates phase/timestamps before spawning run.cwd. A queue/source-change reproduction remains required by this item."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-08",
+      "text": "Prepared source-grounded implementation plan at fd3f9e55fb11be3c1a5a7e7dcbb560f1d3cb9e7a after dashboard and cache lifecycle fixes. Confirmed enqueue-only attribution, synchronous pump/start, limited SQL upsert fields and enqueue HEAD presentation. NOTE-20260908-test-source-attribution-plan contains the proposed strict pass policy, dirty-source compatibility impact, staged changes and regression matrix. No production code change or source-change reproduction performed; item remains open, priority next."
     }
   ],
   "priority": "next",
@@ -31,7 +38,12 @@
   "scope": [
     "Record distinct enqueue and execution source state, including HEAD and dirty-state evidence. Revalidate the Git-discovered worktree immediately before starting.",
     "Detect source changes while a run waits or executes. Choose and document a conservative stale/changed result that never silently certifies the requested revision.",
-    "Expose source uncertainty compactly in HTTP, MCP, and the dashboard. A clean Git index or a dirty boolean alone is not proof of immutable contents; do not promise full reproducibility or add worktree creation to this fix."
+    "Expose source uncertainty compactly in HTTP, MCP, and the dashboard. A clean Git index or a dirty boolean alone is not proof of immutable contents; do not promise full reproducibility or add worktree creation to this fix.",
+    "Read notes/NOTE-20260908-test-source-attribution-plan/implementation-plan.md before implementation. It specifies proposed outcome policy, evidence contracts, queue ownership, migration, presentation and delivery sequence at baseline fd3f9e5.",
+    "Introduce bounded uncached source observations at enqueue, preflight and completion. A status digest is not a content fingerprint: dirty or incomplete evidence remains uncertain, and endpoint observations do not prove immutable execution.",
+    "Account for asynchronous preflight in the existing queue capacity and worktree exclusion before awaiting Git. Reuse the shared project lifecycle; prevent late spawn after cancellation/shutdown and preserve cache-maintenance, owned-process cleanup and log-finalization guarantees.",
+    "Keep the command outcome separate from source-qualified success. Proposed policy rejects detected queued-source changes before spawn and prevents changed/uncertain exit-zero runs from appearing as ordinary passes; review the explicit dirty-worktree compatibility impact in the linked plan.",
+    "Preserve legacy enqueue fields and old history. Add versioned bounded evidence through the single SQLite owner, update insert/upsert paths, and expose consistent source qualification in HTTP, MCP and localized dashboard test history."
   ],
   "source": "Repository assessment and owner direction on 2026-09-05",
   "status": "open",
@@ -40,7 +52,11 @@
   "validation": [
     "Block the queue, enqueue revision A, change the worktree to B, then release the queue. Verify the record cannot claim an unqualified pass for A.",
     "Change tracked or relevant untracked inputs without changing HEAD and verify the recorded uncertainty; cover removed/prunable worktrees before launch.",
-    "Verify unchanged source keeps the normal fast path and existing runs migrate without inventing execution-time metadata."
+    "Verify unchanged source keeps the normal fast path and existing runs migrate without inventing execution-time metadata.",
+    "Cover dirty-to-dirty edits with equal status digests, unsupported/partial Git evidence, command/cwd changes, source changes during execution and explicit limitations of change-then-restore detection. Preserve process outcome independently from attribution.",
+    "Defer preflight and exercise repeated pumps, capacity changes, same-worktree exclusion, idempotent replay, cancellation and shutdown. No late or duplicate child may spawn; cache deletion must remain excluded during owned preparation/finalization.",
+    "Cover final observation failure after exit zero, log-finalization and owned-process cleanup failures, migration/legacy_unknown mapping, restart interruption, and consistent English/Polish UI and HTTP/MCP contracts.",
+    "Run focused regressions, pnpm check, pnpm build and affected browser fixtures under project queue/host rules. Record actual source-observation latency and bounds; plan preparation itself has not executed the queue/source-change reproduction."
   ],
   "value": [
     "Agents can reuse verification evidence without rerunning tests merely to discover which code was checked."
