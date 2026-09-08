@@ -62,16 +62,6 @@
       "type": "feature"
     },
     {
-      "area": "distribution",
-      "id": "FEAT-20260905-portable-verification",
-      "path": "feature/FEAT-20260905-portable-verification.json",
-      "priority": "next",
-      "risk_level": "medium",
-      "status": "open",
-      "title": "Automate portable checks and a clean package smoke test",
-      "type": "feature"
-    },
-    {
       "area": "process-manager",
       "id": "FEAT-20260905-remote-commit-verification",
       "path": "feature/FEAT-20260905-remote-commit-verification.json",

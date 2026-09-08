@@ -1,0 +1,75 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+        with:
+          version: 11.22.0
+          run_install: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22.22.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - name: Pack verified application
+        id: pack
+        shell: bash
+        run: |
+          mkdir -p portable-artifact
+          npm pack --json --pack-destination portable-artifact > portable-artifact/npm-pack.json
+          node -e 'const fs=require("fs");const crypto=require("crypto");const p=JSON.parse(fs.readFileSync("portable-artifact/npm-pack.json"))[0].filename;const f=`portable-artifact/${p}`;const sha=crypto.createHash("sha256").update(fs.readFileSync(f)).digest("hex");fs.copyFileSync("scripts/package-smoke.mjs","portable-artifact/package-smoke.mjs");const h=crypto.createHash("sha256").update(fs.readFileSync("portable-artifact/package-smoke.mjs")).digest("hex");fs.writeFileSync("portable-artifact/provenance.json",JSON.stringify({commit:process.env.GITHUB_SHA,tarball:p,sha256:sha,smokeSha256:h,node:process.version,pnpm:"11.22.0"},null,2)+"\n")'
+          rm portable-artifact/npm-pack.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: portable-package
+          path: portable-artifact/
+          retention-days: 7
+          if-no-files-found: error
+
+  package-smoke:
+    needs: check-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22.22.0
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: portable-package
+          path: portable-artifact
+      - name: Verify provenance and smoke installed artifact
+        shell: bash
+        run: |
+          node -e 'const fs=require("fs"),c=require("crypto"),p=require("./portable-artifact/provenance.json");for(const [f,want] of [[p.tarball,p.sha256],["package-smoke.mjs",p.smokeSha256]]){const got=c.createHash("sha256").update(fs.readFileSync(`portable-artifact/${f}`)).digest("hex");if(got!==want)throw Error(`checksum mismatch: ${f}`)}'
+          TARBALL=$(node -p 'require("./portable-artifact/provenance.json").tarball')
+          SHA256=$(node -p 'require("./portable-artifact/provenance.json").sha256')
+          node portable-artifact/package-smoke.mjs --tarball "portable-artifact/$TARBALL" --sha256 "$SHA256" --report portable-smoke-report.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: portable-smoke-report
+          path: portable-smoke-report.json
+          retention-days: 7
+          if-no-files-found: ignore

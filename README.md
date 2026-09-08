@@ -413,7 +413,16 @@ not write to `/var/log`.
 ```bash
 pnpm check
 pnpm build
+pnpm smoke:package
 ```
+
+`smoke:package` packs the already-built application, installs that exact tarball
+with production dependencies in a fresh temporary consumer, and exercises the
+installed CLI, native SQLite dependency, packaged dashboard assets, authenticated
+HTTP API, and MCP claim/runtime/release flow. It never installs or modifies a user
+service. To verify an existing artifact, use
+`pnpm smoke:package --tarball /absolute/path/package.tgz --sha256 <digest>`.
+The command emits a bounded JSON report and removes its isolated state and fixture.
 
 Useful focused commands:
 

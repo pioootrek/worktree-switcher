@@ -2,7 +2,7 @@
   "author": "agent:codex",
   "body": {
     "baseline_commit": "2eb1f06640c6254f14e4b9b7ce7f20b0836bb2bb",
-    "summary": "Source-grounded portable verification plan: sequential source checks/build and a separate CI consumer job without checkout, tarball manifest/checksums, production dependency installation and native SQLite, installed CLI/static assets/MCP runtime flow, bounded owned cleanup, fault injection and sanitized reports. No CI workflow, package installation or smoke execution performed."
+    "summary": "Implemented the portable verification workflow and standalone package smoke harness. Local check/build and the final ten-stage clean-consumer runtime smoke passed, including controlled damaged-asset rejection and graceful cleanup. Real GitHub job evidence remains before backlog closure."
   },
   "created": "2026-09-08",
   "files": [

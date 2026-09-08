@@ -38,6 +38,7 @@
     "dev:web": "next dev",
     "lint": "eslint .",
     "start": "node dist/cli/index.js start",
+    "smoke:package": "node scripts/package-smoke.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
