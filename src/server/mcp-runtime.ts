@@ -439,7 +439,7 @@ export class McpRuntime {
         reservationId: result.reservation.id,
         projectId,
         worktreePath: result.reservation.worktreePath,
-        operationErrorCode: result.operationError ? "runtime_operation_failed" : null,
+        operationErrorCode: result.operationErrorCode,
         leaseHeld: true,
         status: await english(() => this.service.compactProjectStatus(projectId, owner())),
       });

@@ -86,6 +86,17 @@ interface TargetWaiters {
   waiters: Set<Waiter>;
 }
 
+interface ProjectObservation {
+  observedAt: string;
+  project: Project;
+  runtime: RuntimeStatusSummary;
+  reservation: Reservation | null;
+  capacity: ServerCapacityStatus;
+  queue: TestQueueStatus;
+  projectRunning: number;
+  projectQueued: number;
+}
+
 export class StatusService {
   readonly epoch = randomUUID();
   private readonly ownerSalt = randomBytes(32);
@@ -105,13 +116,7 @@ export class StatusService {
   ) {}
 
   project(projectId: string, owner: string): CompactEnvelope<CompactProjectStatus> {
-    const observedAt = new Date().toISOString();
-    const project = this.store.getProject(projectId);
-    if (!project) throw new Error("STATUS_NOT_FOUND");
-    const runtime = this.processes.statusSummary(projectId);
-    const reservation = this.store.getEffectiveReservation(projectId, observedAt);
-    const status = this.projectStatus(project, runtime, reservation, owner);
-    return this.envelope(`project:${projectId}`, observedAt, status, this.projectRetry(runtime.phase));
+    return this.projectEnvelope(this.observeProject(projectId), owner);
   }
 
   test(runId: string): CompactEnvelope<CompactTestStatus> {
@@ -143,11 +148,23 @@ export class StatusService {
     if (!this.store.getProject(projectId)) throw new Error("STATUS_NOT_FOUND");
     const tail = this.processes.logTail(projectId, limit);
     let lines = tail.lines;
-    while (Buffer.byteLength(JSON.stringify(lines), "utf8") > 16 * 1024 && lines.length > 1) lines = lines.slice(1);
-    if (Buffer.byteLength(JSON.stringify(lines), "utf8") > 16 * 1024) {
-      lines = [new TextDecoder().decode(Buffer.from(lines[0]!).subarray(0, 15 * 1024))];
+    let contentTruncated = false;
+    const result = () => ({ projectId, lines, retainedLines: tail.retainedLines, truncated: tail.truncated || contentTruncated || lines.length < tail.lines.length });
+    while (Buffer.byteLength(JSON.stringify(result()), "utf8") > 16 * 1024 && lines.length > 1) lines = lines.slice(1);
+    if (Buffer.byteLength(JSON.stringify(result()), "utf8") > 16 * 1024) {
+      const value = lines[0]!;
+      let low = 0;
+      let high = value.length;
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        lines = [value.slice(0, middle)];
+        if (Buffer.byteLength(JSON.stringify(result()), "utf8") <= 16 * 1024) low = middle;
+        else high = middle - 1;
+      }
+      lines = [value.slice(0, low)];
+      contentTruncated = lines[0]!.length < value.length;
     }
-    return { projectId, lines, retainedLines: tail.retainedLines, truncated: tail.truncated || lines.length < tail.lines.length };
+    return result();
   }
 
   async wait(target: Target, cursor: string, sessionKey: string, timeoutMs = DEFAULT_WAIT_MS, signal?: AbortSignal): Promise<{ changed: boolean; result?: AnyEnvelope; epoch: string; cursor: string; retryAfterMs: number; errorCode?: "status_wait_busy" }> {
@@ -179,7 +196,11 @@ export class StatusService {
         signal,
       };
       waiter.timer.unref();
-      waiter.abort = () => { this.remove(key, waiter); reject(new Error("STATUS_WAIT_CANCELLED")); };
+      waiter.abort = () => {
+        if (signal?.aborted && !this.targets.get(key)?.waiters.has(waiter)) clearTimeout(waiter.timer);
+        this.remove(key, waiter);
+        reject(new Error("STATUS_WAIT_CANCELLED"));
+      };
       if (signal?.aborted) return waiter.abort();
       signal?.addEventListener("abort", waiter.abort, { once: true });
       const group = this.targets.get(key) ?? { target, waiters: new Set<Waiter>() };
@@ -187,8 +208,13 @@ export class StatusService {
       this.targets.set(key, group);
       this.sessionCounts.set(sessionKey, (this.sessionCounts.get(sessionKey) ?? 0) + 1);
       this.ensureTimer();
-      const rechecked = this.read(target, sessionKey);
-      if (rechecked.cursor !== cursor) { this.remove(key, waiter); waiter.resolve(rechecked); }
+      try {
+        const rechecked = this.read(target, sessionKey);
+        if (rechecked.cursor !== cursor) { this.remove(key, waiter); waiter.resolve(rechecked); }
+      } catch (error) {
+        this.remove(key, waiter);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
@@ -200,10 +226,23 @@ export class StatusService {
     }
   }
 
-  private projectStatus(project: Project, runtime: RuntimeStatusSummary, reservation: Reservation | null, owner: string): CompactProjectStatus {
-    const capacity = this.capacity();
-    const queue = this.queue();
+  private observeProject(projectId: string): ProjectObservation {
+    const observedAt = new Date().toISOString();
+    const project = this.store.getProject(projectId);
+    if (!project) throw new Error("STATUS_NOT_FOUND");
     return {
+      observedAt, project,
+      runtime: this.processes.statusSummary(projectId),
+      reservation: this.store.getEffectiveReservation(projectId, observedAt),
+      capacity: this.capacity(), queue: this.queue(),
+      projectRunning: this.store.countTestRuns(["running"], project.id),
+      projectQueued: this.store.countTestRuns(["queued"], project.id),
+    };
+  }
+
+  private projectEnvelope(observation: ProjectObservation, owner: string): CompactEnvelope<CompactProjectStatus> {
+    const { project, runtime, reservation, capacity, queue } = observation;
+    const status: CompactProjectStatus = {
       projectId: project.id, name: project.name.slice(0, 160), port: project.port,
       selectedWorktreePath: project.selectedWorktreePath, runtimeWorktreePath: runtime.worktreePath,
       runtimePhase: runtime.phase, runtimeStartedAt: runtime.startedAt, failureCode: runtime.failureCode,
@@ -215,13 +254,18 @@ export class StatusService {
       } : null,
       serverCapacity: { enabled: capacity.enabled, limit: capacity.limit, used: capacity.used, available: capacity.available },
       testQueue: { ...queue,
-        projectRunning: this.store.countTestRuns(["running"], project.id),
-        projectQueued: this.store.countTestRuns(["queued"], project.id) },
+        projectRunning: observation.projectRunning, projectQueued: observation.projectQueued },
     };
+    const meaningful = {
+      ...status,
+      serverCapacity: { enabled: status.serverCapacity.enabled, limit: status.serverCapacity.limit },
+      testQueue: { limit: status.testQueue.limit, projectRunning: status.testQueue.projectRunning, projectQueued: status.testQueue.projectQueued },
+    };
+    return this.envelope(`project:${project.id}`, observation.observedAt, status, this.projectRetry(runtime.phase), meaningful);
   }
 
-  private envelope<T>(target: string, observedAt: string, status: T, retryAfterMs: number | null): CompactEnvelope<T> {
-    const cursor = createHash("sha256").update(this.epoch).update(target).update(JSON.stringify(status)).digest("base64url");
+  private envelope<T>(target: string, observedAt: string, status: T, retryAfterMs: number | null, meaningful: unknown = status): CompactEnvelope<T> {
+    const cursor = createHash("sha256").update(this.epoch).update(target).update(JSON.stringify(meaningful)).digest("base64url");
     return { schemaVersion: 1, epoch: this.epoch, cursor, observedAt, retryAfterMs, status };
   }
 
@@ -241,9 +285,21 @@ export class StatusService {
     this.sampling = true;
     try {
       for (const [key, group] of [...this.targets]) {
+        let sharedProject: ProjectObservation | null = null;
+        let sharedTest: AnyEnvelope | null = null;
+        try {
+          if (group.target.kind === "project") sharedProject = this.observeProject(group.target.id);
+          else sharedTest = this.test(group.target.id);
+        } catch (error) {
+          for (const waiter of [...group.waiters]) {
+            this.remove(key, waiter);
+            waiter.reject(error instanceof Error ? error : new Error(String(error)));
+          }
+          continue;
+        }
         for (const waiter of [...group.waiters]) {
           try {
-            const result = this.read(group.target, waiter.sessionKey);
+            const result = sharedProject ? this.projectEnvelope(sharedProject, waiter.sessionKey) : sharedTest!;
             // Each waiter supplied the cursor represented by the group state at registration.
             // Resolve only when the caller-visible projection changed.
             if (result.cursor !== waiter.initialCursor) { this.remove(key, waiter); waiter.resolve(result); }
@@ -262,4 +318,5 @@ export class StatusService {
     if (group.waiters.size === 0) this.targets.delete(key);
     if (this.targets.size === 0 && this.timer) { clearInterval(this.timer); this.timer = null; }
   }
+
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Project, Reservation } from "@/shared/contracts";
 import { StatusService } from "./status-service";
@@ -11,6 +11,8 @@ const project = {
 
 function fixture(reservation: Reservation | null = null) {
   let phase: "stopped" | "running" = "stopped";
+  let globalUsed = 0;
+  let globalRunning = 0;
   const store = {
     getProject: vi.fn(() => project),
     getEffectiveReservation: vi.fn(() => reservation),
@@ -37,10 +39,16 @@ function fixture(reservation: Reservation | null = null) {
     logTail: vi.fn((_projectId: string, limit: number) => ({ lines: ["a", "b", "secret-ish detail"].slice(-limit), retainedLines: 3, truncated: limit < 3 })),
   };
   const service = new StatusService(store, processes,
-    () => ({ enabled: true, limit: 2, used: phase === "running" ? 1 : 0, available: phase === "running" ? 1 : 2, holders: [] }),
-    () => ({ limit: 1, running: 0, queued: 0 }));
-  return { service, store, processes, setPhase(value: "stopped" | "running") { phase = value; } };
+    () => ({ enabled: true, limit: 2, used: globalUsed, available: 2 - globalUsed, holders: [] }),
+    () => ({ limit: 1, running: globalRunning, queued: 0 }));
+  return {
+    service, store, processes,
+    setPhase(value: "stopped" | "running") { phase = value; },
+    setGlobalCounts(value: number) { globalUsed = value; globalRunning = value; },
+  };
 }
+
+afterEach(() => vi.useRealTimers());
 
 describe("StatusService", () => {
   it("returns an allowlisted stable compact project projection", () => {
@@ -69,7 +77,101 @@ describe("StatusService", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     await expect(waiting).resolves.toMatchObject({ changed: true, result: { status: { runtimePhase: "running" } } });
     service.close();
-    vi.useRealTimers();
+  });
+
+  it("does not change a project cursor for unrelated global usage", () => {
+    const { service, setGlobalCounts } = fixture();
+    const first = service.project(project.id, "session");
+    setGlobalCounts(1);
+    const second = service.project(project.id, "session");
+    expect(second.status.serverCapacity.used).toBe(1);
+    expect(second.status.testQueue.running).toBe(1);
+    expect(second.cursor).toBe(first.cursor);
+    service.close();
+  });
+
+  it("times out quietly and releases its timer", async () => {
+    vi.useFakeTimers();
+    const { service } = fixture();
+    const current = service.project(project.id, "session");
+    const waiting = service.wait({ kind: "project", id: project.id }, current.cursor, "session", 50);
+    await vi.advanceTimersByTimeAsync(50);
+    await expect(waiting).resolves.toMatchObject({ changed: false, cursor: current.cursor });
+    expect(vi.getTimerCount()).toBe(0);
+    service.close();
+  });
+
+  it("cleans up already-aborted and subsequently cancelled waits", async () => {
+    vi.useFakeTimers();
+    const { service } = fixture();
+    const current = service.project(project.id, "session");
+    const alreadyAborted = new AbortController();
+    alreadyAborted.abort();
+    await expect(service.wait({ kind: "project", id: project.id }, current.cursor, "session", 10_000, alreadyAborted.signal))
+      .rejects.toThrow("STATUS_WAIT_CANCELLED");
+    expect(vi.getTimerCount()).toBe(0);
+
+    const controller = new AbortController();
+    const waiting = service.wait({ kind: "project", id: project.id }, current.cursor, "session", 10_000, controller.signal);
+    controller.abort();
+    await expect(waiting).rejects.toThrow("STATUS_WAIT_CANCELLED");
+    expect(vi.getTimerCount()).toBe(0);
+    service.close();
+  });
+
+  it("rejects outstanding waits on close and releases limits", async () => {
+    vi.useFakeTimers();
+    const { service } = fixture();
+    const current = service.project(project.id, "session");
+    const waiting = service.wait({ kind: "project", id: project.id }, current.cursor, "session", 10_000);
+    service.close();
+    await expect(waiting).rejects.toThrow("STATUS_CLOSED");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("cleans up when the post-registration recheck fails", async () => {
+    vi.useFakeTimers();
+    const { service, store } = fixture();
+    const current = service.project(project.id, "session");
+    store.getProject
+      .mockImplementationOnce(() => project)
+      .mockImplementationOnce(() => { throw new Error("query failed"); });
+    await expect(service.wait({ kind: "project", id: project.id }, current.cursor, "session", 10_000))
+      .rejects.toThrow("query failed");
+    expect(vi.getTimerCount()).toBe(0);
+    service.close();
+  });
+
+  it("bounds waits per session without retaining the rejected waiter", async () => {
+    vi.useFakeTimers();
+    const { service } = fixture();
+    const current = service.project(project.id, "session");
+    const controllers = Array.from({ length: 4 }, () => new AbortController());
+    const waits = controllers.map((controller) => service.wait(
+      { kind: "project", id: project.id }, current.cursor, "session", 10_000, controller.signal,
+    ));
+    await expect(service.wait({ kind: "project", id: project.id }, current.cursor, "session", 10_000))
+      .resolves.toMatchObject({ changed: false, errorCode: "status_wait_busy", retryAfterMs: 2_000 });
+    controllers.forEach((controller) => controller.abort());
+    await Promise.allSettled(waits);
+    expect(vi.getTimerCount()).toBe(0);
+    service.close();
+  });
+
+  it("shares one target projection per sampling tick", async () => {
+    vi.useFakeTimers();
+    const { service, store, processes } = fixture();
+    const first = service.project(project.id, "session-a");
+    const waits = ["session-a", "session-b"].map((session) => service.wait(
+      { kind: "project", id: project.id }, first.cursor, session, 10_000,
+    ));
+    store.getProject.mockClear();
+    processes.statusSummary.mockClear();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(store.getProject).toHaveBeenCalledOnce();
+    expect(processes.statusSummary).toHaveBeenCalledOnce();
+    service.close();
+    await Promise.allSettled(waits);
   });
 
   it("projects bounded execution source evidence without logs", () => {
@@ -88,6 +190,15 @@ describe("StatusService", () => {
     const { service, processes } = fixture();
     expect(service.logs(project.id, 2)).toMatchObject({ lines: ["b", "secret-ish detail"], retainedLines: 3, truncated: true });
     expect(processes.logTail).toHaveBeenCalledWith(project.id, 2);
+    service.close();
+  });
+
+  it("bounds runtime logs after JSON escaping", () => {
+    const { service, processes } = fixture();
+    processes.logTail.mockReturnValue({ lines: ["\u0000".repeat(4_000)], retainedLines: 1, truncated: false });
+    const result = service.logs(project.id, 1);
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(16 * 1024);
+    expect(result.truncated).toBe(true);
     service.close();
   });
 });

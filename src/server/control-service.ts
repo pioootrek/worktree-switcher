@@ -50,6 +50,7 @@ export interface AgentClaimResult {
   leaseToken: string;
   snapshot: ProjectSnapshot | null;
   operationError: string | null;
+  operationErrorCode: string | null;
 }
 
 export class ControlService {
@@ -87,7 +88,7 @@ export class ControlService {
       testQueue: () => this.testQueueStatus(),
     });
     this.statusQueries = new StatusService(store, processes,
-      () => this.serverCapacity(), () => this.testQueueStatus());
+      () => this.lifecycle.capacityStatusCompact(), () => this.testQueueStatus());
   }
 
   async dashboard(): Promise<DashboardResponse> {
@@ -336,12 +337,16 @@ export class ControlService {
       });
 
       let operationError: string | null = null;
+      let operationErrorCode: string | null = null;
+      let operationStage: "reservation" | "capacity" | "runtime" = "reservation";
       try {
         this.lifecycle.assertReservationAllows(input.projectId, selected.path, { owner: input.owner, leaseToken });
         const runtime = this.processes.snapshot(input.projectId);
         if (runtime.phase !== "running" || runtime.worktreePath !== selected.path) {
+          operationStage = "capacity";
           this.lifecycle.acquireCapacity(project);
           try {
+            operationStage = "runtime";
             if (runtime.phase !== "stopped") await this.processes.stop(input.projectId);
             if (project.selectedWorktreePath !== selected.path) this.store.setSelectedWorktree(input.projectId, selected.path);
             await this.processes.start(this.lifecycle.requireProject(input.projectId), selected.path);
@@ -351,6 +356,10 @@ export class ControlService {
         }
       } catch (error) {
         operationError = error instanceof Error ? error.message : String(error);
+        operationErrorCode = (this.processes.statusSummary?.(input.projectId).failureCode
+          ?? this.processes.snapshot(input.projectId).failure?.code)
+          ?? (operationStage === "capacity" ? "capacity_exhausted"
+            : operationStage === "reservation" ? "reservation_conflict" : "runtime_operation_failed");
         this.logs.controller("agent.claim_switch_failed", {
           projectId: input.projectId,
           reservationId: reservation.id,
@@ -369,6 +378,7 @@ export class ControlService {
         leaseToken,
         snapshot: includeSnapshot ? await this.dashboardQueries.projectSnapshot(this.lifecycle.requireProject(input.projectId)) : null,
         operationError,
+        operationErrorCode,
       };
     });
   }

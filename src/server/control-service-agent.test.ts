@@ -130,6 +130,7 @@ describe("ControlService agent claims", () => {
       idempotencyKey: "failure-1",
     });
     expect(claim.operationError).toBe("Dependency missing");
+    expect(claim.operationErrorCode).toBe("runtime_operation_failed");
     expect(store.getActiveReservation(project.id)?.id).toBe(claim.reservation.id);
     await expect(service.setProjectEnvironment(project.id, { FEATURE_MODE: "local" })).rejects.toThrow("agent:mcp:session-2");
     await expect(service.setProjectEnvironment(project.id, { FEATURE_MODE: "agent" }, {

@@ -106,6 +106,7 @@ describe("MCP loopback server", () => {
       leaseToken: "never-return-this-lease-secret",
       snapshot: { ...snapshot, reservation },
       operationError: null,
+      operationErrorCode: null,
     }));
     const releaseAgentClaim = vi.fn();
     const setProjectEnvironment = vi.fn(() => ({ ...snapshot.project, environment: { PLAYWRIGHT_E2E: "1" } }));
