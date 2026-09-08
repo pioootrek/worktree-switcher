@@ -275,7 +275,7 @@ async function main() {
     await call("stop_project", { projectId: project.id, reservationId, idempotencyKey: "stop-2" });
     await call("release_project_claim", { projectId: project.id, reservationId });
     const status = await call("get_project_status_compact", { projectId: project.id });
-    check(!status.reservation || status.reservation.owner === null, "Claim remained after release.");
+    check(status.status.reservation === null, "Claim remained after release.");
   });
 
   await client.close();
@@ -302,6 +302,22 @@ try {
   await main();
 } catch (error) {
   const message = redact(error instanceof Error ? error.message : String(error));
+  const reportPath = argument("--report");
+  if (reportPath) {
+    try {
+      await writeFile(resolve(reportPath), `${JSON.stringify({
+        ok: false,
+        error: message,
+        node: process.version,
+        platform: `${process.platform}-${process.arch}`,
+        steps,
+        cleanup: forcedCleanup ? "forced" : "pending",
+        durationMs: Date.now() - startedAt,
+      }, null, 2)}\n`);
+    } catch (reportError) {
+      process.stderr.write(`Could not write failure report: ${redact(reportError instanceof Error ? reportError.message : String(reportError))}\n`);
+    }
+  }
   process.stderr.write(`Portable package smoke failed: ${message}\n`);
   process.exitCode = 1;
 } finally {
