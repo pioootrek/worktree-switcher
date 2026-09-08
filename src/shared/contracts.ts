@@ -184,6 +184,26 @@ export interface RuntimeSnapshot {
   resources: RuntimeResourceMetrics;
 }
 
+export type ClaimedRuntimeAction = "start" | "restart" | "stop";
+
+export interface ClaimedRuntimeReceipt {
+  schemaVersion: 1;
+  operationId: string;
+  action: ClaimedRuntimeAction;
+  projectId: string;
+  reservationId: string;
+  outcome: "completed" | "noop" | "failed";
+  replayed: boolean;
+  observedAt: string;
+  port: number;
+  claimedWorktreePath: string;
+  runtime: Pick<RuntimeSnapshot, "phase" | "worktreePath" | "startedAt">;
+  error: { code: string; message: string } | null;
+  leaseHeld: boolean;
+  occupiesCapacity: boolean;
+  capacity: Pick<ServerCapacityStatus, "enabled" | "limit" | "used" | "available">;
+}
+
 export type ResourceMetricsStatus = "idle" | "available" | "stale" | "unavailable" | "unsupported";
 
 export interface ResourceHistoryPoint {

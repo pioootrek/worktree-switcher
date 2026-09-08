@@ -282,3 +282,18 @@ Rollback removes the additive tools/claimed-operation entrypoint and restores
 compatible skill guidance. Keep existing read/claim/renew/release behavior and
 all running processes/leases unchanged. Do not run stop/release or down-migrate
 history as a side effect of rollback.
+
+## Implementation evidence
+
+Implemented on 2026-09-08 from `3c0588a`. The shipped contract uses the proposed
+three strict MCP inputs and bounded receipt, 64 accepted keys per session and 512
+globally, no-op start/stop behavior, capacity-preserving restart, serialized
+release, pre-spawn persisted-claim revalidation, and pseudonymous operation audit
+attribution. Session closure prevents queued operations from beginning while an
+already-started owned transition is allowed to finish.
+
+`pnpm check` passed ESLint, TypeScript, and all 234 Vitest tests. `pnpm build`
+completed the static Next.js dashboard and controller CLI bundle, and
+`git diff --check` passed. The repository was not registered with the active
+Worktree Switcher controller, so finite project commands ran directly; no managed
+development server was started or moved.

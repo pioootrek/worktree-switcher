@@ -144,7 +144,7 @@ export class ProcessManager {
     return { lines: logs.slice(-bounded), retainedLines: logs.length, truncated: logs.length > bounded };
   }
 
-  async start(project: Project, worktreePath: string): Promise<void> {
+  async start(project: Project, worktreePath: string, beforeSpawn?: () => void): Promise<void> {
     const current = this.runtimes.get(project.id) ?? emptyRuntime(project.id);
     if (current.group || current.cleanup) throw new Error("Serwer projektu już działa.");
     if (await isPortOpen(project.port)) {
@@ -154,6 +154,7 @@ export class ProcessManager {
       this.markFailed(runtime, failure);
       throw new Error(failure.message);
     }
+    beforeSpawn?.();
 
     const runtime: RuntimeEntry = {
       ...emptyRuntime(project.id),

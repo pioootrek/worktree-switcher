@@ -52,16 +52,6 @@
       "type": "feature"
     },
     {
-      "area": "core",
-      "id": "FEAT-20260901-mcp-runtime-operations",
-      "path": "feature/FEAT-20260901-mcp-runtime-operations.json",
-      "priority": "next",
-      "risk_level": "medium",
-      "status": "open",
-      "title": "Control managed server runtime through MCP",
-      "type": "feature"
-    },
-    {
       "area": "process-manager",
       "id": "FEAT-20260902-managed-test-queue",
       "path": "feature/FEAT-20260902-managed-test-queue.json",

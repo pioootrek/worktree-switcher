@@ -138,6 +138,9 @@ save_test_environment_profile
 delete_test_environment_profile
 assign_test_preset_profile
 claim_project
+start_project
+restart_project
+stop_project
 renew_project_claim
 release_project_claim
 ```
@@ -154,6 +157,17 @@ requested TTL, and idempotency key. It atomically acquires an agent lease and,
 when needed, switches the server. Its result contains an explicit lease handle
 but never exposes the raw lease token. The MCP session retains that secret and
 uses it for explicit and automatic renewals and release operations.
+
+`start_project`, `restart_project`, and `stop_project` require the exact active
+agent reservation held by the current MCP session. They accept no command, port,
+environment, or worktree override. Start is a no-op for an already-running
+claimed placement; restart performs one serialized stop/start while preserving
+its capacity slot; stop keeps the reservation and releases capacity only after
+owned-process cleanup is confirmed. Each request requires a session-scoped
+idempotency key. Same-key retries replay the timestamped receipt, while a new
+deliberate operation uses a new key. Receipts contain an allowlisted runtime,
+claim, failure-code, and capacity projection without lease tokens, session IDs,
+commands, environment values, or logs.
 
 `claim_project` and `run_test` optionally accept `responseMode: compact`; their
 default full response remains compatible. Projection happens after the same

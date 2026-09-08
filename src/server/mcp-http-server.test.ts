@@ -109,6 +109,12 @@ describe("MCP loopback server", () => {
       operationErrorCode: null,
     }));
     const releaseAgentClaim = vi.fn();
+    const operateClaimedRuntime = vi.fn(async (_projectId, _reservationId, action) => ({
+      schemaVersion: 1 as const, operationId: "runtime-operation", action, projectId, reservationId,
+      outcome: "completed" as const, replayed: false, observedAt: "2026-09-08T00:00:00.000Z", port: 3000,
+      claimedWorktreePath: "/code/web", runtime: { phase: "running" as const, worktreePath: "/code/web", startedAt: "2026-09-08T00:00:00.000Z" },
+      error: null, leaseHeld: true, occupiesCapacity: true, capacity: { enabled: true, limit: 2, used: 1, available: 1 },
+    }));
     const setProjectEnvironment = vi.fn(() => ({ ...snapshot.project, environment: { PLAYWRIGHT_E2E: "1" } }));
     const saveEnvironmentProfile = vi.fn(async () => snapshot.project);
     const selectEnvironmentProfile = vi.fn(async () => snapshot.project);
@@ -142,6 +148,7 @@ describe("MCP loopback server", () => {
       claimProject,
       renewAgentClaim: vi.fn(() => reservation),
       releaseAgentClaim,
+      operateClaimedRuntime,
       setProjectEnvironment,
       saveEnvironmentProfile,
       selectEnvironmentProfile,
@@ -219,6 +226,9 @@ describe("MCP loopback server", () => {
       "delete_test_environment_profile",
       "assign_test_preset_profile",
       "claim_project",
+      "start_project",
+      "restart_project",
+      "stop_project",
       "renew_project_claim",
       "release_project_claim",
     ]);
@@ -330,6 +340,16 @@ describe("MCP loopback server", () => {
     expect(JSON.stringify(compactClaim)).toContain("project-cursor");
     expect(JSON.stringify(compactClaim)).not.toContain("never-return-this-lease-secret");
     expect(claimProject).toHaveBeenLastCalledWith(expect.objectContaining({ idempotencyKey: "test-run-compact" }), undefined, false);
+    const firstRestart = await client.callTool({ name: "restart_project", arguments: { projectId, reservationId, idempotencyKey: "restart-1" } });
+    const replayedRestart = await client.callTool({ name: "restart_project", arguments: { projectId, reservationId, idempotencyKey: "restart-1" } });
+    expect(operateClaimedRuntime).toHaveBeenCalledOnce();
+    expect(JSON.stringify(firstRestart)).not.toContain("never-return-this-lease-secret");
+    const replayedText = (replayedRestart as { content: Array<{ type: "text"; text: string }> }).content[0].text;
+    expect(JSON.parse(replayedText)).toMatchObject({ replayed: true, operationId: "runtime-operation" });
+    const conflictingRetry = await client.callTool({ name: "stop_project", arguments: { projectId, reservationId, idempotencyKey: "restart-1" } });
+    expect(conflictingRetry.isError).toBe(true);
+    expect(JSON.stringify(conflictingRetry)).toContain("idempotency key");
+    expect(operateClaimedRuntime).toHaveBeenCalledOnce();
     await client.callTool({ name: "save_environment_profile", arguments: { projectId, name: "claimed", environment: { PLAYWRIGHT_E2E: "2" } } });
     expect(saveEnvironmentProfile).toHaveBeenLastCalledWith(projectId, "claimed", { PLAYWRIGHT_E2E: "2" }, {
       owner: expect.stringMatching(/^agent:mcp:/),
