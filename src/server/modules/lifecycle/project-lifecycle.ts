@@ -112,10 +112,11 @@ export class ProjectLifecycle {
     const holders = this.store.listProjects().flatMap((project) => {
       const runtime = this.processes.statusSummary?.(project.id) ?? this.processes.snapshot(project.id);
       const pending = this.pendingStarts.has(project.id);
-      if (!pending && runtime.phase !== "starting" && runtime.phase !== "running" && runtime.phase !== "stopping") return [];
+      const ownsProcess = "ownsProcess" in runtime ? runtime.ownsProcess : "pid" in runtime && Boolean(runtime.pid);
+      if (!pending && !ownsProcess && runtime.phase !== "starting" && runtime.phase !== "running" && runtime.phase !== "stopping") return [];
       const phase: ServerCapacityStatus["holders"][number]["phase"] =
         runtime.phase === "starting" || runtime.phase === "running" || runtime.phase === "stopping"
-          ? runtime.phase : "starting";
+          ? runtime.phase : ownsProcess ? "stopping" : "starting";
       return [{ projectId: project.id, projectName: project.name, phase }];
     });
     return { ...settings, used: holders.length,
