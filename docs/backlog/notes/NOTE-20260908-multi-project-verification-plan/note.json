@@ -2,11 +2,14 @@
   "author": "agent:codex",
   "body": {
     "baseline_commit": "8cf25aa1270162bc50e2996de5457e2212bc45b8",
+    "capacity_plan_baseline_commit": "76fa29d1a49fb99d999e0f3bb6b8b407a2d0b5fd",
+    "capacity_plan_summary": "Focused capacity execution plan: first reproduce/fix retained-ownership undercount in compact status, then seven real-process acceptance cases and one real dashboard capacity flow. Uses the existing portable CI from PRs #16/#18. No application tests or runtime experiments performed during planning.",
     "summary": "Source coverage audit and joint verification plan for independent switching and server capacity: real isolated controller/SQLite/Git/process integration, five real browser scenarios, deterministic cleanup/capacity regressions, portable CI coordination and remaining resource/owner evidence. Identifies a source-level compact capacity undercount after unconfirmed cleanup; no runtime reproduction, application tests or deployment performed."
   },
   "created": "2026-09-08",
   "files": [
-    "analysis-and-plan.md"
+    "analysis-and-plan.md",
+    "capacity-implementation-plan.md"
   ],
   "id": "NOTE-20260908-multi-project-verification-plan",
   "last_reviewed": "2026-09-08",

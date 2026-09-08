@@ -6,6 +6,10 @@ Joint acceptance: `FEAT-20260829-dev-server-capacity`.
 This is source analysis and an implementation plan. No application tests,
 browser runs, resource measurements or installed-service changes were performed.
 
+For the next capacity item, use [the focused implementation plan](capacity-implementation-plan.md),
+reviewed against `76fa29d` after portable CI merged. The broader analysis below
+retains its original baseline and covers the remaining multi-project work.
+
 ## Findings and existing coverage
 
 The main implementation exists. The missing evidence is the composition of

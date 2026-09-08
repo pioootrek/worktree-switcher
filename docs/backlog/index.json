@@ -213,7 +213,8 @@
       "author": "agent:codex",
       "created": "2026-09-08",
       "files": [
-        "analysis-and-plan.md"
+        "analysis-and-plan.md",
+        "capacity-implementation-plan.md"
       ],
       "id": "NOTE-20260908-multi-project-verification-plan",
       "path": "notes/NOTE-20260908-multi-project-verification-plan",
