@@ -25,6 +25,8 @@ type RuntimeEntry = RuntimeSnapshot & {
 
 export type RuntimeStatusSummary = Pick<RuntimeSnapshot, "phase" | "worktreePath" | "startedAt"> & {
   failureCode: string | null;
+  /** Internal lifecycle fact: cleanup has not yet released the owned process group. */
+  retainsOwnership: boolean;
 };
 
 export interface ProcessManagerOptions {
@@ -135,6 +137,7 @@ export class ProcessManager {
       worktreePath: runtime.worktreePath,
       startedAt: runtime.startedAt,
       failureCode: runtime.failure?.code ?? (runtime.error ? "runtime_error" : null),
+      retainsOwnership: runtime.group !== null || runtime.cleanup !== null,
     };
   }
 

@@ -79,10 +79,12 @@ describe("ProcessManager", () => {
     const stop = vi.spyOn(OwnedProcessGroup.prototype, "stop").mockRejectedValueOnce(new Error("inspection unavailable"));
     await expect(manager.stop(fixture.id)).rejects.toThrow("inspection unavailable");
     expect(manager.snapshot(fixture.id)).toMatchObject({ phase: "failed", pid });
+    expect(manager.statusSummary(fixture.id)).toMatchObject({ phase: "failed", retainsOwnership: true });
     await expect(manager.start(fixture, process.cwd())).rejects.toThrow("już działa");
     stop.mockRestore();
     await manager.stop(fixture.id);
     expect(manager.snapshot(fixture.id)).toMatchObject({ phase: "stopped", pid: null });
+    expect(manager.statusSummary(fixture.id).retainsOwnership).toBe(false);
   });
 
   it.each(["stop", "shutdown", "early-exit", "startup-timeout"])(

@@ -69,7 +69,17 @@ function fixture(count = 3, onStart: (project: Project) => Promise<void> = async
     runtime.pid = null;
   });
   const processes = {
-    snapshot: (projectId: string) => ({ ...runtimes.get(projectId)! }),
+    snapshot: vi.fn((projectId: string) => ({ ...runtimes.get(projectId)! })),
+    statusSummary: (projectId: string) => {
+      const runtime = runtimes.get(projectId)!;
+      return {
+        phase: runtime.phase,
+        worktreePath: runtime.worktreePath,
+        startedAt: runtime.startedAt,
+        failureCode: runtime.failure?.code ?? (runtime.error ? "runtime_error" : null),
+        retainsOwnership: runtime.pid !== null,
+      };
+    },
     start,
     stop,
     stopAll: vi.fn(async () => undefined),
@@ -228,10 +238,36 @@ describe("ControlService server capacity", () => {
     });
     await expect(service.operate(projects[0].id, operation)).rejects.toThrow("cleanup unconfirmed");
     expect(service.serverCapacity()).toMatchObject({ used: 1, available: 0, holders: [{ phase: "stopping" }] });
+    expect(service.compactProjectStatus(projects[0].id, "human:web").status.serverCapacity)
+      .toMatchObject({ used: 1, available: 0 });
     await expect(service.operate(projects[1].id, "start")).rejects.toThrow("limit 1");
     expect(start).toHaveBeenCalledTimes(1);
     await service.operate(projects[0].id, "stop");
     expect(service.serverCapacity().used).toBe(0);
+    expect(service.compactProjectStatus(projects[0].id, "human:web").status.serverCapacity)
+      .toMatchObject({ used: 0, available: 1 });
+    await expect(service.operate(projects[1].id, "start")).resolves.toBeUndefined();
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(service.serverCapacity()).toMatchObject({ used: 1, available: 0 });
+    expect(service.compactProjectStatus(projects[1].id, "human:web").status.serverCapacity)
+      .toMatchObject({ used: 1, available: 0 });
+    await service.operate(projects[0].id, "stop");
+    expect(service.serverCapacity().holders.map(({ projectId }) => projectId)).toEqual([projects[1].id]);
+    store.close();
+  });
+
+  it("keeps compact status on the bounded summary path", () => {
+    const { service, store, projects, git, processes } = fixture(1);
+    service.setServerCapacity({ enabled: true, limit: 1 });
+    vi.mocked(processes.snapshot).mockClear();
+    vi.mocked(git.list).mockClear();
+    vi.mocked(processes.snapshot).mockImplementation(() => { throw new Error("rich runtime hydration is forbidden"); });
+    vi.mocked(git.list).mockImplementation(() => Promise.reject(new Error("Git discovery is forbidden")));
+
+    expect(service.compactProjectStatus(projects[0].id, "human:web").status)
+      .toMatchObject({ runtimePhase: "stopped", serverCapacity: { used: 0, available: 1 } });
+    expect(processes.snapshot).not.toHaveBeenCalled();
+    expect(git.list).not.toHaveBeenCalled();
     store.close();
   });
 
