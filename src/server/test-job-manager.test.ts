@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TestCommand } from "./test-command";
-import type { Worktree } from "@/shared/contracts";
+import type { TestSourceObservation, Worktree } from "@/shared/contracts";
 import { OwnedProcessGroup } from "./owned-process-group";
 import { nullLogWriter } from "./log-writer";
 import { SqliteStateStore } from "./sqlite-store";
@@ -51,6 +51,75 @@ function fixture() {
 }
 
 describe("TestJobManager", () => {
+  const cleanSource = (): TestSourceObservation => ({ observedAt: new Date().toISOString(), head: "aaa", branch: "main", dirty: false, statusDigest: "empty", statusEntries: 0, complete: true, errorCode: null });
+
+  it("rejects a queued source change before spawning the command", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    const enqueueSource = { observedAt: new Date().toISOString(), head: "aaa", branch: "main", dirty: false, statusDigest: "empty", statusEntries: 0, complete: true, errorCode: null };
+    manager.configureSourceObserver(async () => ({ ...enqueueSource, observedAt: new Date().toISOString(), head: "bbb" }));
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(10), environment: resolved(), actor: "local-user", sourceObservation: enqueueSource });
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("failed"));
+    expect(store.getTestRun(run.id)).toMatchObject({ startedAt: null, source: { attribution: "changed", queueComparison: "changed", processOutcome: null } });
+  });
+
+  it("preserves command success but does not green-light equal dirty observations", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    const dirtySource = { observedAt: new Date().toISOString(), head: "aaa", branch: "main", dirty: true, statusDigest: "dirty", statusEntries: 1, complete: true, errorCode: null };
+    manager.configureSourceObserver(async () => ({ ...dirtySource, observedAt: new Date().toISOString() }));
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(10), environment: resolved(), actor: "local-user", sourceObservation: dirtySource });
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("failed"), { timeout: 2_000 });
+    expect(store.getTestRun(run.id)).toMatchObject({ exitCode: 0, source: { attribution: "uncertain", processOutcome: "passed" } });
+  });
+
+  it("finalizes with uncertain attribution when the finish observation throws", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    const source = cleanSource();
+    manager.configureSourceObserver(async (_run, stage) => {
+      if (stage === "finish") throw new Error("Git unavailable");
+      return cleanSource();
+    });
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(10), environment: resolved(), actor: "local-user", sourceObservation: source });
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("failed"), { timeout: 2_000 });
+    expect(store.getTestRun(run.id)).toMatchObject({ exitCode: 0, source: { attribution: "uncertain", processOutcome: "passed", finish: { errorCode: "source_finish_failed" } } });
+    expect(manager.status().running).toBe(0);
+  });
+
+  it("makes a throwing preflight terminal and source-uncertain", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    manager.configureSourceObserver(async () => { throw new Error("command drift"); });
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(10), environment: resolved(), actor: "local-user", sourceObservation: cleanSource() });
+
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("failed"));
+    expect(store.getTestRun(run.id)).toMatchObject({ startedAt: null, source: { attribution: "uncertain", processOutcome: null, reasonCodes: expect.arrayContaining(["source_preflight_failed"]) } });
+  });
+
+  it("reports preparing capacity without double-counting it as queued", async () => {
+    const { project, manager, worktree, command } = fixture();
+    let release!: () => void;
+    manager.configureSourceObserver(async (_run, stage) => stage === "finish" ? cleanSource() : new Promise<TestSourceObservation>((resolve) => { release = () => resolve(cleanSource()); }));
+    manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(10), environment: resolved(), actor: "local-user", sourceObservation: cleanSource() });
+    await vi.waitFor(() => expect(manager.status()).toMatchObject({ running: 1, queued: 0 }));
+    release();
+  });
+
+  it("drains a configured observer when shutdown cancels an active run", async () => {
+    const { store, project, manager, worktree, command } = fixture();
+    manager.configureSourceObserver(async (_run, stage) => {
+      if (stage === "finish") throw new Error("lifecycle closed");
+      return cleanSource();
+    });
+    const run = manager.enqueue({ projectId: project.id, worktree: worktree("/tmp/a"), command: command(1_000), environment: resolved(), actor: "local-user", sourceObservation: cleanSource() });
+    await vi.waitFor(() => expect(store.getTestRun(run.id)?.phase).toBe("running"));
+
+    await expect(manager.shutdown()).resolves.toBeUndefined();
+    expect(store.getTestRun(run.id)).toMatchObject({ phase: "cancelled", source: { attribution: "uncertain", processOutcome: "cancelled" } });
+    managers.splice(managers.indexOf(manager), 1);
+    store.close();
+  });
+
   it("does not inherit production NODE_ENV from the controller", async () => {
     vi.stubEnv("NODE_ENV", "production");
     const { store, project, manager, worktree, command } = fixture();

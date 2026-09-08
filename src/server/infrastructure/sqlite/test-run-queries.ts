@@ -1,6 +1,7 @@
 import type { PendingTestRun } from "@/server/state-store";
 import type { TestEnvironmentMode, TestRun, TestRunPhase } from "@/shared/contracts";
 import Database from "better-sqlite3";
+import { legacySourceEvidence } from "@/server/test-source-attribution";
 
 type TestRunRow = {
   id: string;
@@ -30,6 +31,7 @@ type TestRunRow = {
   environment_profile: string;
   inherited_server_profile: string | null;
   environment_variable_names_json: string;
+  source_json: string | null;
 };
 
 function mapTestRun(row: TestRunRow): TestRun {
@@ -60,6 +62,7 @@ function mapTestRun(row: TestRunRow): TestRun {
     environmentProfile: row.environment_profile,
     inheritedServerProfile: row.inherited_server_profile,
     environmentVariableNames: JSON.parse(row.environment_variable_names_json) as string[],
+    source: row.source_json ? JSON.parse(row.source_json) as TestRun["source"] : legacySourceEvidence(),
   };
 }
 
@@ -124,20 +127,20 @@ export class TestRunQueries {
         preset_id, preset_name, adapter, actor, phase, queue_position, executable,
         args_json, cwd, queued_at, started_at, finished_at, exit_code, signal, error,
         logs_json, idempotency_key, environment_mode, environment_profile,
-        inherited_server_profile, environment_variable_names_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        inherited_server_profile, environment_variable_names_json, source_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         phase = excluded.phase, queue_position = excluded.queue_position,
         started_at = excluded.started_at, finished_at = excluded.finished_at,
         exit_code = excluded.exit_code, signal = excluded.signal, error = excluded.error,
-        logs_json = excluded.logs_json
+        logs_json = excluded.logs_json, source_json = excluded.source_json
     `).run(
       run.id, run.projectId, run.worktreePath, run.worktreeHead, run.worktreeBranch,
       run.worktreeDirty ? 1 : 0, run.presetId, run.presetName, run.adapter, run.actor,
       run.phase, run.queuePosition, run.executable, JSON.stringify(run.args), run.cwd, run.queuedAt,
       run.startedAt, run.finishedAt, run.exitCode, run.signal, run.error,
       JSON.stringify(run.logs), idempotencyKey ?? null, run.environmentMode, run.environmentProfile,
-      run.inheritedServerProfile, JSON.stringify(run.environmentVariableNames),
+      run.inheritedServerProfile, JSON.stringify(run.environmentVariableNames), JSON.stringify(run.source),
     );
     if (["passed", "failed", "cancelled", "timed_out", "interrupted"].includes(run.phase)) {
       this.database.prepare(`
@@ -152,6 +155,14 @@ export class TestRunQueries {
   markInterruptedTestRuns(): void {
     const now = new Date().toISOString();
     this.database.transaction(() => {
+      const pending = this.database.prepare("SELECT id, source_json FROM test_runs WHERE phase IN ('queued', 'running')").all() as Array<{ id: string; source_json: string | null }>;
+      for (const row of pending) {
+        const source = row.source_json ? JSON.parse(row.source_json) as TestRun["source"] : legacySourceEvidence();
+        source.processOutcome = "interrupted";
+        if (source.attribution === "pending") source.attribution = "uncertain";
+        source.reasonCodes = [...new Set([...source.reasonCodes, "controller_interrupted"])].slice(0, 12);
+        this.database.prepare("UPDATE test_runs SET source_json = ? WHERE id = ?").run(JSON.stringify(source), row.id);
+      }
       this.database.prepare(`
         UPDATE test_runs SET phase = 'interrupted', finished_at = ?, queue_position = NULL,
           error = 'Kontroler został zatrzymany przed zakończeniem testu.'

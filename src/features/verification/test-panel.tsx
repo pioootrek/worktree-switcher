@@ -113,7 +113,7 @@ export function TestPanel({
                     <div className="min-w-0">
                       <p className="font-medium">{testRun.presetName}</p>
                       <p className="truncate font-mono text-[11px] text-muted-foreground" title={testRun.worktreePath}>
-                        {testRun.worktreeBranch ?? "detached"} · {testRun.worktreeHead.slice(0, 8)} · {new Date(testRun.queuedAt).toLocaleString(locale === "pl" ? "pl-PL" : "en-US")}
+                        {t("tests.queuedSource")} {testRun.worktreeBranch ?? "detached"} · {testRun.worktreeHead.slice(0, 8)} · {new Date(testRun.queuedAt).toLocaleString(locale === "pl" ? "pl-PL" : "en-US")}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -123,6 +123,11 @@ export function TestPanel({
                       {active ? <Button size="sm" variant="ghost" onClick={() => void cancel(testRun.id)}><Square aria-hidden />{t("tests.cancel")}</Button> : null}
                     </div>
                   </div>
+                  <p className={`mt-2 text-xs ${testRun.source.attribution === "observed_match" ? "text-emerald-300" : "text-amber-300"}`}>
+                    {t(`testSource.${testRun.source.attribution}`)}
+                    {testRun.source.preflight?.head ? ` · ${t("tests.observedSource")} ${testRun.source.preflight.head.slice(0, 8)}` : ""}
+                    {testRun.source.processOutcome === "passed" && testRun.phase !== "passed" ? ` · ${t("tests.commandPassedSourceUnverified")}` : ""}
+                  </p>
                   <p className="mt-2 text-xs text-muted-foreground">
                     {t("testProfile.applied", { profile: testRun.environmentProfile })}
                     {testRun.inheritedServerProfile ? ` · ${t("testProfile.inherits", { profile: testRun.inheritedServerProfile })}` : ""}

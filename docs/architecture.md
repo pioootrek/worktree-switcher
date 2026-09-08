@@ -97,6 +97,16 @@ again at completion. Queue counts and scheduling candidates use filtered SQL
 queries that do not hydrate historical log tails. Controller shutdown cancels
 active jobs; stale queued or running records become `interrupted` during recovery.
 
+Queued verification records bounded Git source observations at enqueue, before
+spawn, and after owned-process cleanup. Preparation consumes the same global
+slot and per-worktree exclusion as a running job. A changed or unavailable
+preflight rejects the job without spawning; a successful command is reported as
+`passed` only when complete, clean endpoint observations match. Dirty, changed,
+or incomplete evidence preserves the separate process outcome but cannot certify
+the queued revision. The status digest describes bounded Git status records, not
+file contents: edits restored between observations, ignored inputs, environment,
+and external services remain outside this source-attribution guarantee.
+
 ## Resource policy
 
 Managed development applications have priority over Worktree Switcher. The
@@ -214,7 +224,9 @@ worktree path, and are discarded with their owning project.
 Test-run metadata and the last 200 bounded output lines live in `test_runs`.
 Each project retains 50 completed runs; active and queued records are never
 removed by retention. Full rotating output is stored in the state log
-directory rather than SQLite.
+directory rather than SQLite. Versioned source evidence is stored as bounded
+JSON; rows created before source attribution map to `legacy_unknown` without
+inventing execution-time observations.
 
 Accounts would also require authentication, authorization, ownership,
 and audit semantics; SQLite alone does not make the application multi-user.

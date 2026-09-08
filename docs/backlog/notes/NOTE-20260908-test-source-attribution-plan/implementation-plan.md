@@ -259,3 +259,30 @@ Rollback must retain the new evidence column and historical records. A safe
 behavior rollback preserves source-aware qualification and legacy warnings;
 reverting to an old client/controller that ignores them restores the known
 misattribution problem. Do not down-migrate or relabel uncertain runs as verified.
+
+## Implementation evidence (2026-09-08)
+
+Implemented on `t3code/fix-test-run-source-attribution` without closing this
+record or creating a commit. The implementation adds versioned enqueue,
+preflight, and finish observations; queue/execution comparisons; separate
+process outcome; migration 12; and visible Polish/English dashboard attribution.
+Preparation occupies queue/worktree capacity before its first await. Fresh
+project/worktree and command resolution runs under the shared lifecycle before
+spawn, and shutdown drains preparation promises so they cannot launch late.
+
+The Git adapter uses operational admission and bounded 5-second/1-MiB commands,
+reads HEAD around canonical porcelain-v1 status, includes all nonignored
+untracked files and submodule status, and rejects sparse or special index flags
+as incomplete. It persists only SHA-256 status digests and counts, never paths.
+Focused tests cover clean/dirty real Git observations, A-to-B rejection without
+spawn, equal dirty evidence with command success, classification, persistence,
+migration recovery, and queue regressions. Completed verification:
+
+- `pnpm check`: 39 files and 221 tests passed after review follow-up.
+- `pnpm build`: static Next.js export and CLI bundle passed.
+- `pnpm test:ui`: 5 dashboard tests passed in English and Polish.
+
+Endpoint observations still cannot detect change-and-restore between samples,
+ignored inputs, environment changes, or external-service changes. Cancellation
+waits for a bounded in-flight Git command rather than adding per-run Git process
+termination; the closed/generation checks still prevent a late test spawn.
