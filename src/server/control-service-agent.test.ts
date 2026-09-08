@@ -91,13 +91,17 @@ describe("ControlService agent claims", () => {
       resources: { status: "idle", currentRssBytes: null, peakRssBytes: null, cpuPercent: null, processCount: null, sampledAt: null, sampleAgeSeconds: null, warningThresholdBytes: null, history: [] },
     };
     let nextPid = 100;
+    let spawned = 0;
+    let revokeBeforeSpawn = false;
     const start = vi.fn(async (_project, path: string, beforeSpawn?: () => void) => {
-      beforeSpawn?.(); runtime.phase = "running"; runtime.pid = nextPid++; runtime.worktreePath = path; runtime.startedAt = new Date().toISOString();
+      if (revokeBeforeSpawn) store.releaseReservation(project.id, "local-user", true);
+      beforeSpawn?.(); spawned += 1; runtime.phase = "running"; runtime.pid = nextPid++; runtime.worktreePath = path; runtime.startedAt = new Date().toISOString();
     });
     const stop = vi.fn(async () => { runtime.phase = "stopped"; runtime.pid = null; runtime.worktreePath = null; runtime.startedAt = null; });
     const service = new ControlService(store, { list: vi.fn(async () => [worktree]) } as unknown as GitWorktreeReader,
       { snapshot: () => ({ ...runtime }), start, stop } as unknown as ProcessManager, undefined,
       { resolve: () => ({ preset: "node", executable: "pnpm", args: ["run", "dev"], portMethod: "environment", tls: { mode: "off", keyPath: null, certPath: null, caPath: null } }) });
+    store.setServerCapacitySettings({ enabled: true, limit: 1 });
     const claim = await service.claimProject({ projectId: project.id, worktreePath: worktree.path, owner: "agent:mcp:runtime", reason: "Runtime test", idempotencyKey: "claim" });
     const actor = { owner: "agent:mcp:runtime", leaseToken: claim.leaseToken };
 
@@ -105,13 +109,23 @@ describe("ControlService agent claims", () => {
     expect(noop.outcome).toBe("noop");
     expect(start).toHaveBeenCalledOnce();
     const restarted = await service.operateClaimedRuntime(project.id, claim.reservation.id, "restart", actor);
-    expect(restarted).toMatchObject({ outcome: "completed", leaseHeld: true, occupiesCapacity: true });
+    expect(restarted).toMatchObject({ outcome: "completed", leaseHeld: true, occupiesCapacity: true, capacity: { limit: 1, used: 1, available: 0 } });
     expect(start).toHaveBeenCalledTimes(2);
     expect(stop).toHaveBeenCalledOnce();
     const stopped = await service.operateClaimedRuntime(project.id, claim.reservation.id, "stop", actor);
     expect(stopped).toMatchObject({ outcome: "completed", leaseHeld: true, occupiesCapacity: false });
     expect((await service.operateClaimedRuntime(project.id, claim.reservation.id, "stop", actor)).outcome).toBe("noop");
-    await service.releaseAgentClaim(project.id, claim.reservation.id, actor.owner, claim.leaseToken);
+    const cancelled = new AbortController();
+    cancelled.abort();
+    await expect(service.operateClaimedRuntime(project.id, claim.reservation.id, "start", actor, cancelled.signal)).rejects.toThrow("cancelled");
+    expect(start).toHaveBeenCalledTimes(2);
+
+    expect((await service.operateClaimedRuntime(project.id, claim.reservation.id, "start", actor)).outcome).toBe("completed");
+    expect(spawned).toBe(3);
+    revokeBeforeSpawn = true;
+    const revoked = await service.operateClaimedRuntime(project.id, claim.reservation.id, "restart", actor);
+    expect(revoked).toMatchObject({ outcome: "failed", error: { code: "claim_stale" }, leaseHeld: false, occupiesCapacity: false });
+    expect(spawned).toBe(3);
     await expect(service.operateClaimedRuntime(project.id, claim.reservation.id, "start", actor)).rejects.toThrow("stale");
     store.close();
   });

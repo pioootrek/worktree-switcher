@@ -8,6 +8,12 @@ import { createHash, randomUUID } from "node:crypto";
 import type { RuntimeCapacity } from "../lifecycle";
 import { type LifecycleAccess, type OperationActor } from "../lifecycle";
 
+class ClaimedRuntimeOperationError extends Error {
+  constructor(readonly code: string, readonly safeMessage: string) {
+    super(safeMessage);
+  }
+}
+
 export class RuntimeService {
   constructor(
     private readonly store: Pick<StateStore, "setSelectedWorktree" | "updateProjectLaunch" | "recordProjectEvent">,
@@ -40,24 +46,33 @@ export class RuntimeService {
       let operationError: ClaimedRuntimeReceipt["error"] = null;
       try {
         if (initial.pid && initial.worktreePath !== claim.worktreePath) {
-          throw new Error("The managed runtime does not match the claimed worktree.");
+          throw new ClaimedRuntimeOperationError("runtime_worktree_mismatch", "The managed runtime does not match the claimed worktree.");
         }
         if (action === "stop") {
           if (!initial.pid && initial.phase !== "starting" && initial.phase !== "stopping") outcome = "noop";
-          else await this.processes.stop(projectId);
+          else await this.stopRuntime(projectId);
         } else if (action === "start" && initial.phase === "running" && initial.worktreePath === claim.worktreePath) {
           outcome = "noop";
         } else {
-          const worktrees = await this.git.list(project.repositoryPath);
-          const selected = this.lifecycle.resolveWorktree(project, worktrees, claim.worktreePath);
-          this.lifecycle.requireAgentClaim(projectId, reservationId, actor);
-          this.lifecycle.acquireCapacity(project);
+          let selected;
+          try {
+            const worktrees = await this.git.list(project.repositoryPath);
+            selected = this.lifecycle.resolveWorktree(project, worktrees, claim.worktreePath);
+          } catch {
+            throw new ClaimedRuntimeOperationError("worktree_unavailable", "The claimed worktree is unavailable.");
+          }
+          this.revalidateClaim(projectId, reservationId, actor);
+          try {
+            this.lifecycle.acquireCapacity(project);
+          } catch {
+            throw new ClaimedRuntimeOperationError("capacity_exhausted", "Managed server capacity is exhausted.");
+          }
           try {
             if (action === "restart" && initial.pid) {
-              await this.processes.stop(projectId);
-              this.lifecycle.requireAgentClaim(projectId, reservationId, actor);
+              await this.stopRuntime(projectId);
+              this.revalidateClaim(projectId, reservationId, actor);
             } else if (action === "start" && (initial.pid || initial.phase === "starting" || initial.phase === "stopping")) {
-              throw new Error("The managed runtime is busy or still owns a process.");
+              throw new ClaimedRuntimeOperationError("runtime_busy", "The managed runtime is busy.");
             }
             const launch = this.commands.resolve(selected.path, project.port, project.launchPreset, {
               mode: project.tlsMode, keyPath: project.tlsKeyPath, certPath: project.tlsCertPath, caPath: project.tlsCaPath,
@@ -68,17 +83,14 @@ export class RuntimeService {
                 tlsCaPath: launch.tls.caPath, executable: launch.executable, args: launch.args,
               });
             }
-            await this.processes.start(this.lifecycle.requireProject(projectId), selected.path, () => {
-              if (sessionClosed()) throw new Error("The runtime operation was cancelled before it started.");
-              this.lifecycle.requireAgentClaim(projectId, reservationId, actor);
-            });
+            await this.startRuntime(projectId, selected.path, () => this.revalidateClaim(projectId, reservationId, actor));
           } finally {
             this.lifecycle.releaseCapacity(projectId);
           }
         }
       } catch (error) {
         outcome = "failed";
-        operationError = this.safeOperationError(error, projectId);
+        operationError = this.safeOperationError(error);
       }
       const runtime = this.processes.snapshot(projectId);
       let leaseHeld = false;
@@ -93,7 +105,7 @@ export class RuntimeService {
         capacity: { enabled: capacity.enabled, limit: capacity.limit, used: capacity.used, available: capacity.available },
       };
       this.logs.controller(`agent.runtime_${outcome}`, {
-        operationId, projectId, reservationId, action, outcome, actor: "mcp-agent", errorCode: operationError?.code ?? null,
+        operationId, projectId, reservationId, action, outcome, actor: actorRef, errorCode: operationError?.code ?? null,
       });
       this.store.recordProjectEvent(projectId, `agent.runtime_${outcome}`, actorRef, {
         operationId, reservationId, action, outcome, errorCode: operationError?.code ?? null,
@@ -102,15 +114,37 @@ export class RuntimeService {
     });
   }
 
-  private safeOperationError(error: unknown, projectId: string): { code: string; message: string } {
-    const message = error instanceof Error ? error.message : String(error);
-    const runtimeCode = this.processes.snapshot(projectId).failure?.code;
-    if (runtimeCode) return { code: runtimeCode, message: "The managed runtime operation failed." };
-    if (message.includes("does not match the claimed worktree")) return { code: "runtime_worktree_mismatch", message: "The managed runtime does not match the claimed worktree." };
-    if (message.includes("limit")) return { code: "capacity_exhausted", message: "Managed server capacity is exhausted." };
-    if (message.includes("worktree")) return { code: "worktree_unavailable", message: "The claimed worktree is unavailable." };
-    if (message.includes("busy") || message.includes("owns a process")) return { code: "runtime_busy", message: "The managed runtime is busy." };
+  private safeOperationError(error: unknown): { code: string; message: string } {
+    if (error instanceof ClaimedRuntimeOperationError) return { code: error.code, message: error.safeMessage };
     return { code: "runtime_operation_failed", message: "The managed runtime operation failed." };
+  }
+
+  private revalidateClaim(projectId: string, reservationId: string, actor: OperationActor): void {
+    try {
+      this.lifecycle.requireAgentClaim(projectId, reservationId, actor);
+    } catch {
+      throw new ClaimedRuntimeOperationError("claim_stale", "The MCP claim is stale, expired, or no longer active.");
+    }
+  }
+
+  private async stopRuntime(projectId: string): Promise<void> {
+    try {
+      await this.processes.stop(projectId);
+    } catch (error) {
+      if (error instanceof ClaimedRuntimeOperationError) throw error;
+      const code = this.processes.snapshot(projectId).failure?.code ?? "cleanup_unconfirmed";
+      throw new ClaimedRuntimeOperationError(code, "The managed runtime could not be stopped safely.");
+    }
+  }
+
+  private async startRuntime(projectId: string, worktreePath: string, beforeSpawn: () => void): Promise<void> {
+    try {
+      await this.processes.start(this.lifecycle.requireProject(projectId), worktreePath, beforeSpawn);
+    } catch (error) {
+      if (error instanceof ClaimedRuntimeOperationError) throw error;
+      const code = this.processes.snapshot(projectId).failure?.code ?? "launch_failed";
+      throw new ClaimedRuntimeOperationError(code, "The managed runtime could not be started.");
+    }
   }
 
   async operate(
