@@ -40,6 +40,29 @@ describe("shared project lifecycle", () => {
     expect(lifecycle.capacityStatusCompact()).toMatchObject({ used: 0, available: 1, holders: [] });
   });
 
+  it("counts retained ownership through the snapshot-only compact fallback", () => {
+    const projects = [{ id: "web", name: "Web" }];
+    const snapshot = vi.fn(() => ({
+      phase: "failed" as const, pid: 1234, worktreePath: "/code/web", startedAt: null,
+      error: "cleanup unconfirmed", failure: null, logs: [],
+      resources: { status: "idle" as const, currentRssBytes: null, peakRssBytes: null, cpuPercent: null,
+        processCount: null, sampledAt: null, sampleAgeSeconds: null, warningThresholdBytes: null, history: [] },
+    }));
+    const lifecycle = new ProjectLifecycle({
+      getProject: () => projects[0] as never,
+      listProjects: () => projects as never,
+      authorizeReservation: () => null,
+      getServerCapacitySettings: () => ({ enabled: true, limit: 1 }),
+    }, { snapshot });
+
+    expect(lifecycle.capacityStatusCompact()).toMatchObject({
+      used: 1,
+      available: 0,
+      holders: [{ projectId: "web", phase: "stopping" }],
+    });
+    expect(snapshot).toHaveBeenCalledOnce();
+  });
+
   it("serializes one project across callers, allows another project, and recovers after rejection", async () => {
     const lifecycle = new ProjectLifecycle({
       getProject: () => null,
