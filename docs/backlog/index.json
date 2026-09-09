@@ -43,16 +43,6 @@
     },
     {
       "area": "process-manager",
-      "id": "FEAT-20260902-managed-test-queue",
-      "path": "feature/FEAT-20260902-managed-test-queue.json",
-      "priority": "next",
-      "risk_level": "medium",
-      "status": "open",
-      "title": "Complete managed test-queue reliability and user-flow validation",
-      "type": "feature"
-    },
-    {
-      "area": "process-manager",
       "id": "FEAT-20260905-remote-commit-verification",
       "path": "feature/FEAT-20260905-remote-commit-verification.json",
       "priority": "next",

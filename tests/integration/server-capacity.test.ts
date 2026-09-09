@@ -100,7 +100,7 @@ describe("real server capacity", () => {
     await new Promise<void>((resolve, reject) => hanging.listen(0, "127.0.0.1", resolve).once("error", reject));
     const address = hanging.address();
     if (!address || typeof address === "string") throw new Error("Hanging fixture has no TCP address");
-    const project = { id: "probe", name: "probe", port: address.port, main: "", alternate: "" };
+    const project = { id: "probe", name: "probe", port: address.port, main: "", alternate: "", kind: "node" as const };
     try { await expect(endpointUnavailable(project, 700)).rejects.toThrow("closure remained unconfirmed"); }
     finally { await new Promise<void>((resolve, reject) => hanging.close((error) => error ? reject(error) : resolve())); }
   });

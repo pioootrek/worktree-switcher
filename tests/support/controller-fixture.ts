@@ -12,7 +12,9 @@ const exec = promisify(execFile);
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const WAIT_MS = 15_000;
 export type ServerMode = "normal" | "gate" | "early-exit" | "timeout" | "stubborn-descendant";
-export interface FixtureProject { id: string; name: string; port: number; main: string; alternate: string }
+export type FixtureProjectKind = "node" | "django";
+export interface FixtureProject { id: string; name: string; port: number; main: string; alternate: string; kind: FixtureProjectKind }
+export interface FixtureTestEvent { event: "start" | "finish" | "cancel"; identity: string; mode: string; pid: number; at: number }
 export interface HttpResult<T> { status: number; ok: boolean; body: T & { error?: string } }
 export interface FixtureMcpClient { call<T>(name: string, args?: Record<string, unknown>): Promise<T>; close(): Promise<void> }
 export interface ControllerFixture {
@@ -22,6 +24,8 @@ export interface ControllerFixture {
   mcp(): Promise<FixtureMcpClient>;
   setMode(project: FixtureProject, mode: ServerMode, worktreePath?: string): Promise<void>;
   releaseGate(project: FixtureProject, worktreePath?: string): Promise<void>;
+  releaseTestGate(project: FixtureProject, worktreePath?: string): Promise<void>;
+  testEvents(project: FixtureProject): Promise<FixtureTestEvent[]>;
   ownedPids(project: FixtureProject, worktreePath?: string): Promise<number[]>;
   restart(): Promise<void>; stop(): Promise<void>; close(): Promise<void>;
 }
@@ -40,10 +44,15 @@ async function freePort(): Promise<number> {
 async function git(cwd: string, ...args: string[]): Promise<void> {
   await exec("git", args, { cwd, env: { ...process.env, GIT_AUTHOR_NAME: "Fixture", GIT_AUTHOR_EMAIL: "fixture@example.test", GIT_COMMITTER_NAME: "Fixture", GIT_COMMITTER_EMAIL: "fixture@example.test" } });
 }
-async function createRepository(base: string, name: string): Promise<{ main: string; alternate: string }> {
+async function createRepository(base: string, name: string, kind: FixtureProjectKind): Promise<{ main: string; alternate: string }> {
   const main = join(base, name), alternate = join(base, `${name}-alternate`);
+  const testControl = join(base, "test-control");
+  await mkdir(testControl, { recursive: true });
   await mkdir(main); await git(main, "init", "-b", "main");
-  await writeFile(join(main, "package.json"), JSON.stringify({ scripts: { dev: "node server.mjs" } }));
+  await writeFile(join(main, "package.json"), JSON.stringify({
+    packageManager: "npm@11.0.0",
+    scripts: { dev: "node server.mjs", test: "node test-runner.mjs pass", "test:hold": "node test-runner.mjs hold", "test:fail": "node test-runner.mjs fail" },
+  }));
   await writeFile(join(main, "identity.txt"), `${name}:main`); await writeFile(join(main, "mode.txt"), "normal");
   await writeFile(join(main, "server.mjs"), [
     'import { appendFileSync, existsSync, readFileSync } from "node:fs";', 'import { spawn } from "node:child_process";', 'import { createServer } from "node:http";', 'import { randomUUID } from "node:crypto";',
@@ -56,16 +65,41 @@ async function createRepository(base: string, name: string): Promise<{ main: str
     'const server = createServer((request, response) => { if (mode === "timeout") { response.statusCode = 503; response.end("not ready"); return; } response.setHeader("content-type", "application/json"); response.end(JSON.stringify({ identity, boot, pid: process.pid })); });',
     'if (mode === "timeout") process.on("SIGTERM", () => {});', 'server.listen(Number(process.env.PORT), "127.0.0.1");',
   ].join("\n"));
+  await writeFile(join(main, "test-runner.mjs"), [
+    'import { appendFileSync, existsSync, readFileSync } from "node:fs";',
+    `const control = ${JSON.stringify(testControl)};`,
+    `const evidence = ${JSON.stringify(join(testControl, `${name}.jsonl`))};`,
+    'const identity = readFileSync(new URL("./identity.txt", import.meta.url), "utf8").trim();',
+    'const mode = process.argv[2] ?? "pass";',
+    'const record = (event) => appendFileSync(evidence, `${JSON.stringify({ event, identity, mode, pid: process.pid, at: Date.now() })}\\n`);',
+    'record("start"); console.log(`verification ${identity} ${mode}`);',
+    'process.on("SIGTERM", () => { record("cancel"); process.exit(0); });',
+    'if (mode === "hold") { const release = `${control}/${identity}.release`; while (!existsSync(release)) await new Promise((resolve) => setTimeout(resolve, 25)); }',
+    'if (mode === "fail") { console.error(`verification failed ${identity}`); process.exitCode = 9; }',
+    'record("finish");',
+  ].join("\n"));
+  if (kind === "django") {
+    await writeFile(join(main, "manage.py"), [
+      "import json", "import os", "import pathlib", "import sys", "import time",
+      `evidence = pathlib.Path(${JSON.stringify(join(testControl, `${name}.jsonl`))})`,
+      "identity = pathlib.Path(__file__).with_name('identity.txt').read_text().strip()",
+      "if len(sys.argv) < 2 or sys.argv[1] != 'test': raise SystemExit(2)",
+      "evidence.open('a').write(json.dumps({'event': 'start', 'identity': identity, 'mode': 'django', 'pid': os.getpid(), 'at': int(time.time() * 1000)}) + '\\n')",
+      "print(f'django verification {identity}')",
+      "evidence.open('a').write(json.dumps({'event': 'finish', 'identity': identity, 'mode': 'django', 'pid': os.getpid(), 'at': int(time.time() * 1000)}) + '\\n')",
+    ].join("\n"));
+  }
   await git(main, "add", "."); await git(main, "commit", "-m", "fixture main");
   await git(main, "worktree", "add", "-b", "alternate", alternate);
   await writeFile(join(alternate, "identity.txt"), `${name}:alternate`); await git(alternate, "add", "identity.txt"); await git(alternate, "commit", "-m", "fixture alternate");
   return { main, alternate };
 }
 
-export async function startControllerFixture(projectCount = 3): Promise<ControllerFixture> {
+export async function startControllerFixture(projectCount = 3, projectKinds: FixtureProjectKind[] = []): Promise<ControllerFixture> {
   const base = await mkdtemp(join(tmpdir(), "worktree-switcher-integration-"));
   const data = join(base, "data"), state = join(base, "state"); await Promise.all([mkdir(data), mkdir(state)]);
-  const repositories = await Promise.all(Array.from({ length: projectCount }, (_, index) => createRepository(base, `project-${String.fromCharCode(97 + index)}`)));
+  const kinds = Array.from({ length: projectCount }, (_, index) => projectKinds[index] ?? "node");
+  const repositories = await Promise.all(Array.from({ length: projectCount }, (_, index) => createRepository(base, `project-${String.fromCharCode(97 + index)}`, kinds[index]!)));
   const ports = await Promise.all(Array.from({ length: projectCount + 2 }, () => freePort()));
   const controllerPort = ports.pop()!, mcpPort = ports.pop()!;
   let child: ChildProcess | undefined, endpoint = `http://127.0.0.1:${controllerPort}`, accessUrl = "", token = "";
@@ -91,8 +125,8 @@ export async function startControllerFixture(projectCount = 3): Promise<Controll
     await start(); const projects: FixtureProject[] = [];
     for (let index = 0; index < repositories.length; index += 1) {
       const name = `project-${String.fromCharCode(97 + index)}`;
-      const result = await request<{ project: { id: string } }>("/api/projects", { method: "POST", body: JSON.stringify({ name, repositoryPath: repositories[index]!.main, port: ports[index], launchPreset: "node" }) });
-      projects.push({ id: result.project.id, name, port: ports[index]!, ...repositories[index]! });
+      const result = await request<{ project: { id: string } }>("/api/projects", { method: "POST", body: JSON.stringify({ name, repositoryPath: repositories[index]!.main, port: ports[index], launchPreset: kinds[index] }) });
+      projects.push({ id: result.project.id, name, port: ports[index]!, kind: kinds[index]!, ...repositories[index]! });
     }
     const fixture: ControllerFixture = { endpoint, accessUrl, projects, request, requestResult,
       async mcp() {
@@ -105,13 +139,29 @@ export async function startControllerFixture(projectCount = 3): Promise<Controll
           const part = content.find((item: unknown): item is { type: "text"; text: string } =>
             typeof item === "object" && item !== null && (item as { type?: unknown }).type === "text" && typeof (item as { text?: unknown }).text === "string");
           if (!part) throw new Error(`${name} returned no JSON`);
+          if ((result as { isError?: boolean }).isError) {
+            try {
+              const value = JSON.parse(part.text) as { error?: string };
+              throw new Error(value.error ?? `${name} failed`);
+            } catch (error) {
+              if (error instanceof SyntaxError) throw new Error(part.text);
+              throw error;
+            }
+          }
           const value = JSON.parse(part.text) as T & { error?: string };
-          if ((result as { isError?: boolean }).isError) throw new Error(value.error ?? `${name} failed`);
           return value;
         }, close: () => client.close() };
       },
       async setMode(project, mode, worktreePath = project.main) { await writeFile(join(worktreePath, "mode.txt"), mode); await unlink(join(worktreePath, "release.txt")).catch(() => undefined); },
       async releaseGate(project, worktreePath = project.main) { await writeFile(join(worktreePath, "release.txt"), "go"); },
+      async releaseTestGate(project, worktreePath = project.main) {
+        const identity = (await readFile(join(worktreePath, "identity.txt"), "utf8")).trim();
+        await writeFile(join(base, "test-control", `${identity}.release`), "go");
+      },
+      async testEvents(project) {
+        const contents = await readFile(join(base, "test-control", `${project.name}.jsonl`), "utf8").catch(() => "");
+        return contents.split("\n").filter(Boolean).map((line) => JSON.parse(line) as FixtureTestEvent);
+      },
       async ownedPids(project, worktreePath = project.main) {
         const evidence = await readFile(join(worktreePath, "process-evidence.log"), "utf8").catch(() => "");
         return evidence.split("\n").flatMap((line) => { const pid = Number(line.split(" ")[1]); return Number.isInteger(pid) && pid > 0 ? [pid] : []; });
