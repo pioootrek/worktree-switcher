@@ -1,8 +1,35 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { Project, RuntimeSnapshot } from "@/shared/contracts";
 import { ProjectLifecycle } from "./index";
 
 describe("shared project lifecycle", () => {
+  it("counts retained ownership through a snapshot-only compact fallback", () => {
+    const project = { id: "web", name: "Web" } as Project;
+    const runtime = {
+      phase: "failed",
+      pid: 1234,
+      worktreePath: "/code/web",
+      startedAt: "2026-09-09T00:00:00.000Z",
+    } as RuntimeSnapshot;
+    const snapshot = vi.fn(() => runtime);
+    const lifecycle = new ProjectLifecycle({
+      getProject: () => project,
+      listProjects: () => [project],
+      authorizeReservation: () => null,
+      getServerCapacitySettings: () => ({ enabled: true, limit: 1 }),
+    }, { snapshot });
+
+    expect(lifecycle.capacityStatusCompact()).toEqual({
+      enabled: true,
+      limit: 1,
+      used: 1,
+      available: 0,
+      holders: [{ projectId: "web", projectName: "Web", phase: "stopping" }],
+    });
+    expect(snapshot).toHaveBeenCalledOnce();
+  });
+
   it("serializes one project across callers, allows another project, and recovers after rejection", async () => {
     const lifecycle = new ProjectLifecycle({
       getProject: () => null,
