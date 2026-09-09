@@ -120,11 +120,11 @@ controller must be event-driven and have bounded memory use:
 - at most four Git subprocesses with separately bounded queues of 128 operational
   and 128 background commands, prioritizing fresh operational validation even
   when the display queue is full;
-- bounded per-project and global log buffers;
+- runtime log tails capped at 400 lines per project and 4,000 characters per
+  line; disk output batched into 64 KiB writes while preserving rotation;
 - one five-second resource sampler per active Linux process group, with at
-  most 60 in-memory RAM points, at most eight simultaneous process-file reads
-  using a reusable 8 KiB buffer per worker
-  per scan, and no sampler for stopped projects;
+  most 60 in-memory RAM points and eight workers per scan, each reusing an
+  8 KiB process-file buffer; no sampler for stopped projects;
 - one serialized filesystem scan queue for worktree disk usage, refreshed no
   more than once per six hours unless a user explicitly requests it, with a
   30-second cooldown measured from a failed attempt;

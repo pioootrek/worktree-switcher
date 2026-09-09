@@ -12,6 +12,7 @@
       "FIX-20260905-owned-process-tree-stop",
       "NOTE-20260829-readiness-assessment",
       "NOTE-20260908-multi-project-verification-plan",
+      "NOTE-20260909-controller-resource-budget",
       "RWK-20260829-idle-memory-budget"
     ]
   },
@@ -110,6 +111,11 @@
       "author": "agent:codex",
       "date": "2026-09-08",
       "text": "Analysis and implementation instructions are recorded in NOTE-20260908-multi-project-verification-plan/analysis-and-plan.md at baseline 8cf25aa. Existing browser tests use fixture HTTP/EventSource; add separate real-controller integration and five true browser E2E scenarios with real SQLite, Git worktrees and owned Node processes. Jointly verify capacity, reservation authority, stale targets, dirty warnings, failure isolation and shutdown. Preserve the fast fixture suite. The memory item still needs a reproducible measured budget, and owner-workflow evidence remains distinct from fixture automation. Planning only: no application suites, measurements or service changes performed."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-09",
+      "text": "Resource acceptance is complete under NOTE-20260909-controller-resource-budget and docs/resource-budget.md. Implementation 8a0d5d0 incorporates PR #20, passes three canonical measurements (109.8-122.4 MiB post-cycle RSS; 15.75-28.75 MiB growth), detects the 128 MiB negative control with graceful cleanup, and passes check/build, 11 integration, 5 UI and 2 real E2E tests. This closes only RWK-20260829-idle-memory-budget. Keep this feature open for its remaining owner-workflow and focused acceptance evidence; these isolated fixtures are not an observed owner session."
     }
   ],
   "priority": "next",
@@ -138,7 +144,7 @@
   "validation": [
     "Switch three isolated fixture projects between worktrees and verify only the selected runtime restarts, ports stay stable, and reservations remain authoritative.",
     "Verify failures, stale worktrees, concurrent requests, and unknown port owners produce truthful status without affecting another project.",
-    "Use the measurement procedure from RWK-20260829-idle-memory-budget. The historical 50 MiB absolute threshold is superseded; record runtime baseline, controller overhead, idle CPU, and bounded growth.",
+    "Follow docs/resource-budget.md: three same-host Node/controller runs, 0 and 3 stopped projects, three running servers, and 30 switches with 60,000 log lines. Gate baseline-relative RSS (32 MiB stopped / 96 MiB running), post-cycle growth (32 MiB), CPU (0.5% stopped / 5% running of one core), retained logs/history and a 128 MiB negative control. The historical absolute 50 MiB threshold is superseded.",
     "Verify affected dashboard controls, keyboard focus, non-color state labels, and persistent dirty-worktree warnings in one focused browser pass.",
     "Verify shutdown and switch remove complete owned process groups using the linked cleanup fix.",
     "Run the proposed integration and real browser suites against one reviewed build; retain actual endpoint/boot identity and owned cleanup evidence, not only mocked runtime phases. Keep controlled adapter-failure tests explicitly distinguished from black-box runtime evidence."

@@ -1,0 +1,34 @@
+{
+  "author": "agent:codex",
+  "body": {
+    "baseline_commit": "756d989",
+    "summary": "Three full resource repetitions pass unchanged baseline-relative RSS/CPU/growth limits after procfs-buffer reuse and batched log writes: post-cycle RSS 109.8-122.4 MiB and growth 15.75-28.75 MiB, versus 166.7-171.4 MiB and 56.47-60.25 MiB before. A 128 MiB retained-memory negative control fails both memory checks with graceful cleanup. Check/build, 11 integration, 5 UI and 2 real E2E tests pass on implementation 8a0d5d0 incorporating PR #20. Owner workflow and sustained slow-disk overflow remain outside this evidence."
+  },
+  "created": "2026-09-09",
+  "files": [
+    "after.json",
+    "batch-calibration.json",
+    "before.json",
+    "buffer-calibration.json",
+    "calibration.json",
+    "concurrency-only.json",
+    "findings.md",
+    "log-batch-regression-before.txt",
+    "negative-control.json",
+    "no-disk-log-diagnostic.json",
+    "plateau-diagnostic.json",
+    "regression-before.txt"
+  ],
+  "id": "NOTE-20260909-controller-resource-budget",
+  "last_reviewed": "2026-09-09",
+  "schema_version": 1,
+  "status": "active",
+  "tags": [
+    "resources",
+    "memory",
+    "cpu",
+    "measurement",
+    "verification"
+  ],
+  "title": "Controller resource budget, measurements and bounded process inspection"
+}

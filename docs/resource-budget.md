@@ -36,7 +36,10 @@ Use the median to reduce sensitivity to individual samples; retain peak RSS
 and every raw sample for diagnosis. Peaks cover the idle observation windows,
 not the unobserved instant of a log burst. A passing median does not prove that memory
 can never grow over a longer session. This bounded workload supplements the
-implementation's fixed log/history limits and regression tests.
+implementation's fixed log/history limits and regression tests. The retained-log
+check covers runtime tails. Batching disk writes reduces allocation overhead
+but does not impose a pending-byte limit or backpressure on continuous output
+that exceeds disk throughput; this finite workload does not certify that case.
 
 ## Reproduce the benchmark
 
@@ -121,3 +124,7 @@ guards, or use a registered project's development port.
 Record fresh release evidence under `docs/backlog/notes/`. Historical RSS values
 remain dated observations, not current promises. Broader multi-project
 acceptance still needs its browser and owner-workflow evidence.
+
+Measured evidence for the implementation incorporating PR #20 is recorded in
+[the 2026-09-09 acceptance report](backlog/notes/NOTE-20260909-controller-resource-budget/findings.md),
+including raw samples, failed candidates, margin and the negative control.
