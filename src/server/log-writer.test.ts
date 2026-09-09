@@ -144,3 +144,38 @@ it("runs a prune requested between the final scan check and promise settlement",
     await logs.close();
   }
 });
+
+
+it("batches burst output, drains lines arriving during a write and preserves close ordering", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "switcher-log-batch-"));
+  directories.push(directory);
+  const actualOpen = fsPromises.open;
+  let writes = 0;
+  let logs: FileLogWriter;
+  const opened = vi.spyOn(fsPromises, "open").mockImplementation(async (...args) => {
+    const file = await actualOpen(...args);
+    if (String(args[0]).endsWith("burst.log")) {
+      const actualWrite = file.writeFile.bind(file);
+      vi.spyOn(file, "writeFile").mockImplementation(async (...writeArgs) => {
+        writes++;
+        if (writes === 1) logs.test("burst", "arrived during write");
+        return actualWrite(...writeArgs);
+      });
+    }
+    return file;
+  });
+  try {
+    logs = new FileLogWriter(directory);
+    logs.openTest("burst");
+    for (let i = 0; i < 2000; i++) logs.test("burst", `line ${i} ${"x".repeat(100)}`);
+    // Let the first disk write begin before finalization closes admission.
+    await vi.waitFor(() => expect(writes).toBeGreaterThan(0));
+    await logs.finishTest("burst");
+    const lines = readFileSync(join(directory, "tests", "burst.log"), "utf8").trimEnd().split("\n");
+    expect(lines).toHaveLength(2001);
+    for (let i = 0; i < 2000; i++) expect(lines[i].slice(25)).toBe(`line ${i} ${"x".repeat(100)}`);
+    expect(lines.at(-1)).toContain("arrived during write");
+    expect(writes).toBeLessThan(10);
+    await logs.close();
+  } finally { opened.mockRestore(); }
+});

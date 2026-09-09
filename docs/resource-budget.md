@@ -80,6 +80,9 @@ Its overhead is present in both runs. The driver, browser and managed server
 memory/CPU are excluded from controller measurements. No forced GC is requested. Linux monitoring uses at most eight concurrent
 workers per scan, each reusing an 8 KiB buffer for process stat/status records.
 Unexpectedly oversized records are skipped instead of growing the buffer.
+The disk log writer batches queued lines into writes of up to 64 KiB (except
+an individually larger line), preserving line boundaries at rotation and
+flushing accepted output on close. This avoids per-line promise chains.
 
 Run builds, browser suites and this benchmark sequentially. Schedule sampling
 away from other heavy host work and retain the load metadata. Investigate a
