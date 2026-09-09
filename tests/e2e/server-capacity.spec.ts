@@ -18,14 +18,18 @@ test("the real dashboard enforces, reuses, and lowers server capacity", async ({
     await card(b!.id).getByRole("button", { name: "Start", exact: true }).click();
     const before = await Promise.all([endpointIdentity(a!), endpointIdentity(b!)]);
     await expect(page.getByRole("button", { name: "Open server capacity" })).toContainText("2/2");
+    await expect(page.getByText("project-b: start completed.", { exact: true })).toBeVisible();
 
+    const rejected = page.waitForResponse((response) => response.url().includes(`/api/projects/${c!.id}/operation`));
     await card(c!.id).getByRole("button", { name: "Start", exact: true }).click();
+    expect((await rejected).status()).toBe(409);
     await expect(page.getByRole("alert").filter({ hasText: /limit of 2/i })).toBeVisible();
     await endpointUnavailable(c!);
     expect(await Promise.all([endpointIdentity(a!), endpointIdentity(b!)])).toEqual(before);
 
     await card(a!.id).getByRole("button", { name: "Stop", exact: true }).click();
     await endpointUnavailable(a!);
+    await expect(page.getByRole("button", { name: "Open server capacity" })).toContainText("1/2");
     await card(c!.id).getByRole("button", { name: "Start", exact: true }).click();
     await endpointIdentity(c!);
 

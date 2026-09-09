@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
-import { endpointIdentity, endpointUnavailable, startControllerFixture, waitFor, type ControllerFixture, type FixtureProject } from "../support/controller-fixture";
+import { closeFixtureChild, endpointIdentity, endpointUnavailable, startControllerFixture, waitFor, type ControllerFixture, type FixtureProject } from "../support/controller-fixture";
 
 interface Capacity { enabled: boolean; limit: number; used: number; available: number | null; holders: Array<{ projectId: string; phase: string }> }
 interface Dashboard { capacity: Capacity; projects: Array<{ project: { id: string }; runtime: { phase: string } }> }
@@ -51,9 +52,14 @@ describe("real server capacity", () => {
 
   it("C3: retains a slot across switch and restart", async () => {
     fixture = await startControllerFixture(); const [a, b, c] = fixture.projects; await configure(fixture, true, 2); await operation(fixture, a!, "start"); await operation(fixture, b!, "start");
-    const bIdentity = await endpointIdentity(b!); const blocked = operation(fixture, c!, "start"); await operation(fixture, a!, "switch", a!.alternate); expect((await blocked).status).toBe(409);
+    const bIdentity = await endpointIdentity(b!); await fixture.setMode(a!, "gate", a!.alternate); const switching = operation(fixture, a!, "switch", a!.alternate);
+    await waitFor(async () => (await capacity(fixture!)).holders.some((holder) => holder.projectId === a!.id && holder.phase === "starting") || null, 10_000, () => "switch did not reach gated start");
+    expect((await operation(fixture, c!, "start")).status).toBe(409); await fixture.releaseGate(a!, a!.alternate); expect((await switching).ok).toBe(true);
     const switched = await endpointIdentity(a!, `${a!.name}:alternate`); expect(switched.identity).toContain("alternate"); expect(await endpointIdentity(b!)).toEqual(bIdentity);
-    await operation(fixture, a!, "restart", a!.alternate); const restarted = await endpointIdentity(a!, `${a!.name}:alternate`); expect(restarted.boot).not.toBe(switched.boot); expect((await capacity(fixture)).used).toBe(2);
+    await fixture.setMode(a!, "gate", a!.alternate); const restarting = operation(fixture, a!, "restart", a!.alternate);
+    await waitFor(async () => (await capacity(fixture!)).holders.some((holder) => holder.projectId === a!.id && holder.phase === "starting") || null, 10_000, () => "restart did not reach gated start");
+    expect((await operation(fixture, c!, "start")).status).toBe(409); await fixture.releaseGate(a!, a!.alternate); expect((await restarting).ok).toBe(true);
+    const restarted = await endpointIdentity(a!, `${a!.name}:alternate`); expect(restarted.boot).not.toBe(switched.boot); expect((await capacity(fixture)).used).toBe(2);
   });
 
   it("C4: releases capacity after early exit and readiness timeout cleanup", async () => {
@@ -77,7 +83,25 @@ describe("real server capacity", () => {
   });
 
   it("C7: graceful controller shutdown closes every owned listener", async () => {
-    fixture = await startControllerFixture(); const [a, b] = fixture.projects; await operation(fixture, a!, "start"); await operation(fixture, b!, "start"); await Promise.all([endpointIdentity(a!), endpointIdentity(b!)]);
+    fixture = await startControllerFixture(); const [a, b] = fixture.projects; await fixture.setMode(a!, "stubborn-descendant"); await operation(fixture, a!, "start"); await operation(fixture, b!, "start"); await Promise.all([endpointIdentity(a!), endpointIdentity(b!)]);
+    const ownedPids = [...await fixture.ownedPids(a!), ...await fixture.ownedPids(b!)]; expect(ownedPids.length).toBeGreaterThanOrEqual(3);
     await fixture.stop(); await Promise.all([endpointUnavailable(a!), endpointUnavailable(b!)]);
+    await waitFor(() => ownedPids.every((pid) => { try { process.kill(pid, 0); return false; } catch { return true; } }) || null, 5_000, () => `Owned fixture processes survived shutdown: ${ownedPids.join(", ")}`);
+  });
+
+  it("rejects teardown when the controller already crashed", async () => {
+    const crashed = spawn(process.execPath, ["-e", "process.exit(7)"], { stdio: "ignore" });
+    await new Promise<void>((resolveExit) => crashed.once("exit", () => resolveExit()));
+    await expect(closeFixtureChild(crashed)).rejects.toThrow("exited uncleanly (7)");
+  });
+
+  it("does not mistake an unresponsive live listener for a closed endpoint", async () => {
+    const hanging = createServer(() => undefined);
+    await new Promise<void>((resolve, reject) => hanging.listen(0, "127.0.0.1", resolve).once("error", reject));
+    const address = hanging.address();
+    if (!address || typeof address === "string") throw new Error("Hanging fixture has no TCP address");
+    const project = { id: "probe", name: "probe", port: address.port, main: "", alternate: "" };
+    try { await expect(endpointUnavailable(project, 700)).rejects.toThrow("closure remained unconfirmed"); }
+    finally { await new Promise<void>((resolve, reject) => hanging.close((error) => error ? reject(error) : resolve())); }
   });
 });
