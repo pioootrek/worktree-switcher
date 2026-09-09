@@ -179,3 +179,30 @@ it("batches burst output, drains lines arriving during a write and preserves clo
     await logs.close();
   } finally { opened.mockRestore(); }
 });
+
+
+it("rotates small batched lines without crossing the file byte limit or losing output", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "switcher-log-batch-rotation-"));
+  directories.push(directory);
+  const logs = new FileLogWriter(directory);
+  const path = join(directory, "tests", "boundary.log");
+  const limit = 5 * 1024 * 1024;
+  const prefix = `${"p".repeat(limit - 250 - 1)}\n`;
+  writeFileSync(path, prefix);
+  const expected = Array.from({ length: 20 }, (_, i) => `line ${i} ${"ą".repeat(40)}`);
+  try {
+    logs.openTest("boundary");
+    for (const line of expected) logs.test("boundary", line);
+    await logs.finishTest("boundary");
+    const rotated = readFileSync(`${path}.1`);
+    const current = readFileSync(path);
+    expect(rotated.length).toBeLessThanOrEqual(limit);
+    expect(current.length).toBeLessThanOrEqual(limit);
+    expect(rotated.subarray(0, prefix.length).toString()).toBe(prefix);
+    const beforeRotation = rotated.subarray(prefix.length).toString().trimEnd().split("\n");
+    const afterRotation = current.toString().trimEnd().split("\n");
+    expect(beforeRotation).toHaveLength(2);
+    expect(afterRotation).toHaveLength(18);
+    expect([...beforeRotation, ...afterRotation].map(line => line.slice(25))).toEqual(expected);
+  } finally { await logs.close(); }
+});

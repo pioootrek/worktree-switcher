@@ -41,6 +41,8 @@ function parseHostCpuTicks(stat: string): number {
   return line.trim().split(/\s+/).slice(1).reduce((total, value) => total + Number(value), 0);
 }
 
+class ProcessRecordTooLargeError extends Error {}
+
 // Per-process stat/status records are small. Reject unexpectedly large records
 // rather than allocating readFile's buffers for size-zero procfs files.
 async function readProcessFile(path: string, buffer: Buffer): Promise<string> {
@@ -52,7 +54,10 @@ async function readProcessFile(path: string, buffer: Buffer): Promise<string> {
       if (bytesRead === 0) return buffer.toString("utf8", 0, size);
       size += bytesRead;
     }
-    throw new Error("Process resource record exceeds the read limit.");
+    // Probe EOF using the same buffer; a full 8 KiB record is valid.
+    const { bytesRead } = await file.read(buffer, 0, 1, null);
+    if (bytesRead === 0) return buffer.toString("utf8", 0, size);
+    throw new ProcessRecordTooLargeError("Process resource record exceeds the read limit.");
   } finally {
     await file.close();
   }
@@ -67,6 +72,7 @@ export class LinuxProcessResourceSampler implements ProcessResourceSampler {
     const processIds = entries.filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name)).map((entry) => entry.name);
     const group: Array<{ cpuTicks: number; rssBytes: number }> = [];
     let next = 0;
+    let recordError: ProcessRecordTooLargeError | undefined;
     // Each worker reuses one bounded buffer across all of its process records.
     await Promise.all(Array.from({ length: Math.min(8, processIds.length) }, async () => {
       const buffer = Buffer.allocUnsafe(8192);
@@ -77,11 +83,15 @@ export class LinuxProcessResourceSampler implements ProcessResourceSampler {
           if (!stat || stat.processGroupId !== processGroupId) continue;
           const status = await readProcessFile(`/proc/${processId}/status`, buffer);
           group.push({ cpuTicks: stat.cpuTicks, rssBytes: parseRssBytes(status) });
-        } catch {
-          // Processes may exit while /proc is being scanned. A partial sample is still useful.
+        } catch (error) {
+          // Drain all workers before rejecting so every opened descriptor closes.
+          // An oversized record must not silently remove a live group member.
+          if (error instanceof ProcessRecordTooLargeError) recordError ??= error;
+          // Processes may exit while /proc is being scanned; retain that tolerance.
         }
       }
     }));
+    if (recordError) throw recordError;
     if (group.length === 0) throw new Error("The managed process group is no longer available.");
     return {
       rssBytes: group.reduce((total, sample) => total + sample.rssBytes, 0),

@@ -56,7 +56,8 @@ The earlier 60/120-second proposal remains historical, not a second active gate.
 
 - Linux process scans use eight workers and reuse one 8 KiB buffer per worker
   for stat/status records. Short reads are accumulated; descriptors close on
-  every path. Oversized records are skipped like unavailable process samples.
+  every path. The original measured revision skipped oversized records; the
+  review follow-up below corrects that error handling without growing buffers.
 - Disk logs batch already queued lines into writes of up to 64 KiB, except a
   single larger line. This removes per-line promise chains while preserving
   timestamps, line order, rotation boundaries, errors and close/finish flushing.
@@ -136,3 +137,29 @@ work. This gate does not claim that case or indefinite memory stability.
 No installed controller, development server, systemd limit, swap policy, guard
 or watchdog was changed. The owner's real workflow remains separate evidence
 under `FEAT-20260829-multi-project-worktree-switching`; that item stays open.
+
+## PR #21 review follow-up
+
+Both unresolved reviewer concerns are classified as `fix`:
+
+- `discussion_r3966355677`: the 8 KiB boundary rejected a complete record and
+  silently excluded oversized records from the group. An extra EOF probe reuses
+  the same buffer, accepts exactly 8192 bytes and identifies true overflow.
+  Oversized-record errors invalidate the sample after all workers drain and
+  close their descriptors; ProcessManager's existing error path reports
+  unavailable metrics. Disappearing-process tolerance remains unchanged.
+  Tests cover stat/status at 8191, 8192 and 8193 bytes. Four new cases failed
+  against the reviewed implementation and pass with this correction.
+- `discussion_r3966357092`: added a real-file test starting 250 bytes below the
+  5 MiB boundary, then writing 20 short UTF-8 lines in batches. It verifies both
+  file sizes, existing content, and complete ordered output across rotation
+  (2 lines in the rotated file and 18 in the new file). Removing the batch's
+  rotation guard makes this test fail. No production log-writer change was
+  needed for this concern.
+
+Review verification passed: 16 focused tests, `pnpm check` (246 application
+tests and 3 metric tests), `pnpm build`, and 11 integration tests. The full
+measurement reports above remain immutable evidence for `8a0d5d0`; the new
+boundary cases are exercised by focused regression tests. The fixed normal
+read path and buffer capacity are unchanged; no new full resource measurement
+is claimed. CI validates the published follow-up commit separately.

@@ -82,7 +82,9 @@ The baseline and controller use the same test-only Node preload
 Its overhead is present in both runs. The driver, browser and managed server
 memory/CPU are excluded from controller measurements. No forced GC is requested. Linux monitoring uses at most eight concurrent
 workers per scan, each reusing an 8 KiB buffer for process stat/status records.
-Unexpectedly oversized records are skipped instead of growing the buffer.
+Records of exactly 8 KiB are accepted after an EOF probe using the same buffer.
+An oversized record rejects the sample after all worker descriptors close, so
+monitoring reports unavailable instead of publishing an incomplete group total.
 The disk log writer batches queued lines into writes of up to 64 KiB (except
 an individually larger line), preserving line boundaries at rotation and
 flushing accepted output on close. This avoids per-line promise chains.
