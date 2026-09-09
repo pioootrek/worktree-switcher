@@ -1,0 +1,23 @@
+{
+  "author": "agent:codex",
+  "body": {
+    "baseline_commit": "13e80fe",
+    "summary": "Source-backed plan to complete real Node/Django queue acceptance through HTTP, MCP and dashboard; reuse completed lifecycle/source fixes and portable CI. Planning only, no new feature acceptance runs."
+  },
+  "created": "2026-09-09",
+  "files": [
+    "implementation-plan.md"
+  ],
+  "id": "NOTE-20260909-managed-test-queue-plan",
+  "last_reviewed": "2026-09-09",
+  "schema_version": 1,
+  "status": "active",
+  "tags": [
+    "plan",
+    "verification",
+    "queue",
+    "integration",
+    "e2e"
+  ],
+  "title": "Managed test queue transport and browser acceptance plan"
+}

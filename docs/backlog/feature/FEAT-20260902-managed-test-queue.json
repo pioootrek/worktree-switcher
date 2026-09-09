@@ -9,7 +9,8 @@
       "FIX-20260905-owned-process-tree-stop",
       "FIX-20260905-test-log-lifecycle",
       "FIX-20260905-test-run-source-attribution",
-      "NOTE-20260829-readiness-assessment"
+      "NOTE-20260829-readiness-assessment",
+      "NOTE-20260909-managed-test-queue-plan"
     ]
   },
   "notes": [
@@ -27,11 +28,16 @@
       "author": "agent:codex",
       "date": "2026-09-05",
       "text": "The queue already exists. DONE-20260904-test-environment-isolation records a real managed WinPath run; the 2026-09-05 assessment independently passed 131 repository tests. Neither proves today's browser/package flow. Keep open for remaining evidence, with defects tracked separately."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-09",
+      "text": "Source audit at main 13e80fe confirms linked owned-process, final-log and source-attribution fixes are complete in their done records. NOTE-20260909-managed-test-queue-plan/implementation-plan.md defines remaining real HTTP/MCP and PL/EN browser acceptance with portable Node and genuine Django fixtures, queue authority/exclusion, cancellation, source qualification, restart history and CI setup. Planning only: no new feature acceptance runs; keep open."
     }
   ],
   "priority": "next",
   "problem": [
-    "The queue, Node/Django adapters, HTTP/MCP tools, and clean test profiles are implemented. Historical validation covers real fixture jobs and a later managed verification run, but current browser-flow evidence and the linked lifecycle/source fixes remain incomplete."
+    "The queue, Node/Django adapters, HTTP/MCP tools, clean profiles and linked process/log/source fixes are implemented. Remaining work is integrated acceptance of the current built controller and dashboard with portable Node and genuine Django fixtures. Historical and mocked UI evidence does not establish the full current user flow."
   ],
   "risk": {
     "dimensions": [
@@ -44,9 +50,10 @@
   },
   "schema_version": 1,
   "scope": [
-    "Complete the linked log and source-attribution fixes and review descendant cleanup through the owned-process fix.",
+    "Reuse the completed process cleanup, log lifecycle and source-attribution fixes; add missing integrated evidence and fix only newly reproduced defects.",
     "Exercise discovery, enqueue, waiting, cancellation, history, and useful errors through dashboard and MCP with portable Node and Django fixtures.",
-    "Preserve one active run per worktree, the global limit, idempotency, and clean test profiles. Do not rebuild the scheduler or repeat the completed environment-isolation item."
+    "Preserve one active run per worktree, the global limit, idempotency, and clean test profiles. Do not rebuild the scheduler or repeat the completed environment-isolation item.",
+    "Follow NOTE-20260909-managed-test-queue-plan for fixture design, transport/browser scenarios, verification order and closure evidence."
   ],
   "source": "Product discussion on 2026-09-02",
   "status": "open",

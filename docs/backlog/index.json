@@ -157,6 +157,24 @@
       "author": "agent:codex",
       "created": "2026-09-09",
       "files": [
+        "implementation-plan.md"
+      ],
+      "id": "NOTE-20260909-managed-test-queue-plan",
+      "path": "notes/NOTE-20260909-managed-test-queue-plan",
+      "status": "active",
+      "tags": [
+        "plan",
+        "verification",
+        "queue",
+        "integration",
+        "e2e"
+      ],
+      "title": "Managed test queue transport and browser acceptance plan"
+    },
+    {
+      "author": "agent:codex",
+      "created": "2026-09-09",
+      "files": [
         "after.json",
         "batch-calibration.json",
         "before.json",
