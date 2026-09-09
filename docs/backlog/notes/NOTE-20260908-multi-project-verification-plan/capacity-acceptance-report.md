@@ -1,6 +1,6 @@
 # Server capacity acceptance report
 
-Tested implementation: `bf45be1fd11330f60aca520161e1d9e2811d4fc0`
+Tested implementation: `32e0a19769c7ed7c524837d19e2f00a352de43b7`
 
 Date: 2026-09-09
 
@@ -42,9 +42,9 @@ browser storage, SQLite file or MCP token was retained.
 
 - `pnpm check`: passed ESLint, TypeScript and 237 tests in 40 files.
 - `pnpm build`: passed static Next.js export, CLI bundle and build fingerprint.
-- `pnpm test:integration`: passed 9 tests in 2 files, including C1-C7; 66.46 s.
+- `pnpm test:integration`: passed 11 tests in 2 files, including C1-C7 and cleanup-helper regressions; 71.18 s.
 - `pnpm test:ui`: passed 5 fixture UI tests; 14.0 s.
-- `pnpm test:e2e`: passed 2 real-controller browser tests; 5.9 s.
+- `pnpm test:e2e`: passed 2 real-controller browser tests; 7.9 s.
 - `git diff --check`: passed.
 
 All runs were sequential. No emergency controller termination or leftover owned

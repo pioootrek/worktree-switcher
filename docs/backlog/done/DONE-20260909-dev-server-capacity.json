@@ -21,8 +21,8 @@
   "title": "Validated managed server capacity across real transports",
   "validation": [
     "PR #19 established compact/full agreement, recovery, slot reuse, snapshot fallback and bounded compact reads.",
-    "Implementation bf45be1 passed C1-C7 with a built controller, real SQLite, Git, HTTP, MCP and owned Node processes; detailed evidence is in the capacity acceptance report.",
-    "pnpm check passed 237 tests; build, 9 integration tests, 5 fixture UI tests and 2 real Playwright E2E tests passed sequentially.",
+    "Implementation 32e0a19 passed C1-C7 with a built controller, real SQLite, Git, HTTP, MCP and owned Node processes; detailed evidence is in the capacity acceptance report.",
+    "pnpm check passed 237 tests; build, 11 integration tests, 5 fixture UI tests and 2 real Playwright E2E tests passed sequentially.",
     "All fixture controllers and owned listeners completed cleanup without emergency termination."
   ]
 }
