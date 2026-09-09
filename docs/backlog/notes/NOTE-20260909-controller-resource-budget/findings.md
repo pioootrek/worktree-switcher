@@ -163,3 +163,25 @@ measurement reports above remain immutable evidence for `8a0d5d0`; the new
 boundary cases are exercised by focused regression tests. The fixed normal
 read path and buffer capacity are unchanged; no new full resource measurement
 is claimed. CI validates the published follow-up commit separately.
+
+### CI follow-up: operation feedback during refresh
+
+[CI run 34332190544](https://github.com/pioootrek/worktree-switcher/actions/runs/34332190544)
+failed the real capacity E2E at `c613ed0`: the rejected start correctly returned
+409, but the expected capacity alert disappeared. `useDashboard.reconcile`
+cleared the shared error state when an unrelated successful refresh completed.
+This pre-existing race made the new real-controller capacity test timing-sensitive.
+
+Connection/refresh errors now have separate state from operation errors.
+Background reads clear only connection errors. A connection failure can take
+precedence while present, then recovery reveals the retained operation error;
+a subsequent successful mutation clears that operation error. The public
+mutation callback and feature interfaces are unchanged.
+
+Two deterministic browser regressions cover full and live refreshes. Both fail
+against the previous static export after a rendered capacity update confirms
+that the refresh completed. They pass with the fix and additionally verify
+connection failure/recovery plus clearing after a successful operation.
+Local verification passes: `pnpm check` (246 application + 3 metric tests),
+`pnpm build`, 7 UI tests and 2 real-controller E2E tests. CI will rerun the whole
+pipeline, including integration and package smoke, for the published commit.
