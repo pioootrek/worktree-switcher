@@ -77,7 +77,7 @@ function fixture(count = 3, onStart: (project: Project) => Promise<void> = async
         worktreePath: runtime.worktreePath,
         startedAt: runtime.startedAt,
         failureCode: runtime.failure?.code ?? (runtime.error ? "runtime_error" : null),
-        retainsOwnership: runtime.pid !== null,
+        ownsProcess: runtime.pid !== null,
       };
     },
     start,

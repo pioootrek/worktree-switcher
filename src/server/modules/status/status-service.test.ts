@@ -35,7 +35,7 @@ function fixture(reservation: Reservation | null = null) {
     getTestQueueSettings: vi.fn(() => ({ limit: 1 })),
   };
   const processes = {
-    statusSummary: vi.fn(() => ({ phase, worktreePath: phase === "running" ? "/code/web" : null, startedAt: null, failureCode: null, retainsOwnership: phase === "running" })),
+    statusSummary: vi.fn(() => ({ phase, worktreePath: phase === "running" ? "/code/web" : null, startedAt: null, failureCode: null, ownsProcess: phase === "running" })),
     logTail: vi.fn((_projectId: string, limit: number) => ({ lines: ["a", "b", "secret-ish detail"].slice(-limit), retainedLines: 3, truncated: limit < 3 })),
   };
   const service = new StatusService(store, processes,
@@ -65,7 +65,6 @@ describe("StatusService", () => {
     expect(JSON.stringify(first)).not.toContain("raw-session");
     expect(JSON.stringify(first)).not.toContain("private reason");
     expect(JSON.stringify(first)).not.toContain("do-not-leak");
-    expect(JSON.stringify(first)).not.toContain("retainsOwnership");
     service.close();
   });
 

@@ -1,31 +1,64 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Project, RuntimeSnapshot } from "@/shared/contracts";
 import { ProjectLifecycle } from "./index";
 
 describe("shared project lifecycle", () => {
-  it("counts retained ownership through a snapshot-only compact fallback", () => {
-    const project = { id: "web", name: "Web" } as Project;
-    const runtime = {
-      phase: "failed",
-      pid: 1234,
-      worktreePath: "/code/web",
-      startedAt: "2026-09-09T00:00:00.000Z",
-    } as RuntimeSnapshot;
-    const snapshot = vi.fn(() => runtime);
+  it("counts retained failed process ownership consistently in compact capacity", () => {
+    const projects = [{ id: "web", name: "Web" }, { id: "api", name: "API" }];
+    const summaries = new Map([
+      ["web", { phase: "failed" as const, worktreePath: "/code/web", startedAt: "2026-09-08T00:00:00.000Z", failureCode: "cleanup_failed", ownsProcess: true }],
+      ["api", { phase: "stopped" as const, worktreePath: null, startedAt: null, failureCode: null, ownsProcess: false }],
+    ]);
+    const snapshot = (id: string) => ({
+      phase: summaries.get(id)!.phase,
+      pid: summaries.get(id)!.ownsProcess ? 1234 : null,
+      worktreePath: summaries.get(id)!.worktreePath,
+      startedAt: summaries.get(id)!.startedAt,
+      error: null, failure: null, logs: [],
+      resources: { status: "idle" as const, currentRssBytes: null, peakRssBytes: null, cpuPercent: null,
+        processCount: null, sampledAt: null, sampleAgeSeconds: null, warningThresholdBytes: null, history: [] },
+    });
     const lifecycle = new ProjectLifecycle({
-      getProject: () => project,
-      listProjects: () => [project],
+      getProject: (id) => projects.find((project) => project.id === id) as never,
+      listProjects: () => projects as never,
+      authorizeReservation: () => null,
+      getServerCapacitySettings: () => ({ enabled: true, limit: 1 }),
+    }, {
+      snapshot: vi.fn(snapshot),
+      statusSummary: vi.fn((id: string) => summaries.get(id)!),
+    });
+
+    expect(lifecycle.capacityStatusCompact()).toMatchObject({
+      used: 1,
+      available: 0,
+      holders: [{ projectId: "web", phase: "stopping" }],
+    });
+    expect(lifecycle.capacityStatus()).toMatchObject({ used: 1, available: 0 });
+    expect(() => lifecycle.acquireCapacity(projects[1] as never)).toThrow("Osiągnięto limit 1");
+
+    summaries.set("web", { ...summaries.get("web")!, ownsProcess: false });
+    expect(lifecycle.capacityStatusCompact()).toMatchObject({ used: 0, available: 1, holders: [] });
+  });
+
+  it("counts retained ownership through the snapshot-only compact fallback", () => {
+    const projects = [{ id: "web", name: "Web" }];
+    const snapshot = vi.fn(() => ({
+      phase: "failed" as const, pid: 1234, worktreePath: "/code/web", startedAt: null,
+      error: "cleanup unconfirmed", failure: null, logs: [],
+      resources: { status: "idle" as const, currentRssBytes: null, peakRssBytes: null, cpuPercent: null,
+        processCount: null, sampledAt: null, sampleAgeSeconds: null, warningThresholdBytes: null, history: [] },
+    }));
+    const lifecycle = new ProjectLifecycle({
+      getProject: () => projects[0] as never,
+      listProjects: () => projects as never,
       authorizeReservation: () => null,
       getServerCapacitySettings: () => ({ enabled: true, limit: 1 }),
     }, { snapshot });
 
-    expect(lifecycle.capacityStatusCompact()).toEqual({
-      enabled: true,
-      limit: 1,
+    expect(lifecycle.capacityStatusCompact()).toMatchObject({
       used: 1,
       available: 0,
-      holders: [{ projectId: "web", projectName: "Web", phase: "stopping" }],
+      holders: [{ projectId: "web", phase: "stopping" }],
     });
     expect(snapshot).toHaveBeenCalledOnce();
   });

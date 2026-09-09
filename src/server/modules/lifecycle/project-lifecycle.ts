@@ -87,11 +87,18 @@ export class ProjectLifecycle {
         project,
         runtime: this.processes.snapshot(project.id),
       }));
-    const holders = projects.flatMap(({ project, runtime }) => this.capacityHolder(
-      project,
-      runtime.phase,
-      runtime.pid !== null,
-    ));
+    const holders = projects.flatMap(({ project, runtime }) => {
+      const pending = this.pendingStarts.has(project.id);
+      if (!pending && !runtime.pid && runtime.phase !== "starting" && runtime.phase !== "running" && runtime.phase !== "stopping") return [];
+      const phase: ServerCapacityStatus["holders"][number]["phase"] = runtime.phase === "starting" || runtime.phase === "running" || runtime.phase === "stopping"
+        ? runtime.phase
+        : runtime.pid ? "stopping" : "starting";
+      return [{
+        projectId: project.id,
+        projectName: project.name,
+        phase,
+      }];
+    });
     return {
       ...settings,
       used: holders.length,
@@ -104,10 +111,13 @@ export class ProjectLifecycle {
     const settings = this.store.getServerCapacitySettings();
     const holders = this.store.listProjects().flatMap((project) => {
       const runtime = this.processes.statusSummary?.(project.id) ?? this.processes.snapshot(project.id);
-      const retainsOwnership = "retainsOwnership" in runtime
-        ? runtime.retainsOwnership
-        : runtime.pid !== null;
-      return this.capacityHolder(project, runtime.phase, retainsOwnership);
+      const pending = this.pendingStarts.has(project.id);
+      const ownsProcess = "ownsProcess" in runtime ? runtime.ownsProcess : "pid" in runtime && Boolean(runtime.pid);
+      if (!pending && !ownsProcess && runtime.phase !== "starting" && runtime.phase !== "running" && runtime.phase !== "stopping") return [];
+      const phase: ServerCapacityStatus["holders"][number]["phase"] =
+        runtime.phase === "starting" || runtime.phase === "running" || runtime.phase === "stopping"
+          ? runtime.phase : ownsProcess ? "stopping" : "starting";
+      return [{ projectId: project.id, projectName: project.name, phase }];
     });
     return { ...settings, used: holders.length,
       available: settings.enabled ? Math.max(0, settings.limit - holders.length) : null, holders };
@@ -162,20 +172,6 @@ export class ProjectLifecycle {
       released = true;
       owners.delete(key);
     };
-  }
-
-  private capacityHolder(
-    project: Pick<Project, "id" | "name">,
-    runtimePhase: ProjectSnapshot["runtime"]["phase"],
-    retainsOwnership: boolean,
-  ): ServerCapacityStatus["holders"] {
-    const pending = this.pendingStarts.has(project.id);
-    const active = runtimePhase === "starting" || runtimePhase === "running" || runtimePhase === "stopping";
-    if (!pending && !retainsOwnership && !active) return [];
-    const phase: ServerCapacityStatus["holders"][number]["phase"] = active
-      ? runtimePhase
-      : retainsOwnership ? "stopping" : "starting";
-    return [{ projectId: project.id, projectName: project.name, phase }];
   }
 
   private worktreeKey(projectId: string, worktreePath: string): string {
