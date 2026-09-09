@@ -12,16 +12,6 @@
       "type": "feature"
     },
     {
-      "area": "core",
-      "id": "FEAT-20260829-dev-server-capacity",
-      "path": "feature/FEAT-20260829-dev-server-capacity.json",
-      "priority": "next",
-      "risk_level": "medium",
-      "status": "open",
-      "title": "Validate the implemented server capacity with owned process cleanup",
-      "type": "feature"
-    },
-    {
       "area": "process-manager",
       "id": "FEAT-20260829-launch-environment-profiles",
       "path": "feature/FEAT-20260829-launch-environment-profiles.json",
@@ -214,6 +204,7 @@
       "created": "2026-09-08",
       "files": [
         "analysis-and-plan.md",
+        "capacity-acceptance-report.md",
         "capacity-implementation-plan.md"
       ],
       "id": "NOTE-20260908-multi-project-verification-plan",
