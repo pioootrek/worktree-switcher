@@ -216,25 +216,21 @@ owner's service or alter host guards/resource limits.
 
 ## Resource evidence and completion
 
-`RWK-20260829-idle-memory-budget` still needs an explicit reproducible procedure
-and a fresh accepted budget; it does not yet provide a finished numeric gate.
-Propose the following measurement protocol there before claiming this item's
-resource acceptance: same Node/build/host, bare Node HTTP baseline, controller
-with 0 and 3 registered projects, then 3 running fixture servers, recording
-controller RSS separately from descendants and browser. Warm up 60 seconds,
-sample at 1-second intervals for 120 seconds, perform 30 sequential switches
-with bounded log output, settle 60 seconds, then sample another 120 seconds.
-Repeat three times sequentially; include idle CPU, peak/median RSS, post-cycle
-growth and retained log/history bounds. Record the fixture log rate and total
-volume so the growth observation is reproducible.
+The canonical procedure and budgets are now in [Controller resource budget](../../../resource-budget.md),
+implemented under `RWK-20260829-idle-memory-budget`. Use that document and
+`NOTE-20260909-controller-resource-budget/findings.md` for current commands,
+results, failed trials and interpretation. The 60-second warmup / 120-second
+sampling proposal from this plan dated 2026-09-08 is superseded by the canonical
+15-second settling / 30-second observation protocol, repeated three times.
+The observation window spans six normal resource-sampler periods.
 
-These durations are proposed measurement parameters, not measured results or a
-new product budget. Establish overhead/growth limits from fresh data and reconcile
-the product/architecture documents under the memory item. Demonstrate that the
-procedure detects a deliberately bounded local regression (for example retained
-extra log batches or recurring Git work), then discard that regression. Do not
-restore the superseded absolute 50 MiB target or make noisy single RSS samples a
-CI pass/fail gate. Keep this longer measurement outside every-PR browser runs.
+Measure baseline-relative controller RSS separately from descendants and the
+browser, stopped and running CPU, growth after 30 switches with 60,000 log
+lines, and retained logs/history. Require the bounded 128 MiB retained-memory
+negative control to fail a memory check while cleaning up gracefully. Preserve
+historical measurements as dated evidence. Do not restore the superseded
+absolute 50 MiB target or make noisy single RSS samples a CI gate. Keep this
+measurement separate from every-PR browser runs and owner-workflow evidence.
 
 The evidence note must include tested commit, environment/runtime versions,
 commands, scenario results, elapsed time, cleanup outcome and sanitized failure

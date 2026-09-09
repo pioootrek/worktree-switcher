@@ -1,6 +1,6 @@
 ---
 audience: "contributors implementing the controller and user interface"
-last_reviewed: "2026-09-08"
+last_reviewed: "2026-09-09"
 source_of_truth: "runtime, persistence, configuration, and distribution decisions"
 status: "active"
 ---
@@ -120,9 +120,11 @@ controller must be event-driven and have bounded memory use:
 - at most four Git subprocesses with separately bounded queues of 128 operational
   and 128 background commands, prioritizing fresh operational validation even
   when the display queue is full;
-- bounded per-project and global log buffers;
+- runtime log tails capped at 400 lines per project and 4,000 characters per
+  line; disk output batched into 64 KiB writes while preserving rotation;
 - one five-second resource sampler per active Linux process group, with at
-  most 60 in-memory RAM points and no sampler for stopped projects;
+  most 60 in-memory RAM points and eight workers per scan, each reusing an
+  8 KiB process-file buffer; no sampler for stopped projects;
 - one serialized filesystem scan queue for worktree disk usage, refreshed no
   more than once per six hours unless a user explicitly requests it, with a
   30-second cooldown measured from a failed attempt;
@@ -130,9 +132,13 @@ controller must be event-driven and have bounded memory use:
 - release benchmarks report idle RSS, idle CPU, startup time, and growth while
   managing several fixture projects.
 
-Initial acceptance targets are at most 50 MiB idle RSS and negligible idle CPU
-on the supported Linux reference environment. These are budgets to verify, not
-assumptions about Node.js behavior.
+Release acceptance measures controller RSS above a same-host bare Node baseline.
+The budgets are 32 MiB additional median RSS and 0.5% of one logical CPU with
+projects stopped, or 96 MiB and 5% while monitoring three running projects.
+Post-cycle growth is limited to 32 MiB against the same pre-cycle workload.
+The [resource budget](resource-budget.md) defines the reproducible three-run
+procedure, retained-log limits and negative control. The old absolute 50 MiB
+RSS target is superseded; managed-server memory is measured separately.
 
 The Linux resource adapter aggregates `/proc` counters for every member of the
 detached process group created by the controller. This covers the package

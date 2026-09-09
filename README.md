@@ -437,6 +437,15 @@ Read [the product brief](docs/project-brief.md) before changing product or
 architecture decisions. [Architecture decisions](docs/architecture.md)
 describes the current process, persistence, and security boundaries.
 
+## Release resource measurements
+
+Run `pnpm build`, then `pnpm bench:resources --report /tmp/switcher-resources.json`
+for the isolated Linux resource benchmark. It measures controller overhead above
+a bare Node baseline, CPU, and memory growth after switching and log output.
+See [the resource budget](docs/resource-budget.md) for the full procedure,
+acceptance thresholds and the bounded negative control. Run it separately from
+other builds and browser suites.
+
 ## Contributing
 
 Bug reports, focused pull requests, and notes from worktree-heavy setups are

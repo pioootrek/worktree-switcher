@@ -19,32 +19,53 @@ class RotatingLogFile {
   private size = 0;
   private pending: Promise<void> = Promise.resolve();
   private failure: unknown = null;
+  private readonly queued: Array<{ content: string; bytes: number }> = [];
+  private flushing = false;
   private closing: Promise<void> | null = null;
 
   constructor(private readonly path: string) {}
 
   write(line: string): void {
-    if (this.closing) return;
+    if (this.closing || this.failure) return;
     const content = `${new Date().toISOString()} ${line}\n`;
-    this.pending = this.pending.then(async () => {
-      if (this.failure) return;
-      if (!this.file) {
-        this.file = await open(this.path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
-        this.size = (await this.file.stat()).size;
+    this.queued.push({ content, bytes: Buffer.byteLength(content) });
+    if (this.flushing) return;
+    this.flushing = true;
+    // One drain owns the queue. Bursts do not create a promise chain per line.
+    this.pending = Promise.resolve().then(async () => {
+      try {
+        while (this.queued.length) {
+          if (!this.file) {
+            this.file = await open(this.path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
+            this.size = (await this.file.stat()).size;
+          }
+          const first = this.queued.shift()!;
+          if (this.size && this.size + first.bytes > MAX_FILE_BYTES) {
+            await this.file.close();
+            this.file = null;
+            await rename(this.path, `${this.path}.1`);
+            this.file = await open(this.path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
+            this.size = 0;
+          }
+          const batch = [first.content];
+          let bytes = first.bytes;
+          while (this.queued.length && bytes + this.queued[0].bytes <= 64 * 1024
+            && this.size + bytes + this.queued[0].bytes <= MAX_FILE_BYTES) {
+            const next = this.queued.shift()!;
+            batch.push(next.content);
+            bytes += next.bytes;
+          }
+          await this.file.writeFile(batch.join(""));
+          this.size += bytes;
+        }
+      } catch (error: unknown) {
+        this.failure = error;
+        this.queued.length = 0;
+        console.error(`Nie udało się zapisać logu ${this.path}: ${String(error)}`);
+      } finally {
+        // Clear ownership in the same continuation as the final queue check.
+        this.flushing = false;
       }
-      const bytes = Buffer.byteLength(content);
-      if (this.size && this.size + bytes > MAX_FILE_BYTES) {
-        await this.file.close();
-        this.file = null;
-        await rename(this.path, `${this.path}.1`);
-        this.file = await open(this.path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
-        this.size = 0;
-      }
-      await this.file.writeFile(content);
-      this.size += bytes;
-    }).catch((error: unknown) => {
-      this.failure = error;
-      console.error(`Nie udało się zapisać logu ${this.path}: ${String(error)}`);
     });
   }
 

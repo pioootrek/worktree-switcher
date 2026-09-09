@@ -144,3 +144,65 @@ it("runs a prune requested between the final scan check and promise settlement",
     await logs.close();
   }
 });
+
+
+it("batches burst output, drains lines arriving during a write and preserves close ordering", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "switcher-log-batch-"));
+  directories.push(directory);
+  const actualOpen = fsPromises.open;
+  let writes = 0;
+  let logs: FileLogWriter;
+  const opened = vi.spyOn(fsPromises, "open").mockImplementation(async (...args) => {
+    const file = await actualOpen(...args);
+    if (String(args[0]).endsWith("burst.log")) {
+      const actualWrite = file.writeFile.bind(file);
+      vi.spyOn(file, "writeFile").mockImplementation(async (...writeArgs) => {
+        writes++;
+        if (writes === 1) logs.test("burst", "arrived during write");
+        return actualWrite(...writeArgs);
+      });
+    }
+    return file;
+  });
+  try {
+    logs = new FileLogWriter(directory);
+    logs.openTest("burst");
+    for (let i = 0; i < 2000; i++) logs.test("burst", `line ${i} ${"x".repeat(100)}`);
+    // Let the first disk write begin before finalization closes admission.
+    await vi.waitFor(() => expect(writes).toBeGreaterThan(0));
+    await logs.finishTest("burst");
+    const lines = readFileSync(join(directory, "tests", "burst.log"), "utf8").trimEnd().split("\n");
+    expect(lines).toHaveLength(2001);
+    for (let i = 0; i < 2000; i++) expect(lines[i].slice(25)).toBe(`line ${i} ${"x".repeat(100)}`);
+    expect(lines.at(-1)).toContain("arrived during write");
+    expect(writes).toBeLessThan(10);
+    await logs.close();
+  } finally { opened.mockRestore(); }
+});
+
+
+it("rotates small batched lines without crossing the file byte limit or losing output", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "switcher-log-batch-rotation-"));
+  directories.push(directory);
+  const logs = new FileLogWriter(directory);
+  const path = join(directory, "tests", "boundary.log");
+  const limit = 5 * 1024 * 1024;
+  const prefix = `${"p".repeat(limit - 250 - 1)}\n`;
+  writeFileSync(path, prefix);
+  const expected = Array.from({ length: 20 }, (_, i) => `line ${i} ${"ą".repeat(40)}`);
+  try {
+    logs.openTest("boundary");
+    for (const line of expected) logs.test("boundary", line);
+    await logs.finishTest("boundary");
+    const rotated = readFileSync(`${path}.1`);
+    const current = readFileSync(path);
+    expect(rotated.length).toBeLessThanOrEqual(limit);
+    expect(current.length).toBeLessThanOrEqual(limit);
+    expect(rotated.subarray(0, prefix.length).toString()).toBe(prefix);
+    const beforeRotation = rotated.subarray(prefix.length).toString().trimEnd().split("\n");
+    const afterRotation = current.toString().trimEnd().split("\n");
+    expect(beforeRotation).toHaveLength(2);
+    expect(afterRotation).toHaveLength(18);
+    expect([...beforeRotation, ...afterRotation].map(line => line.slice(25))).toEqual(expected);
+  } finally { await logs.close(); }
+});

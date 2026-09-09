@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { open, readFile, readdir } from "node:fs/promises";
 import { cpus } from "node:os";
 
 export interface RawResourceSample {
@@ -41,6 +41,28 @@ function parseHostCpuTicks(stat: string): number {
   return line.trim().split(/\s+/).slice(1).reduce((total, value) => total + Number(value), 0);
 }
 
+class ProcessRecordTooLargeError extends Error {}
+
+// Per-process stat/status records are small. Reject unexpectedly large records
+// rather than allocating readFile's buffers for size-zero procfs files.
+async function readProcessFile(path: string, buffer: Buffer): Promise<string> {
+  const file = await open(path, "r");
+  try {
+    let size = 0;
+    while (size < buffer.length) {
+      const { bytesRead } = await file.read(buffer, size, buffer.length - size, null);
+      if (bytesRead === 0) return buffer.toString("utf8", 0, size);
+      size += bytesRead;
+    }
+    // Probe EOF using the same buffer; a full 8 KiB record is valid.
+    const { bytesRead } = await file.read(buffer, 0, 1, null);
+    if (bytesRead === 0) return buffer.toString("utf8", 0, size);
+    throw new ProcessRecordTooLargeError("Process resource record exceeds the read limit.");
+  } finally {
+    await file.close();
+  }
+}
+
 export class LinuxProcessResourceSampler implements ProcessResourceSampler {
   readonly supported = process.platform === "linux";
 
@@ -48,18 +70,28 @@ export class LinuxProcessResourceSampler implements ProcessResourceSampler {
     if (!this.supported) throw new Error("Process resource monitoring is not supported on this operating system.");
     const [entries, hostStat] = await Promise.all([readdir("/proc", { withFileTypes: true }), readFile("/proc/stat", "utf8")]);
     const processIds = entries.filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name)).map((entry) => entry.name);
-    const samples = await Promise.all(processIds.map(async (processId) => {
-      try {
-        const stat = parseProcessStat(await readFile(`/proc/${processId}/stat`, "utf8"));
-        if (!stat || stat.processGroupId !== processGroupId) return null;
-        const status = await readFile(`/proc/${processId}/status`, "utf8");
-        return { cpuTicks: stat.cpuTicks, rssBytes: parseRssBytes(status) };
-      } catch {
-        // Processes may exit while /proc is being scanned. A partial sample is still useful.
-        return null;
+    const group: Array<{ cpuTicks: number; rssBytes: number }> = [];
+    let next = 0;
+    let recordError: ProcessRecordTooLargeError | undefined;
+    // Each worker reuses one bounded buffer across all of its process records.
+    await Promise.all(Array.from({ length: Math.min(8, processIds.length) }, async () => {
+      const buffer = Buffer.allocUnsafe(8192);
+      while (next < processIds.length) {
+        const processId = processIds[next++];
+        try {
+          const stat = parseProcessStat(await readProcessFile(`/proc/${processId}/stat`, buffer));
+          if (!stat || stat.processGroupId !== processGroupId) continue;
+          const status = await readProcessFile(`/proc/${processId}/status`, buffer);
+          group.push({ cpuTicks: stat.cpuTicks, rssBytes: parseRssBytes(status) });
+        } catch (error) {
+          // Drain all workers before rejecting so every opened descriptor closes.
+          // An oversized record must not silently remove a live group member.
+          if (error instanceof ProcessRecordTooLargeError) recordError ??= error;
+          // Processes may exit while /proc is being scanned; retain that tolerance.
+        }
       }
     }));
-    const group = samples.filter((sample): sample is NonNullable<typeof sample> => sample !== null);
+    if (recordError) throw recordError;
     if (group.length === 0) throw new Error("The managed process group is no longer available.");
     return {
       rssBytes: group.reduce((total, sample) => total + sample.rssBytes, 0),

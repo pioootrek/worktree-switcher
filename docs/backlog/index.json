@@ -73,16 +73,6 @@
     },
     {
       "area": "core",
-      "id": "RWK-20260829-idle-memory-budget",
-      "path": "rework/RWK-20260829-idle-memory-budget.json",
-      "priority": "next",
-      "risk_level": "low",
-      "status": "open",
-      "title": "Revise the unreachable idle memory acceptance target",
-      "type": "rework"
-    },
-    {
-      "area": "core",
       "id": "RWK-20260905-service-ui-boundaries",
       "path": "rework/RWK-20260905-service-ui-boundaries.json",
       "priority": "next",
@@ -163,6 +153,35 @@
     }
   ],
   "notes": [
+    {
+      "author": "agent:codex",
+      "created": "2026-09-09",
+      "files": [
+        "after.json",
+        "batch-calibration.json",
+        "before.json",
+        "buffer-calibration.json",
+        "calibration.json",
+        "concurrency-only.json",
+        "findings.md",
+        "log-batch-regression-before.txt",
+        "negative-control.json",
+        "no-disk-log-diagnostic.json",
+        "plateau-diagnostic.json",
+        "regression-before.txt"
+      ],
+      "id": "NOTE-20260909-controller-resource-budget",
+      "path": "notes/NOTE-20260909-controller-resource-budget",
+      "status": "active",
+      "tags": [
+        "resources",
+        "memory",
+        "cpu",
+        "measurement",
+        "verification"
+      ],
+      "title": "Controller resource budget, measurements and bounded process inspection"
+    },
     {
       "author": "agent:codex",
       "created": "2026-09-08",

@@ -153,3 +153,52 @@ test("stale metadata waits for an explicit refresh", async ({ page }) => {
   await expect(page.getByText(translate("en", "metadata.stale"), { exact: true })).toBeVisible();
   expect(requests.filter(({ path }) => path === "/api/projects/web/metadata/refresh")).toEqual([]);
 });
+
+for (const kind of ["bootstrap", "live"] as const) {
+  test(`a ${kind} refresh preserves an operation error through connection recovery`, async ({ page }) => {
+    const { errors } = await mountDashboard(page);
+    await expect(page.getByText("Fixture Web", { exact: true })).toBeVisible();
+    const operationPath = "**/api/projects/web/operation";
+    const message = "Server limit of 2 reached.";
+    await page.route(operationPath, route => route.fulfill({ status: 409, json: { error: message } }));
+    await page.getByRole("button", { name: "Start", exact: true }).click();
+    const operationError = page.getByRole("alert").filter({ hasText: message });
+    await expect(operationError).toBeVisible();
+
+    let limit = 3;
+    let status = 200;
+    await page.route(kind === "bootstrap" ? "**/api/dashboard" : "**/api/dashboard/live?*", route => {
+      const data = dashboardFixture();
+      const capacity = { ...data.capacity, enabled: true, limit, available: limit };
+      return route.fulfill({ status, json: status === 200
+        ? kind === "bootstrap" ? { ...data, capacity } : { projects: [], capacity }
+        : { error: "refresh failed" } });
+    });
+    let revision = 0;
+    const refresh = () => page.evaluate(({ kind, revision }) => {
+      (window as unknown as { fixtureEvents: { emit(type: string, data: unknown): void } }).fixtureEvents.emit(
+        "changed", { epoch: "fixture", revision, kinds: [kind === "bootstrap" ? "topology" : "controller"], projectIds: [], allProjects: true },
+      );
+    }, { kind, revision: ++revision });
+    const capacity = page.getByRole("button", { name: "Open server capacity" });
+    await refresh();
+    // The capacity change confirms that React applied the refresh response.
+    await expect(capacity).toContainText("0/3");
+    await expect(operationError).toBeVisible();
+
+    status = 503;
+    await refresh();
+    const refreshError = page.getByRole("alert").filter({ hasText: "refresh failed" });
+    await expect(refreshError).toBeVisible();
+    status = 200; limit = 4;
+    await refresh();
+    await expect(capacity).toContainText("0/4");
+    await expect(refreshError).toBeHidden();
+    await expect(operationError).toBeVisible();
+
+    await page.unroute(operationPath);
+    await page.getByRole("button", { name: "Start", exact: true }).click();
+    await expect(operationError).toBeHidden();
+    expect(errors).toEqual([]);
+  });
+}

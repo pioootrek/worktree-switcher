@@ -35,6 +35,7 @@ export function useDashboard() {
   const [token, setToken] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const generation = useRef(0);
   const pending = useRef<PendingRefresh>(emptyPending());
@@ -110,10 +111,10 @@ export function useDashboard() {
               }),
             }));
           }
-          setError(null);
+          setConnectionError(null);
         } catch (cause) {
           if (generation.current === activeGeneration && !(cause instanceof DOMException && cause.name === "AbortError")) {
-            setError(cause instanceof Error ? cause.message : String(cause));
+            setConnectionError(cause instanceof Error ? cause.message : String(cause));
           }
         } finally {
           if (generation.current === activeGeneration) setLoading(false);
@@ -137,7 +138,7 @@ export function useDashboard() {
       const accessToken = fragment.get("token") ?? window.sessionStorage.getItem("worktree-switcher-token");
       if (!accessToken) {
         setLoading(false);
-        setError(t("dashboard.missingToken"));
+        setConnectionError(t("dashboard.missingToken"));
         return;
       }
       window.sessionStorage.setItem("worktree-switcher-token", accessToken);
@@ -164,7 +165,7 @@ export function useDashboard() {
           void reconcile(accessToken, { bootstrap: true });
         }
       });
-      events.onerror = () => setError(t("dashboard.connectionLost"));
+      events.onerror = () => setConnectionError(t("dashboard.connectionLost"));
       focusHandler = () => void reconcile(accessToken, { bootstrap: true });
       window.addEventListener("focus", focusHandler);
     }, 0);
@@ -245,5 +246,5 @@ export function useDashboard() {
     };
   }, [monitoredProjectIds, t, token]);
 
-  return { data, token, loading, error, notice, mutate, setError, runningCount };
+  return { data, token, loading, error: connectionError ?? error, notice, mutate, setError, runningCount };
 }
