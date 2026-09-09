@@ -33,7 +33,7 @@
   },
   "scripts": {
     "build": "next build && tsup src/cli/index.ts --format esm --platform node --target node22 --clean --out-dir dist/cli && node scripts/build-fingerprint.mjs --write",
-    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:resources",
     "dev": "tsx src/cli/index.ts start --web-root out",
     "dev:web": "next dev",
     "lint": "eslint .",
@@ -45,7 +45,9 @@
     "test:modules": "vitest run src/server/modules src/server/infrastructure src/architecture.test.ts",
     "test:ui": "playwright test",
     "test:integration": "node scripts/build-fingerprint.mjs --check && vitest run --config vitest.integration.config.ts",
-    "test:e2e": "node scripts/build-fingerprint.mjs --check && playwright test --config playwright.e2e.config.ts"
+    "test:e2e": "node scripts/build-fingerprint.mjs --check && playwright test --config playwright.e2e.config.ts",
+    "bench:resources": "node scripts/resource-benchmark.mjs",
+    "test:resources": "node --test scripts/resource-metrics.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

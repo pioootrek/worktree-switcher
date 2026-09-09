@@ -1,6 +1,6 @@
 ---
 audience: "contributors and coding agents"
-last_reviewed: "2026-09-03"
+last_reviewed: "2026-09-09"
 source_of_truth: "product intent and initial architecture of Worktree Switcher"
 status: "active"
 ---
@@ -86,8 +86,10 @@ until the independent-project flow is reliable.
 The controller is event-driven: it does not continuously scan repositories or
 watch complete worktree trees. Expensive Git status checks are lazy and
 refreshes are bounded. Release verification measures controller overhead
-separately from the projects it manages, with initial targets of at most 50 MiB
-idle RSS, negligible idle CPU, and a bounded log buffer.
+separately from the projects it manages. The [resource budget](resource-budget.md)
+limits median RSS above a same-host Node baseline, idle CPU, post-cycle growth
+and retained logs. It distinguishes stopped projects from the cost of monitoring
+three running applications and replaces the historical absolute RSS target.
 
 ## Persistence and service boundary
 

@@ -48,18 +48,23 @@ export class LinuxProcessResourceSampler implements ProcessResourceSampler {
     if (!this.supported) throw new Error("Process resource monitoring is not supported on this operating system.");
     const [entries, hostStat] = await Promise.all([readdir("/proc", { withFileTypes: true }), readFile("/proc/stat", "utf8")]);
     const processIds = entries.filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name)).map((entry) => entry.name);
-    const samples = await Promise.all(processIds.map(async (processId) => {
-      try {
-        const stat = parseProcessStat(await readFile(`/proc/${processId}/stat`, "utf8"));
-        if (!stat || stat.processGroupId !== processGroupId) return null;
-        const status = await readFile(`/proc/${processId}/status`, "utf8");
-        return { cpuTicks: stat.cpuTicks, rssBytes: parseRssBytes(status) };
-      } catch {
-        // Processes may exit while /proc is being scanned. A partial sample is still useful.
-        return null;
+    const group: Array<{ cpuTicks: number; rssBytes: number }> = [];
+    let next = 0;
+    // Proc files have no useful stat size. Limit simultaneous readFile buffers
+    // instead of allocating one for every host process on each sample tick.
+    await Promise.all(Array.from({ length: Math.min(8, processIds.length) }, async () => {
+      while (next < processIds.length) {
+        const processId = processIds[next++];
+        try {
+          const stat = parseProcessStat(await readFile(`/proc/${processId}/stat`, "utf8"));
+          if (!stat || stat.processGroupId !== processGroupId) continue;
+          const status = await readFile(`/proc/${processId}/status`, "utf8");
+          group.push({ cpuTicks: stat.cpuTicks, rssBytes: parseRssBytes(status) });
+        } catch {
+          // Processes may exit while /proc is being scanned. A partial sample is still useful.
+        }
       }
     }));
-    const group = samples.filter((sample): sample is NonNullable<typeof sample> => sample !== null);
     if (group.length === 0) throw new Error("The managed process group is no longer available.");
     return {
       rssBytes: group.reduce((total, sample) => total + sample.rssBytes, 0),
