@@ -123,6 +123,7 @@ controller must be event-driven and have bounded memory use:
 - bounded per-project and global log buffers;
 - one five-second resource sampler per active Linux process group, with at
   most 60 in-memory RAM points, at most eight simultaneous process-file reads
+  using a reusable 8 KiB buffer per worker
   per scan, and no sampler for stopped projects;
 - one serialized filesystem scan queue for worktree disk usage, refreshed no
   more than once per six hours unless a user explicitly requests it, with a

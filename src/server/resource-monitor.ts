@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { open, readFile, readdir } from "node:fs/promises";
 import { cpus } from "node:os";
 
 export interface RawResourceSample {
@@ -41,6 +41,23 @@ function parseHostCpuTicks(stat: string): number {
   return line.trim().split(/\s+/).slice(1).reduce((total, value) => total + Number(value), 0);
 }
 
+// Per-process stat/status records are small. Reject unexpectedly large records
+// rather than allocating readFile's buffers for size-zero procfs files.
+async function readProcessFile(path: string, buffer: Buffer): Promise<string> {
+  const file = await open(path, "r");
+  try {
+    let size = 0;
+    while (size < buffer.length) {
+      const { bytesRead } = await file.read(buffer, size, buffer.length - size, null);
+      if (bytesRead === 0) return buffer.toString("utf8", 0, size);
+      size += bytesRead;
+    }
+    throw new Error("Process resource record exceeds the read limit.");
+  } finally {
+    await file.close();
+  }
+}
+
 export class LinuxProcessResourceSampler implements ProcessResourceSampler {
   readonly supported = process.platform === "linux";
 
@@ -50,15 +67,15 @@ export class LinuxProcessResourceSampler implements ProcessResourceSampler {
     const processIds = entries.filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name)).map((entry) => entry.name);
     const group: Array<{ cpuTicks: number; rssBytes: number }> = [];
     let next = 0;
-    // Proc files have no useful stat size. Limit simultaneous readFile buffers
-    // instead of allocating one for every host process on each sample tick.
+    // Each worker reuses one bounded buffer across all of its process records.
     await Promise.all(Array.from({ length: Math.min(8, processIds.length) }, async () => {
+      const buffer = Buffer.allocUnsafe(8192);
       while (next < processIds.length) {
         const processId = processIds[next++];
         try {
-          const stat = parseProcessStat(await readFile(`/proc/${processId}/stat`, "utf8"));
+          const stat = parseProcessStat(await readProcessFile(`/proc/${processId}/stat`, buffer));
           if (!stat || stat.processGroupId !== processGroupId) continue;
-          const status = await readFile(`/proc/${processId}/status`, "utf8");
+          const status = await readProcessFile(`/proc/${processId}/status`, buffer);
           group.push({ cpuTicks: stat.cpuTicks, rssBytes: parseRssBytes(status) });
         } catch {
           // Processes may exit while /proc is being scanned. A partial sample is still useful.

@@ -77,8 +77,9 @@ The baseline and controller use the same test-only Node preload
 `scripts/resource-probe.mjs`. One IPC request per sample reads
 `process.memoryUsage.rss()` and `process.cpuUsage()` inside the measured process.
 Its overhead is present in both runs. The driver, browser and managed server
-memory/CPU are excluded from controller measurements. No forced GC is requested. Linux monitoring limits each scan to eight concurrent
-process-file reads so temporary buffers do not scale with the host process count.
+memory/CPU are excluded from controller measurements. No forced GC is requested. Linux monitoring uses at most eight concurrent
+workers per scan, each reusing an 8 KiB buffer for process stat/status records.
+Unexpectedly oversized records are skipped instead of growing the buffer.
 
 Run builds, browser suites and this benchmark sequentially. Schedule sampling
 away from other heavy host work and retain the load metadata. Investigate a
