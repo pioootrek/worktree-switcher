@@ -4,7 +4,7 @@ import { realpath } from "node:fs/promises";
 
 import type { TestSourceObservation, Worktree } from "@/shared/contracts";
 
-export type GitCommandPriority = "operational" | "background";
+export type GitCommandPriority = "operational" | "background" | "remote";
 
 interface AdmissionJob<T> {
   priority: GitCommandPriority;
@@ -16,15 +16,22 @@ interface AdmissionJob<T> {
 export class GitCommandAdmission {
   private readonly operational: AdmissionJob<unknown>[] = [];
   private readonly background: AdmissionJob<unknown>[] = [];
+  private readonly remote: AdmissionJob<unknown>[] = [];
   private readonly controllers = new Set<AbortController>();
   private running = 0;
+  private remoteRunning = 0;
   private closed = false;
 
-  constructor(private readonly limit = 4, private readonly maxQueued = 128) {}
+  constructor(
+    private readonly limit = 4,
+    private readonly maxQueued = 128,
+    private readonly remoteLimit = 1,
+  ) {}
 
   run<T>(priority: GitCommandPriority, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
     if (this.closed) return Promise.reject(new Error("Obsługa poleceń Git jest zamknięta."));
-    const queue = priority === "operational" ? this.operational : this.background;
+    const queue = priority === "operational" ? this.operational
+      : priority === "remote" ? this.remote : this.background;
     if (queue.length >= this.maxQueued) {
       return Promise.reject(new Error("Kolejka poleceń Git jest zajęta. Spróbuj ponownie później."));
     }
@@ -38,20 +45,24 @@ export class GitCommandAdmission {
   close(): void {
     this.closed = true;
     const error = new Error("Obsługa poleceń Git została zamknięta.");
-    for (const job of [...this.operational.splice(0), ...this.background.splice(0)]) job.reject(error);
+    for (const job of [...this.operational.splice(0), ...this.remote.splice(0), ...this.background.splice(0)]) job.reject(error);
     for (const controller of this.controllers) controller.abort();
   }
 
   private pump(): void {
     while (!this.closed && this.running < this.limit) {
-      const job = this.operational.shift() ?? this.background.shift();
+      const job = this.operational.shift()
+        ?? (this.remoteRunning < this.remoteLimit ? this.remote.shift() : undefined)
+        ?? this.background.shift();
       if (!job) return;
       this.running += 1;
+      if (job.priority === "remote") this.remoteRunning += 1;
       const controller = new AbortController();
       this.controllers.add(controller);
       void job.operation(controller.signal).then(job.resolve, job.reject).finally(() => {
         this.controllers.delete(controller);
         this.running -= 1;
+        if (job.priority === "remote") this.remoteRunning -= 1;
         this.pump();
       });
     }

@@ -102,3 +102,24 @@ export interface RemoteVerificationProvisioningStore {
   saveRemotePrincipalProjectGrant(grant: RemotePrincipalProjectGrant, actor: string): void;
   saveRemoteWorkerProjectGrant(grant: RemoteWorkerProjectGrant, actor: string): void;
 }
+
+export interface PrepareRemoteVerificationWorkspaceInput {
+  requestId: string;
+  repositoryPath: string;
+  sourceRemote: string;
+  commitSha: string;
+}
+
+export interface RemoteVerificationWorkspace {
+  requestId: string;
+  path: string;
+  repositoryPath: string;
+  sourceRemote: string;
+  requestedCommitSha: string;
+  executedCommitSha: string;
+}
+
+export interface RemoteVerificationWorkspacePreparer {
+  prepare(input: PrepareRemoteVerificationWorkspaceInput): Promise<RemoteVerificationWorkspace>;
+  cleanup(workspace: RemoteVerificationWorkspace): Promise<void>;
+}

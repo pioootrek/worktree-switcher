@@ -16,7 +16,10 @@ export type {
   RemoteVerificationRequest,
   RemoteVerificationRequestPhase,
   RemoteVerificationStore,
+  RemoteVerificationWorkspace,
+  RemoteVerificationWorkspacePreparer,
   RemoteWorkerProjectGrant,
   RemoteWorkerRegistration,
+  PrepareRemoteVerificationWorkspaceInput,
   SubmitRemoteVerificationInput,
 } from "./contracts";
