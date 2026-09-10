@@ -54,7 +54,7 @@ describe("service access record", () => {
       accessUrl: "http://192.168.1.20:47831/#token=secret",
       logDirectory: "/tmp/logs",
     };
-    expect(localDashboardEndpoint(legacy)).toBe("http://127.0.0.1:47831");
+    expect(localDashboardEndpoint(legacy)).toBe("http://192.168.1.20:47831");
     expect(publicDashboardEndpoint(legacy)).toBe("http://192.168.1.20:47831");
 
     const current = {

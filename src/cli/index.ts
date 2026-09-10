@@ -15,6 +15,7 @@ import { writeCliLine } from "./output";
 import { pairingUrl } from "./pairing-url";
 import { openProjectGateway, runDoctorCommand, runProjectCommand } from "./project-management";
 import { localDashboardEndpoint, publicDashboardEndpoint, readServiceAccess, removeServiceAccess, writeServiceAccess } from "./service-access";
+import { buildServiceStartArguments } from "./service-install";
 import { UserServiceManager } from "./service-manager";
 import { ControlService } from "../server/control-service";
 import { acquireControllerLock } from "../server/controller-lock";
@@ -168,7 +169,6 @@ async function main(): Promise<void> {
   const lanHost = wildcardHost ? findLanAddress() ?? browserHost : host;
   const localOrigin = directControllerOrigin(browserHost, port);
   const advertisedOrigin = publicOrigin ?? directControllerOrigin(lanHost, port);
-  const localAddress = pairingUrl(localOrigin, accessToken, sessionId);
   const advertisedAddress = pairingUrl(advertisedOrigin, accessToken, sessionId);
   const serviceMode = process.argv.includes("--service-mode");
   writeCliLine(translate(locale, "cli.listening", { host, port }));
@@ -195,7 +195,7 @@ async function main(): Promise<void> {
     writeCliLine(translate(locale, "cli.mcpConfig"));
   }
 
-  if (!process.argv.includes("--no-open") && !serviceMode) openBrowser(localAddress);
+  if (!process.argv.includes("--no-open") && !serviceMode) openBrowser(advertisedAddress);
   let closing = false;
   const shutdown = async () => {
     if (closing) return;
@@ -248,19 +248,18 @@ async function handleServiceCommand(args: string[], paths: ReturnType<typeof res
     const publicOrigin = configuredPublicOrigin ? parsePublicControllerOrigin(configuredPublicOrigin) : undefined;
     validatePublicControllerBackend(host, publicOrigin);
     mkdirSync(paths.logDirectory, { recursive: true, mode: 0o700 });
-    const startArguments = [
-      "--service-mode", "--no-open",
-      "--host", host,
-      "--port", String(port),
-      "--mcp-port", String(mcpPort),
-      "--browse-root", browseRoot,
-      "--data-dir", paths.dataDirectory,
-      "--state-dir", paths.stateDirectory,
-      "--web-root", webRoot,
-    ];
-    if (args.includes("--no-mcp")) startArguments.push("--no-mcp");
-    if (memoryWarningMiB !== null) startArguments.push("--memory-warning-mib", String(memoryWarningMiB));
-    if (publicOrigin) startArguments.push("--public-url", publicOrigin);
+    const startArguments = buildServiceStartArguments({
+      host,
+      port,
+      mcpPort,
+      browseRoot,
+      dataDirectory: paths.dataDirectory,
+      stateDirectory: paths.stateDirectory,
+      webRoot,
+      noMcp: args.includes("--no-mcp"),
+      memoryWarningMiB,
+      publicOrigin,
+    });
     const result = manager.install({
       nodePath: resolve(process.execPath),
       entrypointPath,
