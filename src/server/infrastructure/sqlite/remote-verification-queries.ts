@@ -61,15 +61,18 @@ export class RemoteVerificationQueries {
     return (this.database.prepare("SELECT id, kind, status FROM remote_principals WHERE id = ?").get(id) as PrincipalRow | undefined) ?? null;
   }
 
-  saveRemotePrincipal(principal: RemotePrincipal): void {
+  saveRemotePrincipal(principal: RemotePrincipal, actor: string): void {
     const existing = this.getRemotePrincipal(principal.id);
     if (existing && existing.kind !== principal.kind) {
       throw new Error("Nie można zmienić rodzaju istniejącej tożsamości zdalnej.");
     }
-    this.database.prepare(`
-      INSERT INTO remote_principals(id, kind, status) VALUES (?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET status = excluded.status
-    `).run(principal.id, principal.kind, principal.status);
+    this.database.transaction(() => {
+      this.database.prepare(`
+        INSERT INTO remote_principals(id, kind, status) VALUES (?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET status = excluded.status
+      `).run(principal.id, principal.kind, principal.status);
+      this.audit("remote.principal_saved", actor, principal);
+    })();
   }
 
   getRemoteProjectIdentity(id: string): RemoteProjectIdentity | null {
@@ -78,15 +81,18 @@ export class RemoteVerificationQueries {
     return row ? { id: row.id, name: row.name, sourceRemote: row.source_remote, status: row.status } : null;
   }
 
-  saveRemoteProjectIdentity(project: RemoteProjectIdentity): void {
+  saveRemoteProjectIdentity(project: RemoteProjectIdentity, actor: string): void {
     const existing = this.getRemoteProjectIdentity(project.id);
     if (existing && existing.sourceRemote !== project.sourceRemote) {
       throw new Error("Nie można zmienić źródłowego remote istniejącego projektu zdalnego.");
     }
-    this.database.prepare(`
-      INSERT INTO remote_project_identities(id, name, source_remote, status) VALUES (?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET name = excluded.name, status = excluded.status
-    `).run(project.id, project.name, project.sourceRemote, project.status);
+    this.database.transaction(() => {
+      this.database.prepare(`
+        INSERT INTO remote_project_identities(id, name, source_remote, status) VALUES (?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET name = excluded.name, status = excluded.status
+      `).run(project.id, project.name, project.sourceRemote, project.status);
+      this.audit("remote.project_saved", actor, project);
+    })();
   }
 
   getRemoteWorker(id: string): RemoteWorkerRegistration | null {
@@ -101,16 +107,19 @@ export class RemoteVerificationQueries {
     } : null;
   }
 
-  saveRemoteWorker(worker: RemoteWorkerRegistration): void {
+  saveRemoteWorker(worker: RemoteWorkerRegistration, actor: string): void {
     const existing = this.getRemoteWorker(worker.id);
     if (existing && existing.principalId !== worker.principalId) {
       throw new Error("Nie można zmienić tożsamości istniejącego workera zdalnego.");
     }
-    this.database.prepare(`
-      INSERT INTO remote_workers(id, principal_id, name, status, last_contact_at) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name, status = excluded.status, last_contact_at = excluded.last_contact_at
-    `).run(worker.id, worker.principalId, worker.name, worker.status, worker.lastContactAt);
+    this.database.transaction(() => {
+      this.database.prepare(`
+        INSERT INTO remote_workers(id, principal_id, name, status, last_contact_at) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name, status = excluded.status, last_contact_at = excluded.last_contact_at
+      `).run(worker.id, worker.principalId, worker.name, worker.status, worker.lastContactAt);
+      this.audit("remote.worker_saved", actor, worker);
+    })();
   }
 
   getRemotePrincipalProjectGrant(principalId: string, projectId: string): RemotePrincipalProjectGrant | null {
@@ -126,13 +135,16 @@ export class RemoteVerificationQueries {
     } : null;
   }
 
-  saveRemotePrincipalProjectGrant(grant: RemotePrincipalProjectGrant): void {
-    this.database.prepare(`
-      INSERT INTO remote_principal_project_grants(principal_id, project_id, permissions_json, revoked_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(principal_id, project_id) DO UPDATE SET
-        permissions_json = excluded.permissions_json, revoked_at = excluded.revoked_at
-    `).run(grant.principalId, grant.projectId, JSON.stringify(grant.permissions), grant.revokedAt);
+  saveRemotePrincipalProjectGrant(grant: RemotePrincipalProjectGrant, actor: string): void {
+    this.database.transaction(() => {
+      this.database.prepare(`
+        INSERT INTO remote_principal_project_grants(principal_id, project_id, permissions_json, revoked_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(principal_id, project_id) DO UPDATE SET
+          permissions_json = excluded.permissions_json, revoked_at = excluded.revoked_at
+      `).run(grant.principalId, grant.projectId, JSON.stringify(grant.permissions), grant.revokedAt);
+      this.audit("remote.principal_project_grant_saved", actor, grant);
+    })();
   }
 
   getRemoteWorkerProjectGrant(workerId: string, projectId: string): RemoteWorkerProjectGrant | null {
@@ -149,15 +161,18 @@ export class RemoteVerificationQueries {
     } : null;
   }
 
-  saveRemoteWorkerProjectGrant(grant: RemoteWorkerProjectGrant): void {
-    this.database.prepare(`
-      INSERT INTO remote_worker_project_grants(worker_id, project_id, local_project_id, preset_ids_json, revoked_at)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(worker_id, project_id) DO UPDATE SET
-        local_project_id = excluded.local_project_id,
-        preset_ids_json = excluded.preset_ids_json,
-        revoked_at = excluded.revoked_at
-    `).run(grant.workerId, grant.projectId, grant.localProjectId, JSON.stringify(grant.presetIds), grant.revokedAt);
+  saveRemoteWorkerProjectGrant(grant: RemoteWorkerProjectGrant, actor: string): void {
+    this.database.transaction(() => {
+      this.database.prepare(`
+        INSERT INTO remote_worker_project_grants(worker_id, project_id, local_project_id, preset_ids_json, revoked_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(worker_id, project_id) DO UPDATE SET
+          local_project_id = excluded.local_project_id,
+          preset_ids_json = excluded.preset_ids_json,
+          revoked_at = excluded.revoked_at
+      `).run(grant.workerId, grant.projectId, grant.localProjectId, JSON.stringify(grant.presetIds), grant.revokedAt);
+      this.audit("remote.worker_project_grant_saved", actor, grant);
+    })();
   }
 
   findRemoteVerificationRequestByIdempotency(principalId: string, idempotencyKey: string): RemoteVerificationRequest | null {
@@ -191,5 +206,12 @@ export class RemoteVerificationQueries {
       if (!persisted) throw new Error("Nie udało się zapisać zlecenia zdalnej weryfikacji.");
       return persisted;
     }).immediate();
+  }
+
+  private audit(eventType: string, actor: string, details: unknown): void {
+    this.database.prepare(`
+      INSERT INTO controller_audit_events(event_type, actor, details_json, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(eventType, actor, JSON.stringify(details), new Date().toISOString());
   }
 }

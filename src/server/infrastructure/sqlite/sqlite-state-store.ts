@@ -75,6 +75,16 @@ export class SqliteStateStore implements StateStore, RemoteVerificationStore, Re
     if (!project) throw new Error("Nie znaleziono projektu.");
     const now = new Date().toISOString();
     this.database.transaction(() => {
+      const cancelledRemoteRequests = this.database.prepare(`
+        UPDATE remote_verification_requests
+        SET phase = 'cancelled', updated_at = ?
+        WHERE phase IN ('pending', 'assigned') AND EXISTS (
+          SELECT 1 FROM remote_worker_project_grants grant
+          WHERE grant.worker_id = remote_verification_requests.worker_id
+            AND grant.project_id = remote_verification_requests.project_id
+            AND grant.local_project_id = ?
+        )
+      `).run(now, projectId).changes;
       this.database.prepare(`
         INSERT INTO controller_audit_events(event_type, actor, details_json, created_at)
         VALUES ('project.removed', ?, ?, ?)
@@ -83,6 +93,7 @@ export class SqliteStateStore implements StateStore, RemoteVerificationStore, Re
         name: project.name,
         repositoryPath: project.repositoryPath,
         port: project.port,
+        cancelledRemoteRequests,
       }), now);
       const result = this.database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
       if (result.changes === 0) throw new Error("Nie znaleziono projektu.");
@@ -322,40 +333,40 @@ export class SqliteStateStore implements StateStore, RemoteVerificationStore, Re
     return this.remoteVerification.getRemotePrincipal(id);
   }
 
-  saveRemotePrincipal(principal: RemotePrincipal): void {
-    this.remoteVerification.saveRemotePrincipal(principal);
+  saveRemotePrincipal(principal: RemotePrincipal, actor: string): void {
+    this.remoteVerification.saveRemotePrincipal(principal, actor);
   }
 
   getRemoteProjectIdentity(id: string): RemoteProjectIdentity | null {
     return this.remoteVerification.getRemoteProjectIdentity(id);
   }
 
-  saveRemoteProjectIdentity(project: RemoteProjectIdentity): void {
-    this.remoteVerification.saveRemoteProjectIdentity(project);
+  saveRemoteProjectIdentity(project: RemoteProjectIdentity, actor: string): void {
+    this.remoteVerification.saveRemoteProjectIdentity(project, actor);
   }
 
   getRemoteWorker(id: string): RemoteWorkerRegistration | null {
     return this.remoteVerification.getRemoteWorker(id);
   }
 
-  saveRemoteWorker(worker: RemoteWorkerRegistration): void {
-    this.remoteVerification.saveRemoteWorker(worker);
+  saveRemoteWorker(worker: RemoteWorkerRegistration, actor: string): void {
+    this.remoteVerification.saveRemoteWorker(worker, actor);
   }
 
   getRemotePrincipalProjectGrant(principalId: string, projectId: string): RemotePrincipalProjectGrant | null {
     return this.remoteVerification.getRemotePrincipalProjectGrant(principalId, projectId);
   }
 
-  saveRemotePrincipalProjectGrant(grant: RemotePrincipalProjectGrant): void {
-    this.remoteVerification.saveRemotePrincipalProjectGrant(grant);
+  saveRemotePrincipalProjectGrant(grant: RemotePrincipalProjectGrant, actor: string): void {
+    this.remoteVerification.saveRemotePrincipalProjectGrant(grant, actor);
   }
 
   getRemoteWorkerProjectGrant(workerId: string, projectId: string): RemoteWorkerProjectGrant | null {
     return this.remoteVerification.getRemoteWorkerProjectGrant(workerId, projectId);
   }
 
-  saveRemoteWorkerProjectGrant(grant: RemoteWorkerProjectGrant): void {
-    this.remoteVerification.saveRemoteWorkerProjectGrant(grant);
+  saveRemoteWorkerProjectGrant(grant: RemoteWorkerProjectGrant, actor: string): void {
+    this.remoteVerification.saveRemoteWorkerProjectGrant(grant, actor);
   }
 
   findRemoteVerificationRequestByIdempotency(principalId: string, idempotencyKey: string): RemoteVerificationRequest | null {

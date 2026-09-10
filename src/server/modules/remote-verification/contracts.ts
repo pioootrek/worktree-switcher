@@ -96,9 +96,9 @@ export interface RemoteVerificationStore {
 }
 
 export interface RemoteVerificationProvisioningStore {
-  saveRemotePrincipal(principal: RemotePrincipal): void;
-  saveRemoteProjectIdentity(project: RemoteProjectIdentity): void;
-  saveRemoteWorker(worker: RemoteWorkerRegistration): void;
-  saveRemotePrincipalProjectGrant(grant: RemotePrincipalProjectGrant): void;
-  saveRemoteWorkerProjectGrant(grant: RemoteWorkerProjectGrant): void;
+  saveRemotePrincipal(principal: RemotePrincipal, actor: string): void;
+  saveRemoteProjectIdentity(project: RemoteProjectIdentity, actor: string): void;
+  saveRemoteWorker(worker: RemoteWorkerRegistration, actor: string): void;
+  saveRemotePrincipalProjectGrant(grant: RemotePrincipalProjectGrant, actor: string): void;
+  saveRemoteWorkerProjectGrant(grant: RemoteWorkerProjectGrant, actor: string): void;
 }

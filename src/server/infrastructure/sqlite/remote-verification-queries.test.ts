@@ -29,29 +29,32 @@ function provision(store: SqliteStateStore): string {
     executable: "pnpm",
     args: ["run", "dev"],
   });
-  store.saveRemotePrincipal({ id: "owner-1", kind: "owner", status: "active" });
-  store.saveRemotePrincipal({ id: "worker-principal-1", kind: "worker", status: "active" });
-  store.saveRemoteProjectIdentity({ id: "project-1", name: "Project", sourceRemote: "origin", status: "active" });
+  store.saveRemotePrincipal({ id: "owner-1", kind: "owner", status: "active" }, "local-user");
+  store.saveRemotePrincipal({ id: "worker-principal-1", kind: "worker", status: "active" }, "local-user");
+  store.saveRemoteProjectIdentity(
+    { id: "project-1", name: "Project", sourceRemote: "origin", status: "active" },
+    "local-user",
+  );
   store.saveRemoteWorker({
     id: "worker-1",
     principalId: "worker-principal-1",
     name: "Worker",
     status: "active",
     lastContactAt: null,
-  });
+  }, "local-user");
   store.saveRemotePrincipalProjectGrant({
     principalId: "owner-1",
     projectId: "project-1",
     permissions: ["submit", "read"],
     revokedAt: null,
-  });
+  }, "local-user");
   store.saveRemoteWorkerProjectGrant({
     workerId: "worker-1",
     projectId: "project-1",
     localProjectId: localProject.id,
     presetIds: ["node:test"],
     revokedAt: null,
-  });
+  }, "local-user");
   return localProject.id;
 }
 
@@ -142,7 +145,7 @@ describe("remote verification SQLite persistence", () => {
       projectId: "project-1",
       permissions: ["read"],
       revokedAt: "2026-09-11T00:02:00.000Z",
-    });
+    }, "agent:admin");
 
     const service = new RemoteVerificationService(store);
     expect(() => service.submit({
@@ -156,26 +159,43 @@ describe("remote verification SQLite persistence", () => {
     }));
     expect(store.getRemotePrincipalProjectGrant("owner-1", "project-1")?.revokedAt).toBe("2026-09-11T00:02:00.000Z");
     store.close();
+
+    const database = new Database(path, { readonly: true });
+    const audit = database.prepare(`
+      SELECT actor, details_json FROM controller_audit_events
+      WHERE event_type = 'remote.principal_project_grant_saved'
+      ORDER BY id DESC LIMIT 1
+    `).get() as { actor: string; details_json: string };
+    expect(audit.actor).toBe("agent:admin");
+    expect(JSON.parse(audit.details_json)).toMatchObject({
+      principalId: "owner-1",
+      projectId: "project-1",
+      revokedAt: "2026-09-11T00:02:00.000Z",
+    });
+    database.close();
   });
 
   it("keeps security-sensitive identity bindings immutable", () => {
     const path = databasePath();
     const store = new SqliteStateStore(path);
     provision(store);
-    store.saveRemotePrincipal({ id: "other-worker-principal", kind: "worker", status: "active" });
+    store.saveRemotePrincipal(
+      { id: "other-worker-principal", kind: "worker", status: "active" },
+      "local-user",
+    );
 
-    expect(() => store.saveRemotePrincipal({ id: "owner-1", kind: "agent", status: "active" }))
+    expect(() => store.saveRemotePrincipal({ id: "owner-1", kind: "agent", status: "active" }, "local-user"))
       .toThrow("Nie można zmienić rodzaju istniejącej tożsamości zdalnej.");
     expect(() => store.saveRemoteProjectIdentity({
       id: "project-1", name: "Project", sourceRemote: "upstream", status: "active",
-    })).toThrow("Nie można zmienić źródłowego remote istniejącego projektu zdalnego.");
+    }, "local-user")).toThrow("Nie można zmienić źródłowego remote istniejącego projektu zdalnego.");
     expect(() => store.saveRemoteWorker({
       id: "worker-1",
       principalId: "other-worker-principal",
       name: "Worker",
       status: "active",
       lastContactAt: null,
-    })).toThrow("Nie można zmienić tożsamości istniejącego workera zdalnego.");
+    }, "local-user")).toThrow("Nie można zmienić tożsamości istniejącego workera zdalnego.");
 
     expect(store.getRemotePrincipal("owner-1")?.kind).toBe("owner");
     expect(store.getRemoteProjectIdentity("project-1")?.sourceRemote).toBe("origin");
@@ -183,7 +203,7 @@ describe("remote verification SQLite persistence", () => {
     store.close();
   });
 
-  it("removes only the worker mapping when its local project registration is deleted", () => {
+  it("cancels admitted work before removing its local worker mapping", () => {
     const path = databasePath();
     const store = new SqliteStateStore(path);
     const localProjectId = provision(store);
@@ -200,7 +220,11 @@ describe("remote verification SQLite persistence", () => {
 
     expect(store.getRemoteWorkerProjectGrant("worker-1", "project-1")).toBeNull();
     expect(store.getRemoteProjectIdentity("project-1")).not.toBeNull();
-    expect(store.findRemoteVerificationRequestByIdempotency("owner-1", "submission-1")).toEqual(accepted);
+    expect(store.findRemoteVerificationRequestByIdempotency("owner-1", "submission-1")).toEqual({
+      ...accepted,
+      phase: "cancelled",
+      updatedAt: expect.any(String),
+    });
     store.close();
   });
 
