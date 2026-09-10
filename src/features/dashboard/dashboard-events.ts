@@ -92,8 +92,12 @@ export function connectDashboardEvents(options: {
           },
           signal: controller.signal,
         });
-        if (!response.ok) throw new Error(`Dashboard event stream returned HTTP ${response.status}.`);
+        if (!response.ok) {
+          await response.body?.cancel();
+          throw new Error(`Dashboard event stream returned HTTP ${response.status}.`);
+        }
         if (!response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")) {
+          await response.body?.cancel();
           throw new Error("Dashboard event stream returned an invalid content type.");
         }
         if (!response.body) throw new Error("Dashboard event stream returned no body.");

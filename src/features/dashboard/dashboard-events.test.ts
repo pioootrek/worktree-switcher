@@ -79,4 +79,30 @@ describe("dashboard event stream", () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(fetcher).toHaveBeenCalledOnce();
   });
+
+  it("cancels a rejected response body before reconnecting", async () => {
+    const cancel = vi.fn();
+    let activeController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const fetcher = vi.fn(async () => {
+      if (fetcher.mock.calls.length === 1) {
+        return new Response(new ReadableStream({ cancel }), { status: 401 });
+      }
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) { activeController = controller; } }), {
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    });
+    const connection = connectDashboardEvents({
+      token: "stale-synthetic-secret",
+      fetcher,
+      retryDelayMs: 0,
+      onEvent: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(cancel).toHaveBeenCalledOnce();
+    connection.close();
+    const controllerToClose = activeController as ReadableStreamDefaultController<Uint8Array> | null;
+    controllerToClose?.close();
+  });
 });
