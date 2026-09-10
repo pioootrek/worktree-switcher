@@ -13,6 +13,7 @@ import type {
   RuntimeResourceMetrics,
 } from "@/shared/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { connectDashboardEvents } from "./dashboard-events";
 import { EMPTY_CAPACITY, EMPTY_MCP_STATUS, EMPTY_TEST_QUEUE } from "./defaults";
 
 interface PendingRefresh {
@@ -130,7 +131,7 @@ export function useDashboard() {
 
   useEffect(() => {
     generation.current += 1;
-    let events: EventSource | null = null;
+    let events: { close(): void } | null = null;
     let readyCount = 0;
     let focusHandler: (() => void) | null = null;
     const initialRefresh = window.setTimeout(() => {
@@ -145,27 +146,31 @@ export function useDashboard() {
       if (window.location.hash) window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
       setToken(accessToken);
       void reconcile(accessToken, { bootstrap: true });
-      events = new EventSource(`/api/events?token=${encodeURIComponent(accessToken)}`);
-      events.addEventListener("ready", () => {
-        readyCount += 1;
-        if (readyCount > 1) void reconcile(accessToken, { bootstrap: true });
-      });
-      events.addEventListener("changed", (message) => {
-        try {
-          const change = JSON.parse((message as MessageEvent<string>).data) as DashboardChangeEvent;
-          if (change.kinds.includes("topology") || change.kinds.includes("metadata")) {
-            void reconcile(accessToken, { bootstrap: true });
+      events = connectDashboardEvents({
+        token: accessToken,
+        onEvent(type, payload) {
+          if (type === "ready") {
+            readyCount += 1;
+            if (readyCount > 1) void reconcile(accessToken, { bootstrap: true });
             return;
           }
-          const sections = change.kinds.filter((kind): kind is DashboardSection =>
-            ["runtime", "reservation", "tests", "storage", "controller"].includes(kind),
-          );
-          void reconcile(accessToken, { projectIds: change.allProjects ? [] : change.projectIds, sections });
-        } catch {
-          void reconcile(accessToken, { bootstrap: true });
-        }
+          if (type !== "changed") return;
+          try {
+            const change = JSON.parse(payload) as DashboardChangeEvent;
+            if (change.kinds.includes("topology") || change.kinds.includes("metadata")) {
+              void reconcile(accessToken, { bootstrap: true });
+              return;
+            }
+            const sections = change.kinds.filter((kind): kind is DashboardSection =>
+              ["runtime", "reservation", "tests", "storage", "controller"].includes(kind),
+            );
+            void reconcile(accessToken, { projectIds: change.allProjects ? [] : change.projectIds, sections });
+          } catch {
+            void reconcile(accessToken, { bootstrap: true });
+          }
+        },
+        onError: () => setConnectionError(t("dashboard.connectionLost")),
       });
-      events.onerror = () => setConnectionError(t("dashboard.connectionLost"));
       focusHandler = () => void reconcile(accessToken, { bootstrap: true });
       window.addEventListener("focus", focusHandler);
     }, 0);

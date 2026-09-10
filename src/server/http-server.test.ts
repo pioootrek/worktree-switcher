@@ -121,6 +121,41 @@ describe("controller access boundary", () => {
     expect(dashboard).toHaveBeenCalledOnce();
   });
 
+  it("requires the event token in a header and rejects cross-origin event reads", async () => {
+    const { base } = await fixture({ publicOrigin: "https://switcher.example.test" });
+    expect((await fetch(`${base}/api/events?token=test-access-token`)).status).toBe(401);
+    expect((await fetch(`${base}/api/dashboard`, {
+      headers: {
+        Origin: "https://attacker.invalid",
+        "X-Worktree-Switcher-Token": "test-access-token",
+      },
+    })).status).toBe(403);
+    expect((await fetch(`${base}/api/events`, {
+      headers: {
+        Origin: "https://attacker.invalid",
+        "X-Worktree-Switcher-Token": "test-access-token",
+      },
+    })).status).toBe(403);
+    expect((await fetch(`${base}/api/events`, {
+      headers: {
+        Origin: "null",
+        "X-Worktree-Switcher-Token": "test-access-token",
+      },
+    })).status).toBe(403);
+
+    const controller = new AbortController();
+    const response = await fetch(`${base}/api/events`, {
+      headers: {
+        Origin: "https://switcher.example.test",
+        "X-Worktree-Switcher-Token": "test-access-token",
+      },
+      signal: controller.signal,
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+    controller.abort();
+  });
+
   it("serves lightweight runtime metrics without rediscovering worktrees", async () => {
     const { base, dashboard, runtimeMetrics } = await fixture();
     const response = await fetch(`${base}/api/metrics`, {
