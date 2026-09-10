@@ -2,8 +2,10 @@
 
 Date: 2026-09-09. Source baseline: `13e80fe` on `main`.
 Item: `FEAT-20260902-managed-test-queue`.
-Status: proposed execution plan based on source inspection. This plan does not
-record new queue acceptance runs or close the feature.
+Status: archived on 2026-09-10 after PR #22 closed the feature in
+`DONE-20260909-managed-test-queue`. The steps below preserve the earlier proposed
+plan; consult that done record for actual acceptance evidence. This document
+does not claim every proposed scenario was executed.
 
 ## Outcome and existing evidence
 
