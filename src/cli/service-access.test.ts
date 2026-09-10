@@ -4,7 +4,13 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { readServiceAccess, removeServiceAccess, writeServiceAccess } from "./service-access";
+import {
+  localDashboardEndpoint,
+  publicDashboardEndpoint,
+  readServiceAccess,
+  removeServiceAccess,
+  writeServiceAccess,
+} from "./service-access";
 
 const directories: string[] = [];
 
@@ -22,8 +28,10 @@ describe("service access record", () => {
       startedAt: "2026-08-29T12:00:00.000Z",
       version: "1.2.3",
       dashboardEndpoint: "http://127.0.0.1:47831",
+      localDashboardEndpoint: "http://127.0.0.1:47831",
+      publicDashboardEndpoint: "https://switcher.example.test",
       mcpEndpoint: "http://127.0.0.1:47832/mcp",
-      accessUrl: "http://127.0.0.1:47831/#token=secret",
+      accessUrl: "https://switcher.example.test/?session=session-a#token=secret",
       logDirectory: "/tmp/logs",
     };
 
@@ -34,5 +42,27 @@ describe("service access record", () => {
     expect(readServiceAccess(path)).toEqual(record);
     removeServiceAccess(path);
     expect(readServiceAccess(path)).toBeNull();
+  });
+
+  it("keeps old access records compatible while preferring explicit local and public endpoints", () => {
+    const legacy = {
+      pid: 1,
+      startedAt: "2026-08-29T12:00:00.000Z",
+      version: "1.2.3",
+      dashboardEndpoint: "http://192.168.1.20:47831",
+      mcpEndpoint: null,
+      accessUrl: "http://192.168.1.20:47831/#token=secret",
+      logDirectory: "/tmp/logs",
+    };
+    expect(localDashboardEndpoint(legacy)).toBe("http://127.0.0.1:47831");
+    expect(publicDashboardEndpoint(legacy)).toBe("http://192.168.1.20:47831");
+
+    const current = {
+      ...legacy,
+      localDashboardEndpoint: "http://127.0.0.1:49000",
+      publicDashboardEndpoint: "https://switcher.example.test",
+    };
+    expect(localDashboardEndpoint(current)).toBe("http://127.0.0.1:49000");
+    expect(publicDashboardEndpoint(current)).toBe("https://switcher.example.test");
   });
 });

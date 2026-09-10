@@ -6,6 +6,8 @@ export interface ServiceAccessRecord {
   startedAt: string;
   version: string;
   dashboardEndpoint: string;
+  localDashboardEndpoint?: string;
+  publicDashboardEndpoint?: string;
   mcpEndpoint: string | null;
   accessUrl: string;
   logDirectory: string;
@@ -27,6 +29,8 @@ export function readServiceAccess(path: string): ServiceAccessRecord | null {
       typeof value.startedAt !== "string" ||
       typeof value.version !== "string" ||
       typeof value.dashboardEndpoint !== "string" ||
+      !(value.localDashboardEndpoint === undefined || typeof value.localDashboardEndpoint === "string") ||
+      !(value.publicDashboardEndpoint === undefined || typeof value.publicDashboardEndpoint === "string") ||
       !(typeof value.mcpEndpoint === "string" || value.mcpEndpoint === null) ||
       typeof value.accessUrl !== "string" ||
       typeof value.logDirectory !== "string"
@@ -35,6 +39,17 @@ export function readServiceAccess(path: string): ServiceAccessRecord | null {
   } catch {
     return null;
   }
+}
+
+export function localDashboardEndpoint(record: ServiceAccessRecord): string {
+  if (record.localDashboardEndpoint) return record.localDashboardEndpoint;
+  const endpoint = new URL(record.dashboardEndpoint);
+  endpoint.hostname = "127.0.0.1";
+  return endpoint.toString().replace(/\/$/, "");
+}
+
+export function publicDashboardEndpoint(record: ServiceAccessRecord): string {
+  return record.publicDashboardEndpoint ?? record.dashboardEndpoint;
 }
 
 export function removeServiceAccess(path: string, pid = process.pid): void {
