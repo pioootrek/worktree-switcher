@@ -329,9 +329,10 @@ credential.
 - The controller only stops process trees it started.
 - An unknown process on a configured port is reported, not killed.
 
-The dashboard currently uses HTTP. Bind it to loopback, use a secure tunnel, or
-limit access to a trusted LAN. If the host uses UFW, a LAN-only rule can look
-like this:
+Direct mode uses HTTP. Keep it on loopback or a deliberately trusted LAN. For
+the supported Caddy transport, including LAN private-CA and public-domain
+variants, follow [Protect the controller with HTTPS](docs/controller-https.md).
+If a direct-mode host uses UFW, a LAN-only rule can look like this:
 
 ```bash
 sudo ufw allow from 192.168.1.0/24 to any port 47831 proto tcp comment 'Worktree Switcher LAN'
@@ -350,6 +351,7 @@ worktree-switcher start [options]
 
 --port <port>          Dashboard port. Default: 47831
 --host <address>       Dashboard bind address. Default: 0.0.0.0
+--public-url <origin>  Advertised HTTPS origin; requires a loopback --host
 --no-open              Do not open a browser
 --browse-root <path>   Root exposed by the directory picker
 --data-dir <path>      SQLite database and MCP token directory

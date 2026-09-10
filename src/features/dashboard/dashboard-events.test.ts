@@ -105,4 +105,30 @@ describe("dashboard event stream", () => {
     const controllerToClose = activeController as ReadableStreamDefaultController<Uint8Array> | null;
     controllerToClose?.close();
   });
+
+  it("backs off when streams flap immediately after the ready event", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetcher = vi.fn(async () => eventResponse(["event: ready\ndata: {}\n\n"]));
+      const connection = connectDashboardEvents({
+        token: "synthetic-event-secret",
+        fetcher,
+        retryDelayMs: 500,
+        onEvent: vi.fn(),
+        onError: vi.fn(),
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      connection.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

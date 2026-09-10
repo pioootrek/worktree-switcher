@@ -32,8 +32,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm build
-      - run: pnpm test:integration
+      - name: Install verified Caddy fixture
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/caddy"
+          curl -fsSL -o "$RUNNER_TEMP/caddy/caddy.tar.gz" https://github.com/caddyserver/caddy/releases/download/v2.11.3/caddy_2.11.3_linux_amd64.tar.gz
+          echo "ee886eceda0ff9f30610d3be9b5b594026591e19add6b3961a341c72abe468e5eac9d7c2c2450bbb8420db1f827b954521f9336be4872f81090b8618adf8815a  $RUNNER_TEMP/caddy/caddy.tar.gz" | sha512sum --check
+          tar -xzf "$RUNNER_TEMP/caddy/caddy.tar.gz" -C "$RUNNER_TEMP/caddy" caddy
+          echo "CADDY_BIN=$RUNNER_TEMP/caddy/caddy" >> "$GITHUB_ENV"
       - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:https
+      - run: pnpm test:integration
       - run: pnpm test:ui
       - run: pnpm test:e2e
       - name: Pack verified application
