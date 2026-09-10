@@ -66,11 +66,12 @@ remote commands.
 
 `SystemRemoteVerificationWorkspacePreparer` fetches only a registered Git
 remote and accepts a commit only when a fetched remote-tracking ref contains
-it. It creates a detached, clean worktree below the controller-owned run root
-without moving the development checkout. Cleanup reconstructs the owned path
-from the request ID and leaves sibling workspaces alone. The adapter receives
-the controller's shared `GitCommandAdmission`; it does not create another Git
-process pool. Queue integration and attempt recovery remain separate work.
+it. It creates a detached, clean clone below the controller-owned run root
+without registering another project worktree or moving the development
+checkout. Cleanup reconstructs the owned path from the request ID and leaves
+sibling workspaces alone. The adapter receives the controller's shared
+`GitCommandAdmission`; remote fetches use at most one shared slot and cannot occupy
+the whole pool. Queue integration and attempt recovery remain separate work.
 
 ## Verification commands
 

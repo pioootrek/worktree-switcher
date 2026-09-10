@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { GitCommandAdmission } from "@/server/git-worktrees";
+import { GitCommandAdmission, SystemGitWorktreeReader } from "@/server/git-worktrees";
 import { SystemRemoteVerificationWorkspacePreparer } from "./remote-verification-workspace";
 
 const directories: string[] = [];
@@ -74,6 +74,8 @@ describe("SystemRemoteVerificationWorkspacePreparer", () => {
     expect(readFileSync(join(workspace.path, "revision.txt"), "utf8")).toBe("first\n");
     expect(git(setup.worker, "rev-parse", "HEAD")).toBe(developmentHead);
     expect(readFileSync(join(setup.worker, "local-edit.txt"), "utf8")).toBe("do not touch\n");
+    const discovered = await new SystemGitWorktreeReader().list(setup.worker);
+    expect(discovered.map(({ path }) => path)).toEqual([setup.worker]);
 
     rmSync(workspace.path, { recursive: true, force: true });
     await preparer.cleanup(workspace);
@@ -147,5 +149,19 @@ describe("SystemRemoteVerificationWorkspacePreparer", () => {
       executedCommitSha: setup.firstCommit,
     })).rejects.toMatchObject({ code: "invalid_input" });
     expect(existsSync(setup.worker)).toBe(true);
+  });
+
+  it("maps an unavailable Git admission boundary to a stable error code", async () => {
+    const setup = fixture();
+    const admission = new GitCommandAdmission();
+    admission.close();
+    const preparer = new SystemRemoteVerificationWorkspacePreparer(setup.workspaceRoot, admission);
+
+    await expect(preparer.prepare({
+      requestId: "request-closed",
+      repositoryPath: setup.worker,
+      sourceRemote: "origin",
+      commitSha: setup.firstCommit,
+    })).rejects.toMatchObject({ code: "operation_unavailable" });
   });
 });
