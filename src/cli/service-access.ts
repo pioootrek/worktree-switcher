@@ -43,9 +43,7 @@ export function readServiceAccess(path: string): ServiceAccessRecord | null {
 
 export function localDashboardEndpoint(record: ServiceAccessRecord): string {
   if (record.localDashboardEndpoint) return record.localDashboardEndpoint;
-  const endpoint = new URL(record.dashboardEndpoint);
-  endpoint.hostname = "127.0.0.1";
-  return endpoint.toString().replace(/\/$/, "");
+  return record.dashboardEndpoint;
 }
 
 export function publicDashboardEndpoint(record: ServiceAccessRecord): string {
