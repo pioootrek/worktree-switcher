@@ -32,7 +32,13 @@ function fixture() {
     ["worker-1:project-1", { workerId: "worker-1", projectId: "project-1", localProjectId: "local-project-1", presetIds: ["node:test"], revokedAt: null }],
   ]);
   const requests = new Map<string, RemoteVerificationRequest>();
-  const save = vi.fn((request: RemoteVerificationRequest) => requests.set(`${request.requestedBy}:${request.idempotencyKey}`, request));
+  const createOrReplay = vi.fn((request: RemoteVerificationRequest) => {
+    const key = `${request.requestedBy}:${request.idempotencyKey}`;
+    const existing = requests.get(key);
+    if (existing) return existing;
+    requests.set(key, request);
+    return request;
+  });
   const store: RemoteVerificationStore = {
     getRemotePrincipal: (id) => principals.get(id) ?? null,
     getRemoteProjectIdentity: (id) => projects.get(id) ?? null,
@@ -40,11 +46,11 @@ function fixture() {
     getRemotePrincipalProjectGrant: (principalId, projectId) => principalGrants.get(`${principalId}:${projectId}`) ?? null,
     getRemoteWorkerProjectGrant: (workerId, projectId) => workerGrants.get(`${workerId}:${projectId}`) ?? null,
     findRemoteVerificationRequestByIdempotency: (principalId, key) => requests.get(`${principalId}:${key}`) ?? null,
-    saveRemoteVerificationRequest: save,
+    createOrReplayRemoteVerificationRequest: createOrReplay,
   };
   const service = new RemoteVerificationService(store, () => "2026-09-10T12:00:00.000Z", () => "request-1");
   const input = { projectId: "project-1", workerId: "worker-1", commitSha: SHA, presetId: "node:test", idempotencyKey: "submission-1" };
-  return { service, input, principals, projects, workers, principalGrants, workerGrants, save };
+  return { service, input, principals, projects, workers, principalGrants, workerGrants, createOrReplay };
 }
 
 function expectCode(operation: () => unknown, code: RemoteVerificationError["code"]): void {
@@ -59,7 +65,7 @@ function expectCode(operation: () => unknown, code: RemoteVerificationError["cod
 
 describe("remote verification submission", () => {
   it("persists one exact-SHA request after checking both principal and worker grants", () => {
-    const { service, input, save } = fixture();
+    const { service, input, createOrReplay } = fixture();
     expect(service.submit(input, { principalId: "owner-1" })).toEqual({
       id: "request-1",
       projectId: "project-1",
@@ -72,14 +78,14 @@ describe("remote verification submission", () => {
       createdAt: "2026-09-10T12:00:00.000Z",
       updatedAt: "2026-09-10T12:00:00.000Z",
     });
-    expect(save).toHaveBeenCalledOnce();
+    expect(createOrReplay).toHaveBeenCalledOnce();
   });
 
   it("replays the same authorized submission and rejects reuse for different request fields", () => {
-    const { service, input, principals, projects, workers, principalGrants, workerGrants, save } = fixture();
+    const { service, input, principals, projects, workers, principalGrants, workerGrants, createOrReplay } = fixture();
     const first = service.submit(input, { principalId: "owner-1" });
     expect(service.submit(input, { principalId: "owner-1" })).toBe(first);
-    expect(save).toHaveBeenCalledOnce();
+    expect(createOrReplay).toHaveBeenCalledOnce();
 
     projects.set("project-2", { id: "project-2", name: "Other project", sourceRemote: "origin", status: "active" });
     principalGrants.set("owner-1:project-2", {
@@ -109,39 +115,75 @@ describe("remote verification submission", () => {
     }
   });
 
+  it("replays an accepted request after worker admission changes but still requires caller access", () => {
+    const { service, input, principals, workers, principalGrants, workerGrants, createOrReplay } = fixture();
+    const first = service.submit(input, { principalId: "owner-1" });
+    workers.set("worker-1", { ...workers.get("worker-1")!, status: "revoked" });
+    principals.set("worker-principal-1", { id: "worker-principal-1", kind: "worker", status: "revoked" });
+    workerGrants.set("worker-1:project-1", { ...workerGrants.get("worker-1:project-1")!, revokedAt: "2026-09-10T12:01:00.000Z" });
+
+    expect(service.submit(input, { principalId: "owner-1" })).toBe(first);
+    expect(createOrReplay).toHaveBeenCalledOnce();
+
+    principalGrants.set("owner-1:project-1", { ...principalGrants.get("owner-1:project-1")!, revokedAt: "2026-09-10T12:02:00.000Z" });
+    expectCode(() => service.submit(input, { principalId: "owner-1" }), "project_forbidden");
+  });
+
+  it("returns the atomic winner when another submission creates the same request after lookup", () => {
+    const { service, input, createOrReplay } = fixture();
+    createOrReplay.mockImplementationOnce((candidate) => ({
+      ...candidate,
+      id: "concurrent-request",
+      createdAt: "2026-09-10T11:59:59.000Z",
+      updatedAt: "2026-09-10T11:59:59.000Z",
+    }));
+
+    expect(service.submit(input, { principalId: "owner-1" })).toMatchObject({
+      id: "concurrent-request",
+      commitSha: SHA,
+      idempotencyKey: "submission-1",
+    });
+  });
+
+  it("maps an atomic idempotency collision with different input to the stable conflict error", () => {
+    const { service, input, createOrReplay } = fixture();
+    createOrReplay.mockImplementationOnce((candidate) => ({ ...candidate, commitSha: "a".repeat(40) }));
+    expectCode(() => service.submit(input, { principalId: "owner-1" }), "idempotency_conflict");
+  });
+
   it("rejects abbreviated commits before reading authorization state", () => {
-    const { service, input, save } = fixture();
+    const { service, input, createOrReplay } = fixture();
     expectCode(() => service.submit({ ...input, commitSha: "01234567" }, { principalId: "owner-1" }), "invalid_request");
-    expect(save).not.toHaveBeenCalled();
+    expect(createOrReplay).not.toHaveBeenCalled();
   });
 
   it("rejects revoked principals and principals without a submit grant", () => {
-    const { service, input, principals, principalGrants, save } = fixture();
+    const { service, input, principals, principalGrants, createOrReplay } = fixture();
     principals.set("owner-1", { id: "owner-1", kind: "owner", status: "revoked" });
     expectCode(() => service.submit(input, { principalId: "owner-1" }), "principal_forbidden");
     principals.set("owner-1", { id: "owner-1", kind: "owner", status: "active" });
     principalGrants.delete("owner-1:project-1");
     expectCode(() => service.submit(input, { principalId: "owner-1" }), "project_forbidden");
-    expect(save).not.toHaveBeenCalled();
+    expect(createOrReplay).not.toHaveBeenCalled();
   });
 
   it("does not let a worker principal submit verification requests", () => {
-    const { service, input, save } = fixture();
+    const { service, input, createOrReplay } = fixture();
     expectCode(() => service.submit(input, { principalId: "worker-principal-1" }), "principal_forbidden");
-    expect(save).not.toHaveBeenCalled();
+    expect(createOrReplay).not.toHaveBeenCalled();
   });
 
   it("rejects a worker whose owning principal is revoked or has the wrong kind", () => {
-    const { service, input, principals, save } = fixture();
+    const { service, input, principals, createOrReplay } = fixture();
     principals.set("worker-principal-1", { id: "worker-principal-1", kind: "worker", status: "revoked" });
     expectCode(() => service.submit(input, { principalId: "owner-1" }), "worker_unavailable");
     principals.set("worker-principal-1", { id: "worker-principal-1", kind: "agent", status: "active" });
     expectCode(() => service.submit(input, { principalId: "owner-1" }), "worker_unavailable");
-    expect(save).not.toHaveBeenCalled();
+    expect(createOrReplay).not.toHaveBeenCalled();
   });
 
   it("rejects a revoked worker, a foreign worker and a disallowed preset", () => {
-    const { service, input, workers, workerGrants, save } = fixture();
+    const { service, input, workers, workerGrants, createOrReplay } = fixture();
     workers.set("worker-1", { ...workers.get("worker-1")!, status: "revoked" });
     expectCode(() => service.submit(input, { principalId: "owner-1" }), "worker_unavailable");
     workers.set("worker-1", { ...workers.get("worker-1")!, status: "active" });
@@ -151,6 +193,6 @@ describe("remote verification submission", () => {
       workerId: "worker-1", projectId: "project-1", localProjectId: "local-project-1", presetIds: ["node:check"], revokedAt: null,
     });
     expectCode(() => service.submit(input, { principalId: "owner-1" }), "preset_forbidden");
-    expect(save).not.toHaveBeenCalled();
+    expect(createOrReplay).not.toHaveBeenCalled();
   });
 });

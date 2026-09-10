@@ -91,5 +91,6 @@ export interface RemoteVerificationStore {
   getRemotePrincipalProjectGrant(principalId: string, projectId: string): RemotePrincipalProjectGrant | null;
   getRemoteWorkerProjectGrant(workerId: string, projectId: string): RemoteWorkerProjectGrant | null;
   findRemoteVerificationRequestByIdempotency(principalId: string, idempotencyKey: string): RemoteVerificationRequest | null;
-  saveRemoteVerificationRequest(request: RemoteVerificationRequest): void;
+  /** Atomically creates the request or returns the request that already owns its principal/key pair. */
+  createOrReplayRemoteVerificationRequest(request: RemoteVerificationRequest): RemoteVerificationRequest;
 }

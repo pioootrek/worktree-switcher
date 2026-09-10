@@ -49,6 +49,26 @@ function requireCommitSha(value: string): string {
   return normalized;
 }
 
+function sameSubmission(
+  request: RemoteVerificationRequest,
+  input: Pick<RemoteVerificationRequest, "projectId" | "workerId" | "commitSha" | "presetId">,
+): boolean {
+  return request.projectId === input.projectId
+    && request.workerId === input.workerId
+    && request.commitSha === input.commitSha
+    && request.presetId === input.presetId;
+}
+
+function replayOrConflict(
+  request: RemoteVerificationRequest,
+  input: Pick<RemoteVerificationRequest, "projectId" | "workerId" | "commitSha" | "presetId">,
+): RemoteVerificationRequest {
+  if (!sameSubmission(request, input)) {
+    throw new RemoteVerificationError("idempotency_conflict", "Klucz idempotencji jest już używany przez inne zlecenie.");
+  }
+  return request;
+}
+
 export class RemoteVerificationService {
   constructor(
     private readonly store: RemoteVerificationStore,
@@ -76,6 +96,10 @@ export class RemoteVerificationService {
     if (!principalGrant || principalGrant.revokedAt || !principalGrant.permissions.includes("submit")) {
       throw new RemoteVerificationError("project_forbidden", "Podmiot nie może zlecać weryfikacji tego projektu.");
     }
+
+    const repeated = this.store.findRemoteVerificationRequestByIdempotency(principalId, idempotencyKey);
+    if (repeated) return replayOrConflict(repeated, { projectId, workerId, commitSha, presetId });
+
     const worker = this.store.getRemoteWorker(workerId);
     const workerPrincipal = worker ? this.store.getRemotePrincipal(worker.principalId) : null;
     if (!worker || worker.status !== "active" || !workerPrincipal || workerPrincipal.status !== "active" || workerPrincipal.kind !== "worker") {
@@ -87,19 +111,6 @@ export class RemoteVerificationService {
     }
     if (!workerGrant.presetIds.includes(presetId)) {
       throw new RemoteVerificationError("preset_forbidden", "Worker nie udostępnia wybranego presetu dla tego projektu.");
-    }
-
-    const repeated = this.store.findRemoteVerificationRequestByIdempotency(principalId, idempotencyKey);
-    if (repeated) {
-      if (
-        repeated.projectId !== projectId
-        || repeated.workerId !== workerId
-        || repeated.commitSha !== commitSha
-        || repeated.presetId !== presetId
-      ) {
-        throw new RemoteVerificationError("idempotency_conflict", "Klucz idempotencji jest już używany przez inne zlecenie.");
-      }
-      return repeated;
     }
 
     const createdAt = this.now();
@@ -115,7 +126,9 @@ export class RemoteVerificationService {
       createdAt,
       updatedAt: createdAt,
     };
-    this.store.saveRemoteVerificationRequest(request);
-    return request;
+    return replayOrConflict(
+      this.store.createOrReplayRemoteVerificationRequest(request),
+      { projectId, workerId, commitSha, presetId },
+    );
   }
 }
