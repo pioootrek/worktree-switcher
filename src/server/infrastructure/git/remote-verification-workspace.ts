@@ -86,9 +86,6 @@ export class SystemRemoteVerificationWorkspacePreparer implements RemoteVerifica
     const repositoryPath = await this.canonicalRepository(input.repositoryPath);
     const root = await this.ensureRoot();
     const target = join(root, requestId);
-    if (await exists(target)) {
-      throw new RemoteVerificationWorkspaceError("workspace_conflict", "Workspace zlecenia już istnieje.");
-    }
 
     let remotes: string[];
     try {
@@ -127,6 +124,14 @@ export class SystemRemoteVerificationWorkspacePreparer implements RemoteVerifica
     }
 
     try {
+      await mkdir(target, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new RemoteVerificationWorkspaceError("workspace_conflict", "Workspace zlecenia już istnieje.");
+      }
+      throw error;
+    }
+    try {
       await this.git(["clone", "--quiet", "--no-checkout", "--shared", "--", repositoryPath, target], 60_000);
       await this.git(["-C", target, "checkout", "--quiet", "--detach", resolvedCommit], 30_000);
       const executedCommitSha = (await this.git(["-C", target, "rev-parse", "HEAD"], 5_000)).trim().toLowerCase();
@@ -143,9 +148,7 @@ export class SystemRemoteVerificationWorkspacePreparer implements RemoteVerifica
         executedCommitSha,
       };
     } catch (error) {
-      if (await exists(target)) {
-        await rm(target, { recursive: true, force: true });
-      }
+      await rm(target, { recursive: true, force: true });
       if (error instanceof RemoteVerificationWorkspaceError) throw error;
       throw new RemoteVerificationWorkspaceError("workspace_invalid", "Nie udało się przygotować workspace dla zlecenia.");
     }

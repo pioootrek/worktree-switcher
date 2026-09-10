@@ -164,4 +164,27 @@ describe("SystemRemoteVerificationWorkspacePreparer", () => {
       commitSha: setup.firstCommit,
     })).rejects.toMatchObject({ code: "operation_unavailable" });
   });
+
+  it("lets only one concurrent preparation own and clean a request workspace", async () => {
+    const setup = fixture();
+    const admission = new GitCommandAdmission();
+    const first = new SystemRemoteVerificationWorkspacePreparer(setup.workspaceRoot, admission);
+    const second = new SystemRemoteVerificationWorkspacePreparer(setup.workspaceRoot, admission);
+    const input = {
+      requestId: "request-race",
+      repositoryPath: setup.worker,
+      sourceRemote: "origin",
+      commitSha: setup.firstCommit,
+    };
+
+    const results = await Promise.allSettled([first.prepare(input), second.prepare(input)]);
+    const fulfilled = results.filter((result) => result.status === "fulfilled");
+    const rejected = results.filter((result) => result.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]).toMatchObject({ reason: { code: "workspace_conflict" } });
+    const workspace = (fulfilled[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof first.prepare>>>).value;
+    expect(git(workspace.path, "rev-parse", "HEAD")).toBe(setup.firstCommit);
+    await first.cleanup(workspace);
+  });
 });
