@@ -10,10 +10,12 @@ import type { ControllerDashboardResponse } from "../shared/contracts";
 import { systemLocale, translate } from "../i18n/messages";
 import { localizeServerMessage } from "../i18n/server-errors";
 import { openBrowser } from "./browser";
+import { directControllerOrigin, parsePublicControllerOrigin, validatePublicControllerBackend } from "./controller-addresses";
 import { writeCliLine } from "./output";
 import { pairingUrl } from "./pairing-url";
 import { openProjectGateway, runDoctorCommand, runProjectCommand } from "./project-management";
-import { readServiceAccess, removeServiceAccess, writeServiceAccess } from "./service-access";
+import { localDashboardEndpoint, publicDashboardEndpoint, readServiceAccess, removeServiceAccess, writeServiceAccess } from "./service-access";
+import { buildServiceStartArguments } from "./service-install";
 import { UserServiceManager } from "./service-manager";
 import { ControlService } from "../server/control-service";
 import { acquireControllerLock } from "../server/controller-lock";
@@ -91,6 +93,9 @@ async function main(): Promise<void> {
   const host = option("--host") ?? "0.0.0.0";
   const port = Number(option("--port") ?? 47831);
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error(translate(locale, "cli.invalidPort"));
+  const configuredPublicOrigin = option("--public-url");
+  const publicOrigin = configuredPublicOrigin ? parsePublicControllerOrigin(configuredPublicOrigin) : undefined;
+  validatePublicControllerBackend(host, publicOrigin);
   const defaultWebRoot = resolve(fileURLToPath(new URL("../../out", import.meta.url)));
   const webRoot = resolve(option("--web-root") ?? defaultWebRoot);
   if (!existsSync(webRoot)) throw new Error(translate(locale, "cli.missingPanel", { path: webRoot }));
@@ -147,6 +152,7 @@ async function main(): Promise<void> {
     host,
     port,
     accessToken,
+    publicOrigin,
   });
   try {
     await listen(controller.server, port, host);
@@ -158,10 +164,12 @@ async function main(): Promise<void> {
     controllerLock.release();
     throw error;
   }
-  const browserHost = host === "0.0.0.0" ? "127.0.0.1" : host;
-  const lanHost = host === "0.0.0.0" ? findLanAddress() ?? browserHost : host;
-  const localAddress = pairingUrl(browserHost, port, accessToken, sessionId);
-  const lanAddress = pairingUrl(lanHost, port, accessToken, sessionId);
+  const wildcardHost = host === "0.0.0.0" || host === "::";
+  const browserHost = wildcardHost ? "127.0.0.1" : host;
+  const lanHost = wildcardHost ? findLanAddress() ?? browserHost : host;
+  const localOrigin = directControllerOrigin(browserHost, port);
+  const advertisedOrigin = publicOrigin ?? directControllerOrigin(lanHost, port);
+  const advertisedAddress = pairingUrl(advertisedOrigin, accessToken, sessionId);
   const serviceMode = process.argv.includes("--service-mode");
   writeCliLine(translate(locale, "cli.listening", { host, port }));
   if (serviceMode) {
@@ -169,14 +177,16 @@ async function main(): Promise<void> {
       pid: process.pid,
       startedAt: new Date().toISOString(),
       version: packageJson.version,
-      dashboardEndpoint: `http://${lanHost}:${port}`,
+      dashboardEndpoint: advertisedOrigin,
+      localDashboardEndpoint: localOrigin,
+      publicDashboardEndpoint: advertisedOrigin,
       mcpEndpoint: mcp ? mcpEndpoint : null,
-      accessUrl: lanAddress,
+      accessUrl: advertisedAddress,
       logDirectory: paths.logDirectory,
     });
     writeCliLine("Service access URL: worktree-switcher service url");
   } else {
-    writeCliLine(translate(locale, "cli.accessLink", { url: lanAddress }));
+    writeCliLine(translate(locale, "cli.accessLink", { url: advertisedAddress }));
   }
   writeCliLine(translate(locale, "cli.logs", { path: paths.logDirectory }));
   if (!serviceMode) writeCliLine(translate(locale, "cli.secret"));
@@ -185,7 +195,7 @@ async function main(): Promise<void> {
     writeCliLine(translate(locale, "cli.mcpConfig"));
   }
 
-  if (!process.argv.includes("--no-open") && !serviceMode) openBrowser(localAddress);
+  if (!process.argv.includes("--no-open") && !serviceMode) openBrowser(advertisedAddress);
   let closing = false;
   const shutdown = async () => {
     if (closing) return;
@@ -234,19 +244,22 @@ async function handleServiceCommand(args: string[], paths: ReturnType<typeof res
     const host = option("--host", args) ?? "0.0.0.0";
     const browseRoot = resolve(option("--browse-root", args) ?? homedir());
     const memoryWarningMiB = optionalPositiveNumber(option("--memory-warning-mib", args), "Memory warning threshold");
+    const configuredPublicOrigin = option("--public-url", args);
+    const publicOrigin = configuredPublicOrigin ? parsePublicControllerOrigin(configuredPublicOrigin) : undefined;
+    validatePublicControllerBackend(host, publicOrigin);
     mkdirSync(paths.logDirectory, { recursive: true, mode: 0o700 });
-    const startArguments = [
-      "--service-mode", "--no-open",
-      "--host", host,
-      "--port", String(port),
-      "--mcp-port", String(mcpPort),
-      "--browse-root", browseRoot,
-      "--data-dir", paths.dataDirectory,
-      "--state-dir", paths.stateDirectory,
-      "--web-root", webRoot,
-    ];
-    if (args.includes("--no-mcp")) startArguments.push("--no-mcp");
-    if (memoryWarningMiB !== null) startArguments.push("--memory-warning-mib", String(memoryWarningMiB));
+    const startArguments = buildServiceStartArguments({
+      host,
+      port,
+      mcpPort,
+      browseRoot,
+      dataDirectory: paths.dataDirectory,
+      stateDirectory: paths.stateDirectory,
+      webRoot,
+      noMcp: args.includes("--no-mcp"),
+      memoryWarningMiB,
+      publicOrigin,
+    });
     const result = manager.install({
       nodePath: resolve(process.execPath),
       entrypointPath,
@@ -301,7 +314,7 @@ async function printServiceStatus(manager: UserServiceManager, paths: ReturnType
   if (status.lastExitStatus !== null) writeCliLine(`Last exit status: ${status.lastExitStatus}`);
   if (currentAccess) {
     writeCliLine(`Version: ${currentAccess.version}`);
-    writeCliLine(`Dashboard: ${currentAccess.dashboardEndpoint}`);
+    writeCliLine(`Dashboard: ${publicDashboardEndpoint(currentAccess)}`);
     if (currentAccess.mcpEndpoint) writeCliLine(`MCP: ${currentAccess.mcpEndpoint}`);
     writeCliLine(`Logs: ${currentAccess.logDirectory}`);
     writeCliLine("Access URL: worktree-switcher service url");
@@ -309,7 +322,7 @@ async function printServiceStatus(manager: UserServiceManager, paths: ReturnType
       const accessUrl = new URL(currentAccess.accessUrl);
       const token = new URLSearchParams(accessUrl.hash.slice(1)).get("token");
       if (token) {
-        const response = await fetch(`${currentAccess.dashboardEndpoint}/api/dashboard`, {
+        const response = await fetch(`${localDashboardEndpoint(currentAccess)}/api/dashboard`, {
           headers: { "X-Worktree-Switcher-Token": token },
           signal: AbortSignal.timeout(1_000),
         });

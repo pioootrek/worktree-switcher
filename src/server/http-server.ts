@@ -303,11 +303,12 @@ function hasValidToken(request: IncomingMessage, url: URL, expected: string): bo
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
-function hasValidOrigin(request: IncomingMessage): boolean {
+function hasValidOrigin(request: IncomingMessage, publicOrigin?: string): boolean {
   const origin = request.headers.origin;
   if (!origin) return true;
   try {
     const parsed = new URL(origin);
+    if (publicOrigin) return parsed.origin === publicOrigin && parsed.href === `${parsed.origin}/`;
     return parsed.protocol === "http:" && parsed.host === request.headers.host;
   } catch {
     return false;
@@ -323,6 +324,7 @@ export function createControllerServer(options: {
   host: string;
   port: number;
   accessToken: string;
+  publicOrigin?: string;
 }): ControllerServer {
   const fallbackOrigin = `http://${options.host}:${options.port}`;
   const server = createServer(async (request, response) => {
@@ -335,7 +337,7 @@ export function createControllerServer(options: {
           json(response, 401, { error: localizeServerMessage("Brak prawidłowego klucza dostępu.", locale) });
           return;
         }
-        if (request.method !== "GET" && !hasValidOrigin(request)) {
+        if (request.method !== "GET" && !hasValidOrigin(request, options.publicOrigin)) {
           json(response, 403, { error: localizeServerMessage("Odrzucono żądanie z obcego originu.", locale) });
           return;
         }

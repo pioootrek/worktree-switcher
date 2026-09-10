@@ -13,7 +13,7 @@ import { createControllerServer, type ControllerServer } from "./http-server";
 const controllers: ControllerServer[] = [];
 const directories: string[] = [];
 
-async function fixture() {
+async function fixture(options: { publicOrigin?: string } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-http-"));
   directories.push(directory);
   mkdirSync(directory, { recursive: true });
@@ -73,6 +73,7 @@ async function fixture() {
     host: "0.0.0.0",
     port: 0,
     accessToken: "test-access-token",
+    publicOrigin: options.publicOrigin,
   });
   controllers.push(controller);
   await new Promise<void>((resolve, reject) => {
@@ -163,6 +164,39 @@ describe("controller access boundary", () => {
     });
     expect(response.status).toBe(200);
     expect(refreshProjectMetadata).toHaveBeenCalledWith("project-1");
+  });
+
+  it("authorizes the configured HTTPS origin without trusting Host or forwarding headers", async () => {
+    const { base, refreshProjectMetadata } = await fixture({ publicOrigin: "https://switcher.example.test" });
+    const accepted = await fetch(`${base}/api/projects/project-1/metadata/refresh`, {
+      method: "POST",
+      headers: {
+        Origin: "https://switcher.example.test",
+        Host: "forged.example.test",
+        "Forwarded": "host=forged.example.test;proto=https",
+        "X-Forwarded-Host": "forged.example.test",
+        "X-Forwarded-Proto": "https",
+        "Content-Type": "application/json",
+        "X-Worktree-Switcher-Token": "test-access-token",
+      },
+      body: "{}",
+    });
+    expect(accepted.status).toBe(200);
+    expect(refreshProjectMetadata).toHaveBeenCalledOnce();
+
+    const rejected = await fetch(`${base}/api/projects/project-1/metadata/refresh`, {
+      method: "POST",
+      headers: {
+        Origin: "https://attacker.invalid",
+        Host: "switcher.example.test",
+        "X-Forwarded-Host": "switcher.example.test",
+        "X-Forwarded-Proto": "https",
+        "Content-Type": "application/json",
+        "X-Worktree-Switcher-Token": "test-access-token",
+      },
+      body: "{}",
+    });
+    expect(rejected.status).toBe(403);
   });
 
   it("localizes API errors from Accept-Language", async () => {

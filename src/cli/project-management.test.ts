@@ -128,8 +128,10 @@ describe("project management CLI", () => {
       startedAt: new Date().toISOString(),
       version: "0.0.1",
       dashboardEndpoint: recordedEndpoint,
+      localDashboardEndpoint: localEndpoint,
+      publicDashboardEndpoint: "https://switcher.example.test",
       mcpEndpoint: null,
-      accessUrl: `${localEndpoint}/#token=controller-token`,
+      accessUrl: "https://switcher.example.test/#token=controller-token",
       logDirectory: paths.logDirectory,
     });
 

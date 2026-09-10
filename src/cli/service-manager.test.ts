@@ -22,12 +22,16 @@ afterEach(() => {
 
 describe("user service definitions", () => {
   it("renders a bounded user systemd service without secrets", () => {
-    const unit = renderSystemdUnit(installOptions);
+    const unit = renderSystemdUnit({
+      ...installOptions,
+      startArguments: [...installOptions.startArguments, "--public-url", "https://switcher.example.test"],
+    });
     expect(unit).toContain('ExecStart="/opt/node/bin/node" "/opt/worktree switcher/dist/cli/index.js" "start"');
     expect(unit).toContain("WorkingDirectory=/opt/worktree\\x20switcher");
     expect(unit).toContain('"/home/me/data%%dir"');
     expect(unit).toContain("Restart=on-failure\nRestartSec=5");
     expect(unit).toContain("KillMode=control-group");
+    expect(unit).toContain('"--public-url" "https://switcher.example.test"');
     expect(unit).toContain(`Environment="PATH=${resolveServiceExecutablePath(installOptions.nodePath)}"`);
     expect(unit).not.toContain("token=");
   });

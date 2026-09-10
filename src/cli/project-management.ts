@@ -13,7 +13,7 @@ import { nullLogWriter } from "../server/log-writer";
 import type { AppPaths } from "../server/paths";
 import { ProcessManager } from "../server/process-manager";
 import { SqliteStateStore } from "../server/sqlite-store";
-import { readServiceAccess } from "./service-access";
+import { localDashboardEndpoint, readServiceAccess } from "./service-access";
 
 const execFileAsync = promisify(execFile);
 
@@ -32,7 +32,7 @@ export interface ProjectCommandDependencies {
 
 export async function openProjectGateway(paths: AppPaths, locale: Locale): Promise<ProjectGateway> {
   const access = readServiceAccess(paths.serviceAccessPath);
-  if (access && processExists(access.pid)) return new ControllerProjectGateway(access.dashboardEndpoint, access.accessUrl, locale);
+  if (access && processExists(access.pid)) return new ControllerProjectGateway(localDashboardEndpoint(access), access.accessUrl, locale);
 
   let lock: ControllerLock;
   try {
