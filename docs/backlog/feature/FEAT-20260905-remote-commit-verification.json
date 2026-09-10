@@ -11,7 +11,8 @@
       "FIX-20260905-test-log-lifecycle",
       "FEAT-20260905-shared-project-memory",
       "FEAT-20260905-agent-fleet-coordination",
-      "FEAT-20260829-launch-environment-profiles"
+      "FEAT-20260829-launch-environment-profiles",
+      "NOTE-20260909-self-hosted-saas-plan"
     ]
   },
   "notes": [
@@ -24,6 +25,16 @@
       "author": "agent:codex",
       "date": "2026-09-05",
       "text": "Linked docs/environment-runtime-plan.md and imported Secret Runtime v2 source note. Remote requests select an authorized profile; worker-side secret resolution is a separate access boundary. Secret-free remote checks do not wait for a vault, while credentialed runs require explicit trusted-code and grant policy."
+    },
+    {
+      "author": "human:project-owner",
+      "date": "2026-09-09",
+      "text": "The product must support self-hosting and be prepared for an owner-operated SaaS. Requested a saved staged plan with validation that catches failures early."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-09",
+      "text": "NOTE-20260909-self-hosted-saas-plan/implementation-plan.md records the proposed implementation and gates: address/HTTPS contracts, authenticated remote execution, organization isolation and deployment/restore acceptance. HTTPS owns stage 1; remote execution requires minimum authorization before networking and precedes public multi-tenant hosting. Customer-owned execution is a proposed initial boundary. Planning only; this feature remains open."
     }
   ],
   "priority": "next",

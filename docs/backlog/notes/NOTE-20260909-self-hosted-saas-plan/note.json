@@ -1,0 +1,24 @@
+{
+  "author": "agent:codex",
+  "body": {
+    "baseline_commit": "5777634",
+    "summary": "Staged self-hosted and owner-operated SaaS direction: HTTPS first, authenticated remote execution, organization isolation and repeatable hosting, with early negative tests and explicit delivery gates. Planning only."
+  },
+  "created": "2026-09-09",
+  "files": [
+    "implementation-plan.md"
+  ],
+  "id": "NOTE-20260909-self-hosted-saas-plan",
+  "last_reviewed": "2026-09-09",
+  "schema_version": 1,
+  "status": "active",
+  "tags": [
+    "plan",
+    "architecture",
+    "https",
+    "self-hosted",
+    "saas",
+    "validation"
+  ],
+  "title": "Self-hosted and SaaS stages with early failure validation"
+}

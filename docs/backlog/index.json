@@ -159,6 +159,25 @@
       "files": [
         "implementation-plan.md"
       ],
+      "id": "NOTE-20260909-self-hosted-saas-plan",
+      "path": "notes/NOTE-20260909-self-hosted-saas-plan",
+      "status": "active",
+      "tags": [
+        "plan",
+        "architecture",
+        "https",
+        "self-hosted",
+        "saas",
+        "validation"
+      ],
+      "title": "Self-hosted and SaaS stages with early failure validation"
+    },
+    {
+      "author": "agent:codex",
+      "created": "2026-09-09",
+      "files": [
+        "implementation-plan.md"
+      ],
       "id": "NOTE-20260909-managed-test-queue-plan",
       "path": "notes/NOTE-20260909-managed-test-queue-plan",
       "status": "active",
