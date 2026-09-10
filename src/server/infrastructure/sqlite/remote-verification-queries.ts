@@ -112,6 +112,11 @@ export class RemoteVerificationQueries {
     if (existing && existing.principalId !== worker.principalId) {
       throw new Error("Nie można zmienić tożsamości istniejącego workera zdalnego.");
     }
+    const principalOwner = this.database.prepare("SELECT id FROM remote_workers WHERE principal_id = ?")
+      .get(worker.principalId) as { id: string } | undefined;
+    if (principalOwner && principalOwner.id !== worker.id) {
+      throw new Error("Tożsamość zdalna jest już przypisana do innego workera.");
+    }
     this.database.transaction(() => {
       this.database.prepare(`
         INSERT INTO remote_workers(id, principal_id, name, status, last_contact_at) VALUES (?, ?, ?, ?, ?)

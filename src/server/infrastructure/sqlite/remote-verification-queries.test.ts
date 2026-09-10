@@ -119,20 +119,29 @@ describe("remote verification SQLite persistence", () => {
     reopened.close();
   });
 
-  it("returns one winner for the same principal and idempotency key across connections", () => {
+  it("scopes one idempotency winner per principal across connections", () => {
     const path = databasePath();
     const first = new SqliteStateStore(path);
     provision(first);
+    first.saveRemotePrincipal({ id: "owner-2", kind: "owner", status: "active" }, "local-user");
+    first.saveRemotePrincipalProjectGrant({
+      principalId: "owner-2",
+      projectId: "project-1",
+      permissions: ["submit"],
+      revokedAt: null,
+    }, "local-user");
     const second = new SqliteStateStore(path);
 
     expect(first.createOrReplayRemoteVerificationRequest(request("request-1"))).toEqual(request("request-1"));
     expect(second.createOrReplayRemoteVerificationRequest(request("request-2"))).toEqual(request("request-1"));
     expect(second.createOrReplayRemoteVerificationRequest(request("request-3", "a".repeat(40)))).toEqual(request("request-1"));
+    const otherPrincipalRequest = { ...request("request-4"), requestedBy: "owner-2" };
+    expect(second.createOrReplayRemoteVerificationRequest(otherPrincipalRequest)).toEqual(otherPrincipalRequest);
 
     first.close();
     second.close();
     const database = new Database(path, { readonly: true });
-    expect(database.prepare("SELECT COUNT(*) AS count FROM remote_verification_requests").get()).toEqual({ count: 1 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM remote_verification_requests").get()).toEqual({ count: 2 });
     database.close();
   });
 
@@ -196,6 +205,13 @@ describe("remote verification SQLite persistence", () => {
       status: "active",
       lastContactAt: null,
     }, "local-user")).toThrow("Nie można zmienić tożsamości istniejącego workera zdalnego.");
+    expect(() => store.saveRemoteWorker({
+      id: "worker-2",
+      principalId: "worker-principal-1",
+      name: "Other worker",
+      status: "active",
+      lastContactAt: null,
+    }, "local-user")).toThrow("Tożsamość zdalna jest już przypisana do innego workera.");
 
     expect(store.getRemotePrincipal("owner-1")?.kind).toBe("owner");
     expect(store.getRemoteProjectIdentity("project-1")?.sourceRemote).toBe("origin");
