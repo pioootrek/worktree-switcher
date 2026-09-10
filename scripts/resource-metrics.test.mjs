@@ -1,6 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { controllerRequestEndpoints } from "./controller-access.mjs";
 import { assess, MiB, summarize } from "./resource-metrics.mjs";
+
+test("resource benchmark uses local transport with the advertised browser origin", () => {
+  assert.deepEqual(controllerRequestEndpoints({
+    dashboardEndpoint: "https://switcher.example.test",
+    localDashboardEndpoint: "http://127.0.0.1:47831",
+    publicDashboardEndpoint: "https://switcher.example.test",
+  }), {
+    local: "http://127.0.0.1:47831",
+    origin: "https://switcher.example.test",
+  });
+  assert.deepEqual(controllerRequestEndpoints({ dashboardEndpoint: "http://192.168.1.20:47831" }), {
+    local: "http://192.168.1.20:47831",
+    origin: "http://192.168.1.20:47831",
+  });
+});
 
 test("CPU uses one-core process time and RSS uses the sample median", () => {
   const result = summarize([

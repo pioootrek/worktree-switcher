@@ -1,5 +1,6 @@
 const MAX_EVENT_BYTES = 64 * 1024;
 const MAX_RETRY_DELAY_MS = 10_000;
+const STABLE_CONNECTION_MS = 30_000;
 
 type EventHandler = (type: string, data: string) => void;
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -82,7 +83,7 @@ export function connectDashboardEvents(options: {
 
   void (async () => {
     while (!closed) {
-      let receivedEvent = false;
+      let connectedAt: number | null = null;
       try {
         const response = await fetcher("/api/events", {
           cache: "no-store",
@@ -101,8 +102,8 @@ export function connectDashboardEvents(options: {
           throw new Error("Dashboard event stream returned an invalid content type.");
         }
         if (!response.body) throw new Error("Dashboard event stream returned no body.");
+        connectedAt = Date.now();
         await consumeDashboardEvents(response.body, (type, data) => {
-          receivedEvent = true;
           options.onEvent(type, data);
         });
         if (!closed) options.onError();
@@ -111,7 +112,7 @@ export function connectDashboardEvents(options: {
         options.onError();
       }
       if (closed) return;
-      if (receivedEvent) retryDelay = initialDelay;
+      if (connectedAt !== null && Date.now() - connectedAt >= STABLE_CONNECTION_MS) retryDelay = initialDelay;
       try {
         await waitForRetry(retryDelay, controller.signal);
       } catch {
