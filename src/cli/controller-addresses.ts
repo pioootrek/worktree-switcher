@@ -13,6 +13,10 @@ export function directControllerOrigin(host: string, port: number): string {
   return new URL(`http://${urlHost(host)}:${port}/`).origin;
 }
 
+export function interactiveControllerOrigin(localOrigin: string, publicOrigin: string | undefined): string {
+  return publicOrigin ?? localOrigin;
+}
+
 export function parsePublicControllerOrigin(value: string): string {
   let url: URL;
   try {

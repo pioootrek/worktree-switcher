@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { directControllerOrigin, parsePublicControllerOrigin, validatePublicControllerBackend } from "./controller-addresses";
+import {
+  directControllerOrigin,
+  interactiveControllerOrigin,
+  parsePublicControllerOrigin,
+  validatePublicControllerBackend,
+} from "./controller-addresses";
 
 describe("controller address contract", () => {
   it("canonicalizes an explicit HTTPS public origin", () => {
@@ -22,6 +27,12 @@ describe("controller address contract", () => {
     expect(directControllerOrigin("192.168.1.20", 47831)).toBe("http://192.168.1.20:47831");
     expect(directControllerOrigin("switcher.local", 47831)).toBe("http://switcher.local:47831");
     expect(directControllerOrigin("::1", 47831)).toBe("http://[::1]:47831");
+  });
+
+  it("opens direct mode on loopback and proxy mode on the public origin", () => {
+    expect(interactiveControllerOrigin("http://127.0.0.1:47831", undefined)).toBe("http://127.0.0.1:47831");
+    expect(interactiveControllerOrigin("http://127.0.0.1:47831", "https://switcher.example.test"))
+      .toBe("https://switcher.example.test");
   });
 
   it("requires the first proxy mode to use a loopback backend", () => {

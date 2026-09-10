@@ -10,7 +10,12 @@ import type { ControllerDashboardResponse } from "../shared/contracts";
 import { systemLocale, translate } from "../i18n/messages";
 import { localizeServerMessage } from "../i18n/server-errors";
 import { openBrowser } from "./browser";
-import { directControllerOrigin, parsePublicControllerOrigin, validatePublicControllerBackend } from "./controller-addresses";
+import {
+  directControllerOrigin,
+  interactiveControllerOrigin,
+  parsePublicControllerOrigin,
+  validatePublicControllerBackend,
+} from "./controller-addresses";
 import { writeCliLine } from "./output";
 import { pairingUrl } from "./pairing-url";
 import { openProjectGateway, runDoctorCommand, runProjectCommand } from "./project-management";
@@ -170,6 +175,7 @@ async function main(): Promise<void> {
   const localOrigin = directControllerOrigin(browserHost, port);
   const advertisedOrigin = publicOrigin ?? directControllerOrigin(lanHost, port);
   const advertisedAddress = pairingUrl(advertisedOrigin, accessToken, sessionId);
+  const interactiveAddress = pairingUrl(interactiveControllerOrigin(localOrigin, publicOrigin), accessToken, sessionId);
   const serviceMode = process.argv.includes("--service-mode");
   writeCliLine(translate(locale, "cli.listening", { host, port }));
   if (serviceMode) {
@@ -195,7 +201,7 @@ async function main(): Promise<void> {
     writeCliLine(translate(locale, "cli.mcpConfig"));
   }
 
-  if (!process.argv.includes("--no-open") && !serviceMode) openBrowser(advertisedAddress);
+  if (!process.argv.includes("--no-open") && !serviceMode) openBrowser(interactiveAddress);
   let closing = false;
   const shutdown = async () => {
     if (closing) return;
