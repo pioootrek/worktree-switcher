@@ -290,24 +290,21 @@ export interface ControllerServer {
   close(): Promise<void>;
 }
 
-function hasValidToken(request: IncomingMessage, url: URL, expected: string): boolean {
+function hasValidToken(request: IncomingMessage, expected: string): boolean {
   const header = request.headers["x-worktree-switcher-token"];
-  const supplied = typeof header === "string"
-    ? header
-    : url.pathname === "/api/events"
-      ? url.searchParams.get("token")
-      : null;
+  const supplied = typeof header === "string" ? header : null;
   if (!supplied) return false;
   const actualBuffer = Buffer.from(supplied);
   const expectedBuffer = Buffer.from(expected);
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
-function hasValidOrigin(request: IncomingMessage): boolean {
+function hasValidOrigin(request: IncomingMessage, publicOrigin?: string): boolean {
   const origin = request.headers.origin;
   if (!origin) return true;
   try {
     const parsed = new URL(origin);
+    if (publicOrigin) return parsed.origin === publicOrigin && parsed.href === `${parsed.origin}/`;
     return parsed.protocol === "http:" && parsed.host === request.headers.host;
   } catch {
     return false;
@@ -323,6 +320,7 @@ export function createControllerServer(options: {
   host: string;
   port: number;
   accessToken: string;
+  publicOrigin?: string;
 }): ControllerServer {
   const fallbackOrigin = `http://${options.host}:${options.port}`;
   const server = createServer(async (request, response) => {
@@ -331,11 +329,11 @@ export function createControllerServer(options: {
     try {
       if (url.pathname.startsWith("/api/")) {
         response.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
-        if (!hasValidToken(request, url, options.accessToken)) {
+        if (!hasValidToken(request, options.accessToken)) {
           json(response, 401, { error: localizeServerMessage("Brak prawidłowego klucza dostępu.", locale) });
           return;
         }
-        if (request.method !== "GET" && !hasValidOrigin(request)) {
+        if (request.headers.origin && !hasValidOrigin(request, options.publicOrigin)) {
           json(response, 403, { error: localizeServerMessage("Odrzucono żądanie z obcego originu.", locale) });
           return;
         }
@@ -370,6 +368,7 @@ export function createControllerServer(options: {
             "Cache-Control": "no-cache, no-transform",
             Connection: "keep-alive",
             "Content-Type": "text/event-stream",
+            "X-Accel-Buffering": "no",
           });
           options.events.add(response);
           return;

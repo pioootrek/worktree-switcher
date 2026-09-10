@@ -141,6 +141,7 @@ async function main() {
   const packageRoot = join(consumer, "node_modules", "worktree-switcher");
   const cli = join(consumer, "node_modules", ".bin", "worktree-switcher");
   check((await stat(cli)).isFile(), "Installed CLI is missing.");
+  check((await stat(join(packageRoot, "docs", "controller-https.md"))).isFile(), "Installed HTTPS guide is missing.");
   const metadata = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
   await step("native-sqlite", async () => {
     const sqlite = await import(pathToFileURL(join(consumer, "node_modules", "better-sqlite3", "lib", "index.js")));
@@ -197,7 +198,8 @@ async function main() {
 
   let stdout = "";
   let stderr = "";
-  controller = spawn(cli, ["start", "--service-mode", "--no-open", "--host", "127.0.0.1", "--port", String(dashboardPort), "--mcp-port", String(mcpPort), "--browse-root", fixture, ...common], {
+  const publicOrigin = "https://switcher.example.test";
+  controller = spawn(cli, ["start", "--service-mode", "--no-open", "--host", "127.0.0.1", "--port", String(dashboardPort), "--public-url", publicOrigin, "--mcp-port", String(mcpPort), "--browse-root", fixture, ...common], {
     cwd: root, env: { PATH: process.env.PATH, LANG: "C.UTF-8" }, stdio: ["ignore", "pipe", "pipe"],
   });
   controller.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
@@ -213,6 +215,9 @@ async function main() {
   check(!stdout.includes("#token=") && !stdout.includes(SENTINEL), "Controller output exposed a secret.");
 
   const accessUrl = new URL(access.accessUrl);
+  check(accessUrl.origin === publicOrigin, "Packaged controller did not advertise the configured public origin.");
+  check(access.publicDashboardEndpoint === publicOrigin, "Packaged controller did not record its public endpoint.");
+  check(access.localDashboardEndpoint === `http://127.0.0.1:${dashboardPort}`, "Packaged controller did not record its local CLI endpoint.");
   const dashboardToken = check(new URLSearchParams(accessUrl.hash.slice(1)).get("token"), "Dashboard token missing from private access record.");
   await step("packaged-assets", async () => {
     const htmlResponse = await fetch(`http://127.0.0.1:${dashboardPort}/`);

@@ -13,7 +13,7 @@ import { createControllerServer, type ControllerServer } from "./http-server";
 const controllers: ControllerServer[] = [];
 const directories: string[] = [];
 
-async function fixture() {
+async function fixture(options: { publicOrigin?: string } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-http-"));
   directories.push(directory);
   mkdirSync(directory, { recursive: true });
@@ -73,6 +73,7 @@ async function fixture() {
     host: "0.0.0.0",
     port: 0,
     accessToken: "test-access-token",
+    publicOrigin: options.publicOrigin,
   });
   controllers.push(controller);
   await new Promise<void>((resolve, reject) => {
@@ -120,6 +121,41 @@ describe("controller access boundary", () => {
     expect(dashboard).toHaveBeenCalledOnce();
   });
 
+  it("requires the event token in a header and rejects cross-origin event reads", async () => {
+    const { base } = await fixture({ publicOrigin: "https://switcher.example.test" });
+    expect((await fetch(`${base}/api/events?token=test-access-token`)).status).toBe(401);
+    expect((await fetch(`${base}/api/dashboard`, {
+      headers: {
+        Origin: "https://attacker.invalid",
+        "X-Worktree-Switcher-Token": "test-access-token",
+      },
+    })).status).toBe(403);
+    expect((await fetch(`${base}/api/events`, {
+      headers: {
+        Origin: "https://attacker.invalid",
+        "X-Worktree-Switcher-Token": "test-access-token",
+      },
+    })).status).toBe(403);
+    expect((await fetch(`${base}/api/events`, {
+      headers: {
+        Origin: "null",
+        "X-Worktree-Switcher-Token": "test-access-token",
+      },
+    })).status).toBe(403);
+
+    const controller = new AbortController();
+    const response = await fetch(`${base}/api/events`, {
+      headers: {
+        Origin: "https://switcher.example.test",
+        "X-Worktree-Switcher-Token": "test-access-token",
+      },
+      signal: controller.signal,
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+    controller.abort();
+  });
+
   it("serves lightweight runtime metrics without rediscovering worktrees", async () => {
     const { base, dashboard, runtimeMetrics } = await fixture();
     const response = await fetch(`${base}/api/metrics`, {
@@ -163,6 +199,39 @@ describe("controller access boundary", () => {
     });
     expect(response.status).toBe(200);
     expect(refreshProjectMetadata).toHaveBeenCalledWith("project-1");
+  });
+
+  it("authorizes the configured HTTPS origin without trusting Host or forwarding headers", async () => {
+    const { base, refreshProjectMetadata } = await fixture({ publicOrigin: "https://switcher.example.test" });
+    const accepted = await fetch(`${base}/api/projects/project-1/metadata/refresh`, {
+      method: "POST",
+      headers: {
+        Origin: "https://switcher.example.test",
+        Host: "forged.example.test",
+        "Forwarded": "host=forged.example.test;proto=https",
+        "X-Forwarded-Host": "forged.example.test",
+        "X-Forwarded-Proto": "https",
+        "Content-Type": "application/json",
+        "X-Worktree-Switcher-Token": "test-access-token",
+      },
+      body: "{}",
+    });
+    expect(accepted.status).toBe(200);
+    expect(refreshProjectMetadata).toHaveBeenCalledOnce();
+
+    const rejected = await fetch(`${base}/api/projects/project-1/metadata/refresh`, {
+      method: "POST",
+      headers: {
+        Origin: "https://attacker.invalid",
+        Host: "switcher.example.test",
+        "X-Forwarded-Host": "switcher.example.test",
+        "X-Forwarded-Proto": "https",
+        "Content-Type": "application/json",
+        "X-Worktree-Switcher-Token": "test-access-token",
+      },
+      body: "{}",
+    });
+    expect(rejected.status).toBe(403);
   });
 
   it("localizes API errors from Accept-Language", async () => {
