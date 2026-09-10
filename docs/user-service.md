@@ -73,7 +73,11 @@ node dist/cli/index.js service install \
   --memory-warning-mib 1536
 ```
 
-Use `--no-mcp` if you do not want the MCP listener.
+Use `--no-mcp` if you do not want the MCP listener. To publish the dashboard
+through the supported HTTPS reverse-proxy setup, follow
+[Protect the controller with HTTPS](controller-https.md). Its `--public-url`
+mode requires a loopback `--host` and an explicit service refresh when changing
+an existing definition.
 `--memory-warning-mib` adds a visual warning when one managed process group
 reaches the configured aggregate resident-memory threshold. It reports only;
 the controller never terminates a server because of this threshold.
