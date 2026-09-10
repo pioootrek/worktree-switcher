@@ -75,12 +75,38 @@ describe("remote verification submission", () => {
     expect(save).toHaveBeenCalledOnce();
   });
 
-  it("replays the same authorized submission and rejects reuse for another commit", () => {
-    const { service, input, save } = fixture();
+  it("replays the same authorized submission and rejects reuse for different request fields", () => {
+    const { service, input, principals, projects, workers, principalGrants, workerGrants, save } = fixture();
     const first = service.submit(input, { principalId: "owner-1" });
     expect(service.submit(input, { principalId: "owner-1" })).toBe(first);
     expect(save).toHaveBeenCalledOnce();
-    expectCode(() => service.submit({ ...input, commitSha: "a".repeat(40) }, { principalId: "owner-1" }), "idempotency_conflict");
+
+    projects.set("project-2", { id: "project-2", name: "Other project", sourceRemote: "origin", status: "active" });
+    principalGrants.set("owner-1:project-2", {
+      principalId: "owner-1", projectId: "project-2", permissions: ["submit"], revokedAt: null,
+    });
+    workerGrants.set("worker-1:project-2", {
+      workerId: "worker-1", projectId: "project-2", localProjectId: "local-project-2", presetIds: ["node:test"], revokedAt: null,
+    });
+    principals.set("worker-principal-2", { id: "worker-principal-2", kind: "worker", status: "active" });
+    workers.set("worker-2", {
+      id: "worker-2", principalId: "worker-principal-2", name: "Other worker", status: "active", lastContactAt: null,
+    });
+    workerGrants.set("worker-2:project-1", {
+      workerId: "worker-2", projectId: "project-1", localProjectId: "local-project-1", presetIds: ["node:test"], revokedAt: null,
+    });
+    workerGrants.set("worker-1:project-1", {
+      ...workerGrants.get("worker-1:project-1")!, presetIds: ["node:test", "node:check"],
+    });
+
+    for (const conflicting of [
+      { ...input, projectId: "project-2" },
+      { ...input, workerId: "worker-2" },
+      { ...input, presetId: "node:check" },
+      { ...input, commitSha: "a".repeat(40) },
+    ]) {
+      expectCode(() => service.submit(conflicting, { principalId: "owner-1" }), "idempotency_conflict");
+    }
   });
 
   it("rejects abbreviated commits before reading authorization state", () => {
@@ -96,6 +122,21 @@ describe("remote verification submission", () => {
     principals.set("owner-1", { id: "owner-1", kind: "owner", status: "active" });
     principalGrants.delete("owner-1:project-1");
     expectCode(() => service.submit(input, { principalId: "owner-1" }), "project_forbidden");
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("does not let a worker principal submit verification requests", () => {
+    const { service, input, save } = fixture();
+    expectCode(() => service.submit(input, { principalId: "worker-principal-1" }), "principal_forbidden");
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("rejects a worker whose owning principal is revoked or has the wrong kind", () => {
+    const { service, input, principals, save } = fixture();
+    principals.set("worker-principal-1", { id: "worker-principal-1", kind: "worker", status: "revoked" });
+    expectCode(() => service.submit(input, { principalId: "owner-1" }), "worker_unavailable");
+    principals.set("worker-principal-1", { id: "worker-principal-1", kind: "agent", status: "active" });
+    expectCode(() => service.submit(input, { principalId: "owner-1" }), "worker_unavailable");
     expect(save).not.toHaveBeenCalled();
   });
 
