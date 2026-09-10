@@ -10,6 +10,10 @@ for (const locale of ["en", "pl"] as const) {
     if (locale === "pl") await page.getByRole("button", { name: translate("en", "language.label") }).click();
     await expect(page.locator("html")).toHaveAttribute("lang", locale);
     await expect.poll(() => page.evaluate(() => (window as unknown as { fixtureEvents: { active: number } }).fixtureEvents.active)).toBe(1);
+    await expect.poll(() => page.evaluate(() => {
+      const events = (window as unknown as { fixtureEvents: { lastUrl: string; lastToken: string } }).fixtureEvents;
+      return { url: events.lastUrl, token: events.lastToken };
+    })).toEqual({ url: "/api/events", token: "ui-fixture-token" });
     await expect(page).toHaveURL("http://switcher.test/");
 
     await page.getByRole("button", { name: t("metadata.refresh"), exact: true }).click();
@@ -120,10 +124,9 @@ test("an SSE ready event after reconnect reconciles a quiet dashboard", async ({
     await route.fulfill({ json: dashboardFixture() });
   });
   await page.evaluate(() => {
-    (window as unknown as { fixtureEvents: { emit(type: string, data: unknown): void } }).fixtureEvents.emit(
-      "ready", { epoch: "fixture", revision: 2 },
-    );
+    (window as unknown as { fixtureEvents: { disconnect(): void } }).fixtureEvents.disconnect();
   });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { fixtureEvents: { active: number } }).fixtureEvents.active)).toBe(1);
   await expect.poll(() => bootstraps).toBe(1);
 });
 

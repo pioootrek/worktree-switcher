@@ -290,13 +290,9 @@ export interface ControllerServer {
   close(): Promise<void>;
 }
 
-function hasValidToken(request: IncomingMessage, url: URL, expected: string): boolean {
+function hasValidToken(request: IncomingMessage, expected: string): boolean {
   const header = request.headers["x-worktree-switcher-token"];
-  const supplied = typeof header === "string"
-    ? header
-    : url.pathname === "/api/events"
-      ? url.searchParams.get("token")
-      : null;
+  const supplied = typeof header === "string" ? header : null;
   if (!supplied) return false;
   const actualBuffer = Buffer.from(supplied);
   const expectedBuffer = Buffer.from(expected);
@@ -333,11 +329,11 @@ export function createControllerServer(options: {
     try {
       if (url.pathname.startsWith("/api/")) {
         response.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
-        if (!hasValidToken(request, url, options.accessToken)) {
+        if (!hasValidToken(request, options.accessToken)) {
           json(response, 401, { error: localizeServerMessage("Brak prawidłowego klucza dostępu.", locale) });
           return;
         }
-        if (request.method !== "GET" && !hasValidOrigin(request, options.publicOrigin)) {
+        if (request.headers.origin && !hasValidOrigin(request, options.publicOrigin)) {
           json(response, 403, { error: localizeServerMessage("Odrzucono żądanie z obcego originu.", locale) });
           return;
         }
@@ -372,6 +368,7 @@ export function createControllerServer(options: {
             "Cache-Control": "no-cache, no-transform",
             Connection: "keep-alive",
             "Content-Type": "text/event-stream",
+            "X-Accel-Buffering": "no",
           });
           options.events.add(response);
           return;

@@ -46,23 +46,58 @@ export async function mountDashboard(page: Page) {
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => {
     // The fixture owns event delivery; count subscriptions to catch accidental duplication.
-    const sources = new Set<EventTarget>();
+    const nativeFetch = window.fetch.bind(window);
+    const encoder = new TextEncoder();
+    const streams = new Set<{ send(frame: string): void; disconnect(): void }>();
     const events = {
       active: 0,
+      lastUrl: "",
+      lastToken: "",
       emit(type: string, data: unknown = {}) {
-        for (const source of sources) source.dispatchEvent(new MessageEvent(type, { data: JSON.stringify(data) }));
+        const frame = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+        for (const stream of streams) stream.send(frame);
       },
+      disconnect() { for (const stream of [...streams]) stream.disconnect(); },
     };
     Object.assign(window, { fixtureEvents: events });
-    window.EventSource = class extends EventTarget {
-      constructor() {
-        super();
-        events.active += 1;
-        sources.add(this);
-        queueMicrotask(() => this.dispatchEvent(new MessageEvent("ready", { data: JSON.stringify({ epoch: "fixture", revision: 0 }) })));
-      }
-      close() { events.active -= 1; sources.delete(this); }
-    } as unknown as typeof EventSource;
+    window.fetch = (async (input, init) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.href);
+      if (url.pathname !== "/api/events") return nativeFetch(input, init);
+      events.lastUrl = `${url.pathname}${url.search}`;
+      events.lastToken = new Headers(init?.headers).get("X-Worktree-Switcher-Token") ?? "";
+      if (events.lastToken !== "ui-fixture-token") return new Response("Unauthorized", { status: 401 });
+      let streamController: ReadableStreamDefaultController<Uint8Array>;
+      let connected = true;
+      const cleanup = () => {
+        if (!connected) return;
+        connected = false;
+        streams.delete(connection);
+        events.active -= 1;
+      };
+      const connection = {
+        send(frame: string) { if (connected) streamController.enqueue(encoder.encode(frame)); },
+        disconnect() {
+          if (!connected) return;
+          streamController.close();
+          cleanup();
+        },
+      };
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          streamController = controller;
+          streams.add(connection);
+          events.active += 1;
+          queueMicrotask(() => connection.send("event: ready\ndata: {\"epoch\":\"fixture\",\"revision\":0}\n\n"));
+        },
+        cancel: cleanup,
+      });
+      init?.signal?.addEventListener("abort", () => {
+        if (!connected) return;
+        streamController.error(init.signal?.reason);
+        cleanup();
+      }, { once: true });
+      return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+    }) as typeof fetch;
   });
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
