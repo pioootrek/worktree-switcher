@@ -19,6 +19,7 @@ connects the application modules; existing constructor arguments remain valid.
 | Test environment filtering and preset assignment | `src/server/modules/environments/` and `verification/` | `src/features/verification/` | `pnpm test src/server/modules/environments src/server/test-job-manager.test.ts` |
 | Runtime start/stop/switch or TLS | `src/server/modules/runtime/` and shared `lifecycle/` | `src/features/runtime/` and project-card composition | `pnpm test src/server/control-service-capacity.test.ts src/server/control-service-agent.test.ts src/server/modules/lifecycle` |
 | Test-run SQL or storage history | `src/server/infrastructure/sqlite/test-run-queries.ts` or `storage-queries.ts` | Owning feature, if payload presentation changes | `pnpm test src/server/infrastructure/sqlite` |
+| Remote verification admission and identity storage | `src/server/modules/remote-verification/` and `src/server/infrastructure/sqlite/remote-verification-queries.ts` | None until a transport slice is implemented | `pnpm test src/server/modules/remote-verification src/server/infrastructure/sqlite` |
 | Schema upgrade | `src/server/infrastructure/sqlite/migrations.ts` | None | `pnpm test src/server/infrastructure/sqlite` |
 | Session, event subscription, dashboard refresh | `src/features/dashboard/use-dashboard.ts` | `src/features/dashboard/dashboard.tsx` | `pnpm build` followed by `pnpm test:ui` |
 | Dashboard read projection and Git refresh admission | `src/server/modules/dashboard/` and `src/server/git-worktrees.ts` | `src/features/dashboard/use-dashboard.ts` | `pnpm test src/server/modules/dashboard src/server/control-service-dashboard.test.ts src/server/events.test.ts` |
@@ -55,6 +56,13 @@ and migrations, and lends the connection to query helpers. Helpers do not close
 it. Reservation and profile transactions stay with the owner; storage retention
 keeps its existing transaction. `src/server/sqlite-store.ts` remains a compatible
 public entry point. SQL mapping types are internal persistence records.
+
+`RemoteVerificationService` accepts an authenticated principal supplied by a
+future transport and checks both principal and worker grants before persisting a
+full-SHA request. `RemoteVerificationQueries` uses the controller's existing
+SQLite connection. Its create-or-replay transaction owns the unique
+principal/idempotency-key boundary. This slice does not connect workers or run
+remote commands.
 
 ## Verification commands
 

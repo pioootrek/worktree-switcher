@@ -12,6 +12,7 @@ export type {
   RemoteVerificationActor,
   RemoteVerificationAttempt,
   RemoteVerificationAttemptPhase,
+  RemoteVerificationProvisioningStore,
   RemoteVerificationRequest,
   RemoteVerificationRequestPhase,
   RemoteVerificationStore,
