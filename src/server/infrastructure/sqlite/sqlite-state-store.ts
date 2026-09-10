@@ -1,5 +1,15 @@
 import type { PendingTestRun, ProjectRegistration, ReservationRequest, StateStore, TestRunStatusRecord, WorktreeStorageSample } from "@/server/state-store";
 import type { Project, Reservation, ServerCapacitySettings, TestEnvironmentProfile, TestQueueSettings, TestRun, TestRunPhase, WorktreeStorageSnapshot } from "@/shared/contracts";
+import type {
+  RemotePrincipal,
+  RemotePrincipalProjectGrant,
+  RemoteProjectIdentity,
+  RemoteVerificationProvisioningStore,
+  RemoteVerificationRequest,
+  RemoteVerificationStore,
+  RemoteWorkerProjectGrant,
+  RemoteWorkerRegistration,
+} from "@/server/modules/remote-verification";
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -7,13 +17,15 @@ import { dirname } from "node:path";
 import { initializeSchema } from "./migrations";
 import { mapProject, type ProjectRow } from "./project-mapping";
 import { equalHash, mapReservation, type ReservationRow } from "./reservation-mapping";
+import { RemoteVerificationQueries } from "./remote-verification-queries";
 import { StorageQueries } from "./storage-queries";
 import { TestRunQueries } from "./test-run-queries";
 
-export class SqliteStateStore implements StateStore {
+export class SqliteStateStore implements StateStore, RemoteVerificationStore, RemoteVerificationProvisioningStore {
   private readonly database: Database.Database;
   private readonly testRuns: TestRunQueries;
   private readonly storage: StorageQueries;
+  private readonly remoteVerification: RemoteVerificationQueries;
 
   constructor(databasePath: string) {
     mkdirSync(dirname(databasePath), { recursive: true });
@@ -24,6 +36,7 @@ export class SqliteStateStore implements StateStore {
     initializeSchema(this.database);
     this.testRuns = new TestRunQueries(this.database);
     this.storage = new StorageQueries(this.database);
+    this.remoteVerification = new RemoteVerificationQueries(this.database);
   }
 
   listProjects(): Project[] {
@@ -303,6 +316,54 @@ export class SqliteStateStore implements StateStore {
 
   markInterruptedTestRuns(): void {
     return this.testRuns.markInterruptedTestRuns();
+  }
+
+  getRemotePrincipal(id: string): RemotePrincipal | null {
+    return this.remoteVerification.getRemotePrincipal(id);
+  }
+
+  saveRemotePrincipal(principal: RemotePrincipal): void {
+    this.remoteVerification.saveRemotePrincipal(principal);
+  }
+
+  getRemoteProjectIdentity(id: string): RemoteProjectIdentity | null {
+    return this.remoteVerification.getRemoteProjectIdentity(id);
+  }
+
+  saveRemoteProjectIdentity(project: RemoteProjectIdentity): void {
+    this.remoteVerification.saveRemoteProjectIdentity(project);
+  }
+
+  getRemoteWorker(id: string): RemoteWorkerRegistration | null {
+    return this.remoteVerification.getRemoteWorker(id);
+  }
+
+  saveRemoteWorker(worker: RemoteWorkerRegistration): void {
+    this.remoteVerification.saveRemoteWorker(worker);
+  }
+
+  getRemotePrincipalProjectGrant(principalId: string, projectId: string): RemotePrincipalProjectGrant | null {
+    return this.remoteVerification.getRemotePrincipalProjectGrant(principalId, projectId);
+  }
+
+  saveRemotePrincipalProjectGrant(grant: RemotePrincipalProjectGrant): void {
+    this.remoteVerification.saveRemotePrincipalProjectGrant(grant);
+  }
+
+  getRemoteWorkerProjectGrant(workerId: string, projectId: string): RemoteWorkerProjectGrant | null {
+    return this.remoteVerification.getRemoteWorkerProjectGrant(workerId, projectId);
+  }
+
+  saveRemoteWorkerProjectGrant(grant: RemoteWorkerProjectGrant): void {
+    this.remoteVerification.saveRemoteWorkerProjectGrant(grant);
+  }
+
+  findRemoteVerificationRequestByIdempotency(principalId: string, idempotencyKey: string): RemoteVerificationRequest | null {
+    return this.remoteVerification.findRemoteVerificationRequestByIdempotency(principalId, idempotencyKey);
+  }
+
+  createOrReplayRemoteVerificationRequest(request: RemoteVerificationRequest): RemoteVerificationRequest {
+    return this.remoteVerification.createOrReplayRemoteVerificationRequest(request);
   }
 
   getWorktreeStorage(projectId: string, worktreePath: string): WorktreeStorageSnapshot | null {

@@ -94,3 +94,11 @@ export interface RemoteVerificationStore {
   /** Atomically creates the request or returns the request that already owns its principal/key pair. */
   createOrReplayRemoteVerificationRequest(request: RemoteVerificationRequest): RemoteVerificationRequest;
 }
+
+export interface RemoteVerificationProvisioningStore {
+  saveRemotePrincipal(principal: RemotePrincipal): void;
+  saveRemoteProjectIdentity(project: RemoteProjectIdentity): void;
+  saveRemoteWorker(worker: RemoteWorkerRegistration): void;
+  saveRemotePrincipalProjectGrant(grant: RemotePrincipalProjectGrant): void;
+  saveRemoteWorkerProjectGrant(grant: RemoteWorkerProjectGrant): void;
+}
