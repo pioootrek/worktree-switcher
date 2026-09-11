@@ -5,6 +5,7 @@
   const state = byId("state");
   const count = byId("count");
   const density = byId("density");
+  const theme = byId("theme");
   const rows = byId("rows");
   const pageSize = 10;
   let page = 0;
@@ -82,10 +83,19 @@
   byId("previous").addEventListener("click", () => { page -= 1; render(); });
   byId("next").addEventListener("click", () => { page += 1; render(); });
   byId("reset").addEventListener("click", () => { search.value = ""; state.value = "all"; page = 0; render(); });
+  function applyTheme() {
+    document.documentElement.dataset.theme = theme.value;
+    const tokens = getComputedStyle(document.documentElement);
+    for (const label of document.querySelectorAll("[data-token]")) {
+      label.textContent = tokens.getPropertyValue(label.dataset.token).trim().toUpperCase();
+    }
+  }
+  theme.addEventListener("change", applyTheme);
   for (const button of document.querySelectorAll("[data-demo]")) {
     button.addEventListener("click", () => {
       byId("demo-message").textContent = `${button.dataset.demo}: przykład wyglądu. Nie wykonano żadnej operacji.`;
     });
   }
+  applyTheme();
   render();
 })();

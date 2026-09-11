@@ -4,6 +4,14 @@ Open `index.html` directly in a browser. It uses local files only and needs no
 installation, build, development server, API, credentials or network connection.
 Keep it beside `docs/` when copying it so the approved image link still works.
 
+Use **Motyw: Ciemny / Jasny** in the header to compare themes. Both share the
+lime action fill; light mode uses darker accent text, status colors and focus
+rings for contrast. Palette labels follow the active theme. Theme changes keep
+the current filters, page, density and selection. Refresh starts in dark mode
+unless the browser restores the select value; no preference is persisted by
+the catalog. The approved bitmap always retains its original dark appearance.
+The light palette is a proposed companion, awaiting visual review.
+
 This directory is a visual reference and experimentation space, separate from
 the application. Its HTML specimens describe appearance and interaction ideas;
 they are not production shadcn components or a second implementation to import.
@@ -53,6 +61,10 @@ decision. The catalog labels that distinction visibly.
 
 - Open `index.html` with networking disabled; the reference image and local
   styles should still load.
+- Change the theme after filtering and selecting a row. The table state should
+  stay unchanged. Check palette labels, button hover, focus, native form controls,
+  muted text and warning/error states in both themes. The reference image must
+  remain unchanged.
 - Switch between 30 and 300 fictional projects and both densities. Search for
   `projekt 029`, use the server-state filter and browse pages. Clear the filters
   and confirm a no-results state is distinguishable from an empty registry.
