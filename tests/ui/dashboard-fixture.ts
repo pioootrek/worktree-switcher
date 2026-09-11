@@ -37,10 +37,9 @@ export function dashboardFixture(): ControllerDashboardResponse {
 }
 
 /** Loads the real static export into Chromium; no HTTP listener or controller is started. */
-export async function mountDashboard(page: Page) {
+export async function mountDashboard(page: Page, data = dashboardFixture()) {
   const webRoot = resolve("out");
   if (!existsSync(resolve(webRoot, "index.html"))) throw new Error("Run pnpm build before pnpm test:ui.");
-  const data = dashboardFixture();
   const requests: Array<{ path: string; method: string; body: unknown }> = [];
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));

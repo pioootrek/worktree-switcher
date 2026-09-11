@@ -34,7 +34,7 @@ export function Dashboard() {
               <h1 className="text-2xl font-semibold tracking-tight">Worktree Switcher</h1>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex max-w-full flex-wrap items-center gap-2">
             <Badge variant="outline" className="h-9 gap-2 px-3 font-normal">
               <span className="relative flex size-2">
                 <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-50 motion-reduce:animate-none" />

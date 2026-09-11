@@ -27,6 +27,43 @@ afterEach(() => {
 });
 
 describe("SqliteStateStore", () => {
+  it("repairs a legacy database whose recorded migration 7 omitted the launch preset column", () => {
+    const directory = mkdtempSync(join(tmpdir(), "switcher-preset-repair-"));
+    directories.push(directory);
+    const path = join(directory, "state.sqlite3");
+    const initial = new SqliteStateStore(path);
+    const project = initial.addProject(projectInput("Legacy", "/code/legacy", 3218));
+    initial.close();
+    const legacy = new Database(path);
+    legacy.exec("DELETE FROM schema_migrations WHERE version > 12; ALTER TABLE projects DROP COLUMN launch_preset;");
+    legacy.close();
+    const repaired = new SqliteStateStore(path);
+    expect(repaired.getProject(project.id)?.launchPreset).toBe("node");
+    expect(repaired.listProjects()[0].launchPreset).toBe("node");
+    const django = repaired.addProject({ ...projectInput("Django", "/code/django", 3217), launchPreset: "django" });
+    repaired.close();
+    const reopened = new SqliteStateStore(path);
+    expect(reopened.getProject(django.id)?.launchPreset).toBe("django");
+    reopened.close();
+  });
+
+  it("preserves existing launch presets when applying the repair migration", () => {
+    const directory = mkdtempSync(join(tmpdir(), "switcher-preset-existing-"));
+    directories.push(directory);
+    const path = join(directory, "state.sqlite3");
+    const initial = new SqliteStateStore(path);
+    const auto = initial.addProject({ ...projectInput("Auto", "/code/auto", 3216), launchPreset: "auto" });
+    const django = initial.addProject({ ...projectInput("Django", "/code/django", 3217), launchPreset: "django" });
+    initial.close();
+    const legacy = new Database(path);
+    legacy.exec("DELETE FROM schema_migrations WHERE version = 13");
+    legacy.close();
+    const repaired = new SqliteStateStore(path);
+    expect(repaired.getProject(auto.id)?.launchPreset).toBe("auto");
+    expect(repaired.getProject(django.id)?.launchPreset).toBe("django");
+    repaired.close();
+  });
+
   it("persists test queue settings, run output, and interruption recovery", () => {
     const store = createStore();
     const project = store.addProject(projectInput("Tests", "/code/tests", 3219));
