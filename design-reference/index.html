@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pl">
+<html lang="pl" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -15,6 +15,9 @@
     <nav aria-label="Sekcje katalogu">
       <a href="#reference">Wzorzec</a><a href="#tokens">Podstawy</a><a href="#components">Komponenty</a><a href="#playground">Tabela</a>
     </nav>
+    <label class="theme-control" for="theme">Motyw
+      <select id="theme"><option value="dark">Ciemny</option><option value="light">Jasny</option></select>
+    </label>
   </header>
   <main id="main">
     <section id="reference" aria-labelledby="reference-title">
@@ -30,19 +33,19 @@
         <summary>Pokaż oryginalną makietę</summary>
         <figure>
           <img src="../docs/backlog/notes/NOTE-20260911-approved-gui-direction/approved-project-worktrees.png" alt="Zatwierdzony ciemny widok projektu Customer Portal: serwer działa na main, a feat/checkout jest wybranym celem przełączenia; akcent limonkowy, tabela worktrees i osobny pasek operacji." width="1488" height="1056">
-          <figcaption>Zatwierdzona makieta. Przykładowe dane. Oryginalny plik pozostaje w zapisie decyzji.</figcaption>
+          <figcaption>Zatwierdzona makieta w trybie ciemnym. Przełącznik motywu zmienia katalog i próbki, nie oryginalny obraz.</figcaption>
         </figure>
       </details>
     </section>
     <section id="tokens" aria-labelledby="tokens-title">
       <span class="eyebrow">Robocza interpretacja</span>
       <h2 id="tokens-title">Kolory i typografia</h2>
-      <p class="muted">Antracyt, czytelny tekst i oszczędna limonka. Konkretne wartości tokenów są propozycją do oceny, nie nową zatwierdzoną paletą.</p>
+      <p class="muted">Antracyt w trybie ciemnym, jasne neutralne powierzchnie w trybie jasnym i wspólny limonkowy akcent. Jasny wariant oraz konkretne wartości tokenów są propozycją do oceny.</p>
       <div class="palette">
-        <div><div class="swatch" style="background:var(--background)"></div>Tło <code>#181A18</code></div>
-        <div><div class="swatch" style="background:var(--surface)"></div>Powierzchnia <code>#202320</code></div>
-        <div><div class="swatch" style="background:var(--primary)"></div>Akcent <code>#C5E76C</code></div>
-        <div><div class="swatch" style="background:var(--foreground)"></div>Tekst <code>#ECEFE6</code></div>
+        <div><div class="swatch" style="background:var(--background)"></div>Tło <code data-token="--background">#181A18</code></div>
+        <div><div class="swatch" style="background:var(--surface)"></div>Powierzchnia <code data-token="--surface">#202320</code></div>
+        <div><div class="swatch" style="background:var(--primary)"></div>Akcent <code data-token="--primary">#C5E76C</code></div>
+        <div><div class="swatch" style="background:var(--foreground)"></div>Tekst <code data-token="--foreground">#ECEFE6</code></div>
       </div>
       <h3>Customer Portal</h3>
       <p>Tekst interfejsu pozostaje czytelny również w gęstej tabeli.</p>
