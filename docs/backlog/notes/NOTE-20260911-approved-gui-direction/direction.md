@@ -73,3 +73,11 @@ The source generation identifier and file checksum are recorded in `note.json`.
 Keep this image in the repository rather than relying on the conversation's
 generated-image storage. Supersede this direction only when the owner adopts
 a replacement, preserving the decision history.
+
+## Reference catalog
+
+The owner requested a separate space for examples and design experiments.
+[design-reference](../../../../design-reference/README.md) contains a local HTML
+catalog with this exact image, working tokens, component specimens and a
+fictional 30/300-project table. Its samples remain proposed interpretations;
+the catalog does not replace the approved image or form part of the application.

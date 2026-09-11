@@ -1,0 +1,22 @@
+/* Working interpretation of the approved image, not production/approved tokens. */
+:root {
+  color-scheme: dark;
+  --background: #181a18;
+  --foreground: #ecefe6;
+  --surface: #202320;
+  --muted: #292d28;
+  --muted-foreground: #b1b8ad;
+  --primary: #c5e76c;
+  --primary-foreground: #181a18;
+  --selected: #303a22;
+  --border: #444b40;
+  --input: #75806d;
+  --ring: #c5e76c;
+  --success: #a4d883;
+  --warning: #f1c56c;
+  --destructive: #ff9592;
+  --radius: 4px;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  --row-padding: 15px;
+}
