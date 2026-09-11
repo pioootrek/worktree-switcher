@@ -35,6 +35,16 @@
       "author": "agent:codex",
       "date": "2026-09-09",
       "text": "NOTE-20260909-self-hosted-saas-plan/implementation-plan.md records the proposed implementation and gates: address/HTTPS contracts, authenticated remote execution, organization isolation and deployment/restore acceptance. HTTPS owns stage 1; remote execution requires minimum authorization before networking and precedes public multi-tenant hosting. Customer-owned execution is a proposed initial boundary. Planning only; this feature remains open."
+    },
+    {
+      "author": "human:pioootrek",
+      "date": "2026-09-11",
+      "text": "Requested the implementation plan; expects the worker to fetch/update project code to the requested commit automatically when needed."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-11",
+      "text": "Detailed plan at NOTE-20260909-self-hosted-saas-plan/remote-verification-implementation.md (baseline d429eb9): six gated slices from durable identity/grants through worker-owned exact-SHA preparation, existing queue integration, outbound dispatch/recovery, MCP/CLI/UI, and installation acceptance. Automatic source fetching uses isolated attempt workspaces; never moves active worktrees or substitutes branch HEAD. Early tests cover authorization, source drift, dependency setup, duplicate delivery, offline cancellation, restarts and retention. Planning only; next implementation slice is identity/grants/state contracts."
     }
   ],
   "priority": "next",

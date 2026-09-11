@@ -137,7 +137,8 @@
       "author": "agent:codex",
       "created": "2026-09-09",
       "files": [
-        "implementation-plan.md"
+        "implementation-plan.md",
+        "remote-verification-implementation.md"
       ],
       "id": "NOTE-20260909-self-hosted-saas-plan",
       "path": "notes/NOTE-20260909-self-hosted-saas-plan",

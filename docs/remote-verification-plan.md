@@ -1,6 +1,6 @@
 ---
 audience: "owner, contributors, and coding agents"
-last_reviewed: "2026-09-05"
+last_reviewed: "2026-09-11"
 source_of_truth: "remote verification and worker direction from the owner discussion on 2026-09-05"
 status: "active"
 ---
@@ -119,6 +119,11 @@ cancellation or releasing capacity. A restarted attempt cannot be reported as
 completion of the original check.
 
 ## Delivery and verification
+
+The [implementation slices and acceptance gates](backlog/notes/NOTE-20260909-self-hosted-saas-plan/remote-verification-implementation.md)
+expand this direction against baseline `d429eb9`: automatic worker-owned source
+preparation, six delivery slices, early failure tests and explicit recovery rules.
+Worker source updates do not update its own executable or move a dev checkout.
 
 The [architecture and effort assessment](architecture-effort-assessment.md)
 estimates a narrow remote-worker slice and identifies enabling refactors.
