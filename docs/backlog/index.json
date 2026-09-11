@@ -135,6 +135,25 @@
   "notes": [
     {
       "author": "agent:codex",
+      "created": "2026-09-11",
+      "files": [
+        "approved-project-worktrees.png",
+        "direction.md"
+      ],
+      "id": "NOTE-20260911-approved-gui-direction",
+      "path": "notes/NOTE-20260911-approved-gui-direction",
+      "status": "active",
+      "tags": [
+        "design",
+        "gui",
+        "owner-approved",
+        "shadcn",
+        "visual-reference"
+      ],
+      "title": "Owner-approved GUI direction: charcoal and restrained lime"
+    },
+    {
+      "author": "agent:codex",
       "created": "2026-09-09",
       "files": [
         "implementation-plan.md",
