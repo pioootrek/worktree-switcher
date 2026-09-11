@@ -71,6 +71,7 @@ describe("SystemRemoteVerificationWorkspacePreparer", () => {
     expect(git(workspace.path, "rev-parse", "HEAD")).toBe(setup.firstCommit);
     expect(git(workspace.path, "branch", "--show-current")).toBe("");
     expect(git(workspace.path, "status", "--porcelain")).toBe("");
+    expect(existsSync(join(workspace.path, ".git", "objects", "info", "alternates"))).toBe(false);
     expect(readFileSync(join(workspace.path, "revision.txt"), "utf8")).toBe("first\n");
     expect(git(setup.worker, "rev-parse", "HEAD")).toBe(developmentHead);
     expect(readFileSync(join(setup.worker, "local-edit.txt"), "utf8")).toBe("do not touch\n");
@@ -89,6 +90,25 @@ describe("SystemRemoteVerificationWorkspacePreparer", () => {
     await preparer.cleanup(recreated);
     expect(existsSync(workspace.path)).toBe(false);
     expect(readFileSync(join(setup.workspaceRoot, "unrelated.txt"), "utf8")).toBe("keep\n");
+  });
+
+  it("reclaims an orphaned request workspace before retrying preparation", async () => {
+    const setup = fixture();
+    const orphan = join(setup.workspaceRoot, "request-orphan");
+    mkdirSync(orphan, { recursive: true });
+    writeFileSync(join(orphan, "partial-clone.txt"), "orphaned\n");
+    const preparer = new SystemRemoteVerificationWorkspacePreparer(setup.workspaceRoot, new GitCommandAdmission());
+
+    const workspace = await preparer.prepare({
+      requestId: "request-orphan",
+      repositoryPath: setup.worker,
+      sourceRemote: "origin",
+      commitSha: setup.firstCommit,
+    });
+
+    expect(git(workspace.path, "rev-parse", "HEAD")).toBe(setup.firstCommit);
+    expect(existsSync(join(workspace.path, "partial-clone.txt"))).toBe(false);
+    await preparer.cleanup(workspace);
   });
 
   it("rejects a missing source and an unavailable commit without falling back to branch HEAD", async () => {

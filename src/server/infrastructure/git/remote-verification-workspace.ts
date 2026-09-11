@@ -11,6 +11,7 @@ import { GitCommandAdmission } from "@/server/git-worktrees";
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const COMMIT_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const activeWorkspaceTargets = new Set<string>();
 
 export type RemoteVerificationWorkspaceErrorCode =
   | "invalid_input"
@@ -123,34 +124,40 @@ export class SystemRemoteVerificationWorkspacePreparer implements RemoteVerifica
       throw new RemoteVerificationWorkspaceError("commit_unavailable", "Żądany commit nie jest dostępny w skonfigurowanym źródle.");
     }
 
-    try {
-      await mkdir(target, { mode: 0o700 });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-        throw new RemoteVerificationWorkspaceError("workspace_conflict", "Workspace zlecenia już istnieje.");
-      }
-      throw error;
+    if (activeWorkspaceTargets.has(target)) {
+      throw new RemoteVerificationWorkspaceError("workspace_conflict", "Workspace zlecenia jest już przygotowywany lub używany.");
     }
+    activeWorkspaceTargets.add(target);
+    let prepared = false;
     try {
-      await this.git(["clone", "--quiet", "--no-checkout", "--shared", "--", repositoryPath, target], 60_000);
-      await this.git(["-C", target, "checkout", "--quiet", "--detach", resolvedCommit], 30_000);
-      const executedCommitSha = (await this.git(["-C", target, "rev-parse", "HEAD"], 5_000)).trim().toLowerCase();
-      const status = await this.git(["-C", target, "status", "--porcelain=v1", "--untracked-files=all"], 10_000);
-      if (executedCommitSha !== commitSha || status.length > 0) {
-        throw new RemoteVerificationWorkspaceError("workspace_invalid", "Przygotowany workspace nie odpowiada żądanemu commitowi.");
+      if (await exists(target)) {
+        await rm(target, { recursive: true, force: true });
       }
-      return {
-        requestId,
-        path: await realpath(target),
-        repositoryPath,
-        sourceRemote,
-        requestedCommitSha: commitSha,
-        executedCommitSha,
-      };
-    } catch (error) {
-      await rm(target, { recursive: true, force: true });
-      if (error instanceof RemoteVerificationWorkspaceError) throw error;
-      throw new RemoteVerificationWorkspaceError("workspace_invalid", "Nie udało się przygotować workspace dla zlecenia.");
+      await mkdir(target, { mode: 0o700 });
+      try {
+        await this.git(["clone", "--quiet", "--no-checkout", "--", repositoryPath, target], 60_000);
+        await this.git(["-C", target, "checkout", "--quiet", "--detach", resolvedCommit], 30_000);
+        const executedCommitSha = (await this.git(["-C", target, "rev-parse", "HEAD"], 5_000)).trim().toLowerCase();
+        const status = await this.git(["-C", target, "status", "--porcelain=v1", "--untracked-files=all"], 10_000);
+        if (executedCommitSha !== commitSha || status.length > 0) {
+          throw new RemoteVerificationWorkspaceError("workspace_invalid", "Przygotowany workspace nie odpowiada żądanemu commitowi.");
+        }
+        prepared = true;
+        return {
+          requestId,
+          path: await realpath(target),
+          repositoryPath,
+          sourceRemote,
+          requestedCommitSha: commitSha,
+          executedCommitSha,
+        };
+      } catch (error) {
+        await rm(target, { recursive: true, force: true });
+        if (error instanceof RemoteVerificationWorkspaceError) throw error;
+        throw new RemoteVerificationWorkspaceError("workspace_invalid", "Nie udało się przygotować workspace dla zlecenia.");
+      }
+    } finally {
+      if (!prepared) activeWorkspaceTargets.delete(target);
     }
   }
 
@@ -161,8 +168,11 @@ export class SystemRemoteVerificationWorkspacePreparer implements RemoteVerifica
     if (resolve(workspace.path) !== target) {
       throw new RemoteVerificationWorkspaceError("invalid_input", "Workspace nie należy do katalogu zleceń kontrolera.");
     }
-    if (!await exists(target)) return;
-    await rm(target, { recursive: true, force: true });
+    try {
+      if (await exists(target)) await rm(target, { recursive: true, force: true });
+    } finally {
+      activeWorkspaceTargets.delete(target);
+    }
   }
 
   private identifier(value: string, label: string): string {
