@@ -46,6 +46,7 @@ export function ProjectCard({
   const isBusy = runtime.phase === "starting" || runtime.phase === "stopping" || pending !== null;
   const failureCopy = runtime.failure ? localizedFailure(project, runtime.failure, t) : null;
   const metadata = snapshot.metadata;
+  const hasActiveRuntime = runtime.phase === "running" || runtime.phase === "starting" || runtime.phase === "stopping";
 
   const refreshMetadata = async () => {
     setPending("metadata");
@@ -220,7 +221,8 @@ export function ProjectCard({
               <tbody>
                 {worktrees.map((worktree) => {
                   const chosen = selected === worktree.path;
-                  const active = runtime.worktreePath === worktree.path && runtime.phase !== "stopped";
+                  const located = runtime.worktreePath === worktree.path && runtime.phase !== "stopped";
+                  const running = runtime.worktreePath === worktree.path && runtime.phase === "running";
                   return (
                     <tr
                       key={worktree.path}
@@ -241,7 +243,7 @@ export function ProjectCard({
                       <td className="max-w-[320px] px-3 py-3.5">
                         <div className="flex items-center gap-2">
                           <span className="truncate font-mono font-medium" title={worktree.branch ?? "detached HEAD"}>{worktree.branch ?? "detached HEAD"}</span>
-                          {active && <Badge variant="outline" className="border-primary/25 text-primary">{t("project.active")}</Badge>}
+                          {running && <Badge variant="outline" className="border-primary/25 text-primary">{t("project.active")}</Badge>}
                         </div>
                         <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground" title={worktree.path}>{worktree.path}</p>
                       </td>
@@ -252,7 +254,7 @@ export function ProjectCard({
                         </span>
                       </td>
                       <td className="px-3 py-3.5 font-mono text-xs">{worktree.shortHead}</td>
-                      <td className="px-4 py-3.5 text-muted-foreground">{active ? t(`phase.${runtime.phase}`) : "—"}</td>
+                      <td className="px-4 py-3.5 text-muted-foreground">{located ? t(`phase.${runtime.phase}`) : "—"}</td>
                     </tr>
                   );
                 })}
@@ -301,13 +303,15 @@ export function ProjectCard({
           </div>
         </div>
 
-        <div className="-mx-5 mt-6 flex flex-wrap items-center justify-between gap-4 border-y border-border bg-background/30 px-5 py-4 sm:-mx-6 sm:px-6">
+        <div data-operation-target className="-mx-5 mt-6 flex flex-wrap items-center justify-between gap-4 border-y border-border bg-background/30 px-5 py-4 sm:-mx-6 sm:px-6">
           <div className="min-w-0">
             <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{t("project.operationTarget")}</p>
             <p className="mt-1 truncate font-mono text-sm font-medium" title={selectedWorktree?.path}>{selectedWorktree?.branch ?? t("project.noSelection")} <span className="text-muted-foreground">· {selectedWorktree?.shortHead ?? "—"}</span></p>
           </div>
           <p className="text-sm text-muted-foreground">
-            {runtime.worktreePath && runtime.worktreePath !== selected
+            {!hasActiveRuntime
+              ? t("project.noActiveServer")
+              : runtime.worktreePath && runtime.worktreePath !== selected
               ? t("project.transition", { from: worktrees.find((worktree) => worktree.path === runtime.worktreePath)?.branch ?? "—", to: selectedWorktree?.branch ?? "—" })
               : t("project.noTransition")}
           </p>

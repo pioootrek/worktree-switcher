@@ -34,12 +34,12 @@ export function Dashboard() {
           <a href="#projects" className="relative flex min-h-20 flex-col items-center justify-center gap-2 bg-sidebar-accent text-xs font-medium text-primary before:absolute before:inset-y-0 before:left-0 before:w-1 before:rounded-r-full before:bg-primary">
             <FolderGit2 className="size-5" aria-hidden />{t("dashboard.navProjects")}
           </a>
-          <a href="#projects" className="flex min-h-20 flex-col items-center justify-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground">
+          <span className="flex min-h-20 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
             <FlaskConical className="size-5" aria-hidden />{t("dashboard.navTests")}
-          </a>
-          <a href="#projects" className="flex min-h-20 flex-col items-center justify-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground">
+          </span>
+          <span className="flex min-h-20 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
             <HardDrive className="size-5" aria-hidden />{t("dashboard.navResources")}
-          </a>
+          </span>
         </nav>
         <div className="flex w-full flex-col items-center gap-3 border-t border-border py-5 text-xs text-muted-foreground">
           <Settings2 className="size-5" aria-hidden />{t("dashboard.navSettings")}
@@ -111,9 +111,8 @@ export function Dashboard() {
           </section>
         )}
         </div>
-        <footer className="flex min-h-14 items-center justify-between gap-4 border-t border-border px-4 text-xs text-muted-foreground sm:px-7 lg:px-8">
-          <span className="flex items-center gap-2"><span className="size-2 rounded-full bg-emerald-400" />{t("dashboard.connected")}</span>
-          <span>Worktree Switcher</span>
+        <footer className="flex min-h-14 items-center justify-end border-t border-border px-4 text-xs text-muted-foreground sm:px-7 lg:px-8">
+          Worktree Switcher
         </footer>
       </div>
     </main>

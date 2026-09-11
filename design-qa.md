@@ -24,7 +24,7 @@ The implementation preserves the reference hierarchy: narrow operator navigation
 - Colors/tokens: foundational shadcn tokens now map to neutral charcoal and a single restrained lime primary; amber, red, and green remain semantic states rather than competing brand colors. Light-mode token support remains present.
 - Image quality/assets: the target contains no product photography or custom raster artwork to reproduce. All interface icons use the existing Lucide family; no placeholder, CSS-art, inline-SVG, or generated asset substitutes were introduced.
 - Copy/content: new labels explicitly distinguish the running server from the selected operation target in Polish and English.
-- Accessibility/interactions: project actions, worktree select, row selection, tabs, dialogs, locale switch, focus visibility, long labels, and 390/768/1440 responsive layouts were exercised by the repository Playwright fixture. Its captured page-error list remained empty.
+- Accessibility/interactions: project actions, worktree select, explicit table-row selection, tabs, dialogs, locale switch, focus visibility, long labels, and 390/768/1440 responsive layouts were exercised by the repository Playwright fixture. Its captured page-error list remained empty.
 
 **Findings**
 
