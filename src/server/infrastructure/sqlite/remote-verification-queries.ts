@@ -2,7 +2,9 @@ import type {
   RemotePrincipal,
   RemotePrincipalProjectGrant,
   RemoteProjectIdentity,
+  RemoteVerificationAttempt,
   RemoteVerificationRequest,
+  RemoteVerificationRequestPhase,
   RemoteWorkerProjectGrant,
   RemoteWorkerRegistration,
 } from "@/server/modules/remote-verification";
@@ -37,6 +39,21 @@ type RequestRow = {
   created_at: string;
   updated_at: string;
 };
+type AttemptRow = {
+  id: string;
+  request_id: string;
+  worker_id: string;
+  sequence: number;
+  phase: RemoteVerificationAttempt["phase"];
+  version: number;
+  local_run_id: string | null;
+  executed_commit_sha: string | null;
+  failure_kind: RemoteVerificationAttempt["failureKind"];
+  error_code: string | null;
+  accepted_at: string;
+  last_reported_at: string;
+  finished_at: string | null;
+};
 
 function mapRequest(row: RequestRow): RemoteVerificationRequest {
   return {
@@ -50,6 +67,24 @@ function mapRequest(row: RequestRow): RemoteVerificationRequest {
     phase: row.phase,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function mapAttempt(row: AttemptRow): RemoteVerificationAttempt {
+  return {
+    id: row.id,
+    requestId: row.request_id,
+    workerId: row.worker_id,
+    sequence: row.sequence,
+    phase: row.phase,
+    version: row.version,
+    localRunId: row.local_run_id,
+    executedCommitSha: row.executed_commit_sha,
+    failureKind: row.failure_kind,
+    errorCode: row.error_code,
+    acceptedAt: row.accepted_at,
+    lastReportedAt: row.last_reported_at,
+    finishedAt: row.finished_at,
   };
 }
 
@@ -187,6 +222,11 @@ export class RemoteVerificationQueries {
     return row ? mapRequest(row) : null;
   }
 
+  getRemoteVerificationRequest(id: string): RemoteVerificationRequest | null {
+    const row = this.database.prepare("SELECT * FROM remote_verification_requests WHERE id = ?").get(id) as RequestRow | undefined;
+    return row ? mapRequest(row) : null;
+  }
+
   createOrReplayRemoteVerificationRequest(request: RemoteVerificationRequest): RemoteVerificationRequest {
     return this.database.transaction(() => {
       this.database.prepare(`
@@ -210,6 +250,117 @@ export class RemoteVerificationQueries {
       const persisted = this.findRemoteVerificationRequestByIdempotency(request.requestedBy, request.idempotencyKey);
       if (!persisted) throw new Error("Nie udało się zapisać zlecenia zdalnej weryfikacji.");
       return persisted;
+    }).immediate();
+  }
+
+  getRemoteVerificationAttempt(id: string): RemoteVerificationAttempt | null {
+    const row = this.database.prepare("SELECT * FROM remote_verification_attempts WHERE id = ?").get(id) as AttemptRow | undefined;
+    return row ? mapAttempt(row) : null;
+  }
+
+  findRemoteVerificationAttemptForRequest(requestId: string): RemoteVerificationAttempt | null {
+    const row = this.database.prepare(`
+      SELECT * FROM remote_verification_attempts
+      WHERE request_id = ? ORDER BY sequence DESC LIMIT 1
+    `).get(requestId) as AttemptRow | undefined;
+    return row ? mapAttempt(row) : null;
+  }
+
+  createOrReplayRemoteVerificationAttempt(attempt: RemoteVerificationAttempt): RemoteVerificationAttempt | null {
+    return this.database.transaction(() => {
+      const existing = this.findRemoteVerificationAttemptForRequest(attempt.requestId);
+      if (existing) return existing;
+
+      const request = this.getRemoteVerificationRequest(attempt.requestId);
+      const worker = request ? this.getRemoteWorker(attempt.workerId) : null;
+      const principal = worker ? this.getRemotePrincipal(worker.principalId) : null;
+      const grant = request ? this.getRemoteWorkerProjectGrant(attempt.workerId, request.projectId) : null;
+      if (
+        !request || request.phase !== "pending" || request.workerId !== attempt.workerId
+        || !worker || worker.status !== "active"
+        || !principal || principal.kind !== "worker" || principal.status !== "active"
+        || !grant || grant.revokedAt !== null || !grant.presetIds.includes(request.presetId)
+      ) return null;
+
+      this.database.prepare(`
+        INSERT INTO remote_verification_attempts(
+          id, request_id, worker_id, sequence, phase, version, local_run_id,
+          executed_commit_sha, failure_kind, error_code, accepted_at,
+          last_reported_at, finished_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(request_id, sequence) DO NOTHING
+      `).run(
+        attempt.id,
+        attempt.requestId,
+        attempt.workerId,
+        attempt.sequence,
+        attempt.phase,
+        attempt.version,
+        attempt.localRunId,
+        attempt.executedCommitSha,
+        attempt.failureKind,
+        attempt.errorCode,
+        attempt.acceptedAt,
+        attempt.lastReportedAt,
+        attempt.finishedAt,
+      );
+      const persisted = this.findRemoteVerificationAttemptForRequest(attempt.requestId);
+      if (!persisted) return null;
+      this.database.prepare(`
+        UPDATE remote_verification_requests SET phase = 'assigned', updated_at = ?
+        WHERE id = ? AND phase = 'pending'
+      `).run(attempt.acceptedAt, attempt.requestId);
+      return persisted;
+    }).immediate();
+  }
+
+  updateRemoteVerificationAttempt(
+    attempt: RemoteVerificationAttempt,
+    expectedVersion: number,
+    requestPhase: RemoteVerificationRequestPhase,
+  ): boolean {
+    return this.database.transaction(() => {
+      const result = this.database.prepare(`
+        UPDATE remote_verification_attempts SET
+          phase = ?, version = ?, local_run_id = ?, executed_commit_sha = ?,
+          failure_kind = ?, error_code = ?, last_reported_at = ?, finished_at = ?
+        WHERE id = ? AND version = ?
+      `).run(
+        attempt.phase,
+        attempt.version,
+        attempt.localRunId,
+        attempt.executedCommitSha,
+        attempt.failureKind,
+        attempt.errorCode,
+        attempt.lastReportedAt,
+        attempt.finishedAt,
+        attempt.id,
+        expectedVersion,
+      );
+      if (result.changes === 0) return false;
+      this.database.prepare(`
+        UPDATE remote_verification_requests SET phase = ?, updated_at = ?
+        WHERE id = ? AND phase = 'assigned'
+      `).run(requestPhase, attempt.lastReportedAt, attempt.requestId);
+      return true;
+    }).immediate();
+  }
+
+  markRemoteVerificationAttemptsUncertain(observedAt: string): number {
+    return this.database.transaction(() => {
+      const result = this.database.prepare(`
+        UPDATE remote_verification_attempts SET
+          phase = 'uncertain', version = version + 1, last_reported_at = ?, finished_at = NULL
+        WHERE phase IN ('assigned', 'preparing', 'running', 'cancel_requested')
+      `).run(observedAt);
+      if (result.changes > 0) {
+        this.database.prepare(`
+          UPDATE remote_verification_requests SET phase = 'assigned', updated_at = ?
+          WHERE id IN (SELECT request_id FROM remote_verification_attempts WHERE phase = 'uncertain')
+            AND phase NOT IN ('completed', 'cancelled')
+        `).run(observedAt);
+      }
+      return result.changes;
     }).immediate();
   }
 

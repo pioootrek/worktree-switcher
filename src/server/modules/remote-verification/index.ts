@@ -3,7 +3,13 @@ export {
   RemoteVerificationService,
   type RemoteVerificationErrorCode,
 } from "./remote-verification-service";
+export {
+  RemoteVerificationAttemptError,
+  RemoteVerificationAttemptService,
+  type RemoteVerificationAttemptErrorCode,
+} from "./remote-verification-attempt-service";
 export type {
+  AssignRemoteVerificationAttemptInput,
   RemoteIdentityStatus,
   RemotePrincipal,
   RemotePrincipalKind,
@@ -12,6 +18,7 @@ export type {
   RemoteVerificationActor,
   RemoteVerificationAttempt,
   RemoteVerificationAttemptPhase,
+  RemoteVerificationAttemptStore,
   RemoteVerificationProvisioningStore,
   RemoteVerificationRequest,
   RemoteVerificationRequestPhase,
@@ -21,5 +28,6 @@ export type {
   RemoteWorkerProjectGrant,
   RemoteWorkerRegistration,
   PrepareRemoteVerificationWorkspaceInput,
+  ReportRemoteVerificationAttemptInput,
   SubmitRemoteVerificationInput,
 } from "./contracts";
