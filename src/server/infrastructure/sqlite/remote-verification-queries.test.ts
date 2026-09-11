@@ -94,7 +94,12 @@ function attemptService(store: SqliteStateStore, times: string[], ids: string[] 
     () => ids[Math.min(idIndex++, ids.length - 1)]!,
   );
   return {
-    assign: service.assign.bind(service),
+    assign: (input: Parameters<RemoteVerificationAttemptService["assign"]>[0]) => (
+      service.assign(input, { principalId: "worker-principal-1" })
+    ),
+    assignAs: (input: Parameters<RemoteVerificationAttemptService["assign"]>[0], principalId: string) => (
+      service.assign(input, { principalId })
+    ),
     report: (input: Parameters<RemoteVerificationAttemptService["report"]>[0]) => (
       service.report(input, { principalId: "worker-principal-1" })
     ),
@@ -357,6 +362,30 @@ describe("remote verification SQLite persistence", () => {
       phase: "preparing",
     }, "worker-principal-2"), "worker_forbidden");
     expect(store.getRemoteVerificationAttempt(assigned.id)).toEqual(assigned);
+    store.close();
+  });
+
+  it("rejects assignment by an authenticated non-owning worker", () => {
+    const path = databasePath();
+    const store = new SqliteStateStore(path);
+    provision(store);
+    store.saveRemotePrincipal({ id: "worker-principal-2", kind: "worker", status: "active" }, "local-user");
+    store.saveRemoteWorker({
+      id: "worker-2",
+      principalId: "worker-principal-2",
+      name: "Other worker",
+      status: "active",
+      lastContactAt: null,
+    }, "local-user");
+    const accepted = submit(store);
+    const service = attemptService(store, ["2026-09-11T00:01:00.000Z"]);
+
+    expectAttemptCode(() => service.assignAs({
+      requestId: accepted.id,
+      workerId: "worker-1",
+    }, "worker-principal-2"), "worker_forbidden");
+    expect(store.findRemoteVerificationAttemptForRequest(accepted.id)).toBeNull();
+    expect(store.getRemoteVerificationRequest(accepted.id)?.phase).toBe("pending");
     store.close();
   });
 

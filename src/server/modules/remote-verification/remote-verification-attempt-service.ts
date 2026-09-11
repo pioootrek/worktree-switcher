@@ -61,7 +61,7 @@ export class RemoteVerificationAttemptService {
     private readonly createId: () => string = randomUUID,
   ) {}
 
-  assign(input: AssignRemoteVerificationAttemptInput): RemoteVerificationAttempt {
+  assign(input: AssignRemoteVerificationAttemptInput, actor: RemoteVerificationActor): RemoteVerificationAttempt {
     const requestId = requiredText(input.requestId, "Identyfikator zlecenia");
     const workerId = requiredText(input.workerId, "Identyfikator workera");
     const request = this.store.getRemoteVerificationRequest(requestId);
@@ -73,7 +73,10 @@ export class RemoteVerificationAttemptService {
     const worker = this.store.getRemoteWorker(workerId);
     const workerPrincipal = worker ? this.store.getRemotePrincipal(worker.principalId) : null;
     const grant = this.store.getRemoteWorkerProjectGrant(workerId, request.projectId);
-    if (!worker || worker.status !== "active" || !workerPrincipal || workerPrincipal.kind !== "worker" || workerPrincipal.status !== "active") {
+    if (
+      !worker || worker.status !== "active" || worker.principalId !== actor.principalId
+      || !workerPrincipal || workerPrincipal.kind !== "worker" || workerPrincipal.status !== "active"
+    ) {
       throw new RemoteVerificationAttemptError("worker_forbidden", "Worker zdalnej weryfikacji nie jest aktywny.");
     }
     if (!grant || grant.revokedAt !== null || !grant.presetIds.includes(request.presetId)) {
