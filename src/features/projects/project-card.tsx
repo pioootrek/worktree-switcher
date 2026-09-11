@@ -2,6 +2,7 @@
 
 import { Metric } from "@/components/metric";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -21,7 +22,7 @@ import { WorktreeStoragePanel } from "@/features/storage/worktree-storage-panel"
 import { TestPanel } from "@/features/verification/test-panel";
 import { useI18n } from "@/i18n/provider";
 import type { ProjectSnapshot } from "@/shared/contracts";
-import { AlertTriangle, HardDrive, LockKeyhole, Play, RefreshCw, RotateCcw, Server, Square, TestTube2, UnlockKeyhole } from "lucide-react";
+import { AlertTriangle, Check, Circle, GitBranch, HardDrive, LockKeyhole, Play, RefreshCw, RotateCcw, Server, Square, TestTube2, UnlockKeyhole } from "lucide-react";
 import { useState } from "react";
 
 export function ProjectCard({
@@ -94,12 +95,12 @@ export function ProjectCard({
   };
 
   return (
-    <Card data-project-id={project.id} className="min-w-0 overflow-hidden border-white/8 bg-card/75 shadow-xl shadow-black/10 backdrop-blur-sm">
-      <CardHeader className="pb-4">
+    <Card data-project-id={project.id} className="min-w-0 overflow-hidden rounded-lg border-border bg-card/70 py-0 shadow-none backdrop-blur-sm">
+      <CardHeader className="border-b border-border px-5 py-5 sm:px-6">
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 max-w-full">
-            <CardTitle className="flex items-center gap-2 break-all text-lg">
-              <Server className="size-4 shrink-0 text-indigo-300" aria-hidden />
+            <CardTitle className="flex items-center gap-2 break-all text-xl font-semibold tracking-tight sm:text-2xl">
+              <Server className="size-5 shrink-0 text-primary" aria-hidden />
               {project.name}
             </CardTitle>
             <CardDescription className="mt-1 truncate font-mono text-xs" title={project.repositoryPath}>
@@ -107,20 +108,6 @@ export function ProjectCard({
             </CardDescription>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => void refreshMetadata()}
-                  disabled={pending !== null || metadata?.status === "refreshing"}
-                  aria-label={t("metadata.refresh")}
-                >
-                  <RefreshCw className={metadata?.status === "refreshing" ? "animate-spin motion-reduce:animate-none" : undefined} aria-hidden />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("metadata.refresh")}</TooltipContent>
-            </Tooltip>
             <EnvironmentSettingsDialog
               project={project}
               phase={runtime.phase}
@@ -136,17 +123,16 @@ export function ProjectCard({
                 setError={setError}
               />
             )}
-            <RuntimeBadge phase={runtime.phase} />
           </div>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="px-0">
         {metadata?.status === "stale" && !metadata.error && !snapshot.discoveryError && metadata.lastSuccessfulAt ? (
-          <p className="mb-4 text-sm text-muted-foreground">
+          <p className="mx-5 mt-5 text-sm text-muted-foreground sm:mx-6">
             {t("metadata.lastSuccess", { time: new Date(metadata.lastSuccessfulAt).toLocaleString(locale === "pl" ? "pl-PL" : "en-US") })}
           </p>
         ) : metadata && metadata.status !== "fresh" && (
-          <Alert className="mb-4 border-amber-400/20 bg-amber-400/5 text-amber-100">
+          <Alert className="mx-5 mt-5 border-amber-400/20 bg-amber-400/5 text-amber-100 sm:mx-6">
             <AlertTriangle aria-hidden />
             <AlertTitle>{t(`metadata.${metadata.status}`)}</AlertTitle>
             <AlertDescription>
@@ -157,8 +143,24 @@ export function ProjectCard({
           </Alert>
         )}
         {snapshot.discoveryError && (
-          <Alert variant="destructive" className="mb-4"><AlertTriangle aria-hidden /><AlertDescription>{snapshot.discoveryError}</AlertDescription></Alert>
+          <Alert variant="destructive" className="mx-5 mt-5 sm:mx-6"><AlertTriangle aria-hidden /><AlertDescription>{snapshot.discoveryError}</AlertDescription></Alert>
         )}
+        <div className="mx-5 mt-5 grid gap-4 rounded-md border border-border bg-background/35 px-5 py-4 sm:mx-6 lg:grid-cols-[minmax(0,1.4fr)_repeat(2,minmax(120px,.6fr))] lg:items-center">
+          <div>
+            <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{t("project.runningServer")}</p>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+              <RuntimeBadge phase={runtime.phase} />
+              <span className="flex min-w-0 items-center gap-2 font-mono text-sm font-medium">
+                <GitBranch className="size-4 text-muted-foreground" aria-hidden />
+                <span className="truncate">{worktrees.find((worktree) => worktree.path === runtime.worktreePath)?.branch ?? t("project.noRuntime")}</span>
+              </span>
+            </div>
+          </div>
+          <Metric label={t("project.port")} value={String(project.port)} />
+          <Metric label={t("project.protocol")} value={project.tlsMode === "off" ? "HTTP" : "HTTPS"} />
+        </div>
+
+        <div className="px-5 sm:px-6">
         {reservation && (
           <Alert className="mb-4 border-amber-400/25 bg-amber-400/7 text-amber-100">
             <LockKeyhole aria-hidden />
@@ -182,9 +184,86 @@ export function ProjectCard({
           </Alert>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <div className="mt-6">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold tracking-tight">{t("project.chooseWorktree")}</h3>
+              <p className="mt-1 text-sm text-muted-foreground">{t("project.chooseWorktreeHint")}</p>
+            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => void refreshMetadata()}
+                  disabled={pending !== null || metadata?.status === "refreshing"}
+                  aria-label={t("metadata.refresh")}
+                >
+                  <RefreshCw className={metadata?.status === "refreshing" ? "animate-spin motion-reduce:animate-none" : undefined} aria-hidden />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("metadata.refresh")}</TooltipContent>
+            </Tooltip>
+          </div>
+
+          <div className="overflow-x-auto rounded-md border border-border" role="region" aria-label={t("project.worktreeTable")} tabIndex={0}>
+            <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+              <thead className="bg-muted/35 text-xs text-muted-foreground">
+                <tr>
+                  <th className="w-14 px-4 py-3 font-medium"><span className="sr-only">{t("project.selection")}</span></th>
+                  <th className="px-3 py-3 font-medium">{t("project.branch")}</th>
+                  <th className="px-3 py-3 font-medium">{t("project.gitState")}</th>
+                  <th className="px-3 py-3 font-medium">{t("project.commit")}</th>
+                  <th className="px-4 py-3 font-medium">{t("project.runtimeState")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {worktrees.map((worktree) => {
+                  const chosen = selected === worktree.path;
+                  const active = runtime.worktreePath === worktree.path && runtime.phase !== "stopped";
+                  return (
+                    <tr
+                      key={worktree.path}
+                      className={chosen ? "bg-primary/[0.07] shadow-[inset_4px_0_0_var(--primary)]" : "border-t border-border transition-colors hover:bg-muted/25"}
+                    >
+                      <td className="px-4 py-3.5">
+                        <button
+                          type="button"
+                          className="grid size-6 place-items-center rounded-full text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+                          aria-label={t("project.selectWorktree", { branch: worktree.branch ?? "detached HEAD" })}
+                          aria-pressed={chosen}
+                          disabled={isBusy || worktree.prunable}
+                          onClick={() => setSelected(worktree.path)}
+                        >
+                          {chosen ? <Check className="size-4 rounded-full bg-primary p-0.5 text-primary-foreground" aria-hidden /> : <Circle className="size-4" aria-hidden />}
+                        </button>
+                      </td>
+                      <td className="max-w-[320px] px-3 py-3.5">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate font-mono font-medium" title={worktree.branch ?? "detached HEAD"}>{worktree.branch ?? "detached HEAD"}</span>
+                          {active && <Badge variant="outline" className="border-primary/25 text-primary">{t("project.active")}</Badge>}
+                        </div>
+                        <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground" title={worktree.path}>{worktree.path}</p>
+                      </td>
+                      <td className="px-3 py-3.5">
+                        <span className={worktree.dirty ? "flex items-center gap-2 text-amber-400" : "flex items-center gap-2 text-muted-foreground"}>
+                          <span className={worktree.dirty ? "size-2 rounded-full bg-amber-400" : "size-2 rounded-full bg-emerald-400"} />
+                          {worktree.dirty ? t("project.dirty") : t("project.clean")}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3.5 font-mono text-xs">{worktree.shortHead}</td>
+                      <td className="px-4 py-3.5 text-muted-foreground">{active ? t(`phase.${runtime.phase}`) : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
           <div className="min-w-0 space-y-2">
-            <Label htmlFor={`worktree-${project.id}`}>{t("project.activeWorktree")}</Label>
+            <Label htmlFor={`worktree-${project.id}`}>{t("project.selectedWorktree")}</Label>
             <Select value={selected} onValueChange={setSelected} disabled={isBusy || worktrees.length === 0}>
               <SelectTrigger id={`worktree-${project.id}`} className="w-full min-w-0 *:data-[slot=select-value]:min-w-0">
                 <SelectValue placeholder={t("project.noWorktree")} />
@@ -220,6 +299,18 @@ export function ProjectCard({
               <RefreshCw aria-hidden />{t("project.switch")}
             </Button>
           </div>
+        </div>
+
+        <div className="-mx-5 mt-6 flex flex-wrap items-center justify-between gap-4 border-y border-border bg-background/30 px-5 py-4 sm:-mx-6 sm:px-6">
+          <div className="min-w-0">
+            <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{t("project.operationTarget")}</p>
+            <p className="mt-1 truncate font-mono text-sm font-medium" title={selectedWorktree?.path}>{selectedWorktree?.branch ?? t("project.noSelection")} <span className="text-muted-foreground">· {selectedWorktree?.shortHead ?? "—"}</span></p>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {runtime.worktreePath && runtime.worktreePath !== selected
+              ? t("project.transition", { from: worktrees.find((worktree) => worktree.path === runtime.worktreePath)?.branch ?? "—", to: selectedWorktree?.branch ?? "—" })
+              : t("project.noTransition")}
+          </p>
         </div>
 
         <Separator className="my-5" />
@@ -308,7 +399,7 @@ export function ProjectCard({
           </TabsContent>
         </Tabs>
 
-        <div className="mt-5 flex items-center justify-between gap-3 border-t border-white/7 pt-4">
+        <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
           <p className="truncate text-xs text-muted-foreground" title={selectedWorktree?.path}>{selectedWorktree?.path ?? t("project.noSelection")}</p>
           {reservation ? (
             <Button
@@ -328,6 +419,7 @@ export function ProjectCard({
               <LockKeyhole aria-hidden />{t("project.reserve")}
             </Button>
           )}
+        </div>
         </div>
       </CardContent>
     </Card>

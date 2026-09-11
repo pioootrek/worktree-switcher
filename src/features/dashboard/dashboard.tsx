@@ -12,7 +12,7 @@ import { CapacityDialog } from "@/features/runtime/capacity-dialog";
 import { TestQueueDialog } from "@/features/verification/test-queue-dialog";
 import { dashboardSummary } from "@/i18n/messages";
 import { useI18n } from "@/i18n/provider";
-import { AlertTriangle, GitBranch, Languages, LoaderCircle } from "lucide-react";
+import { AlertTriangle, FlaskConical, FolderGit2, GitBranch, HardDrive, Languages, LoaderCircle, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { useDashboard } from "./use-dashboard";
 
@@ -22,17 +22,36 @@ export function Dashboard() {
   const [dialogOpen, setDialogOpen] = useState(false);
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,oklch(0.26_0.06_260/.32),transparent_34rem)]">
-      <div className="mx-auto max-w-[1500px] px-4 py-6 sm:px-7 lg:px-10">
-        <header className="mb-8 flex flex-wrap items-start justify-between gap-5">
-          <div className="flex items-center gap-3">
-            <div className="grid size-11 place-items-center rounded-xl border border-indigo-400/25 bg-indigo-400/10 shadow-[0_0_30px_oklch(0.65_0.15_270/.12)]">
-              <GitBranch className="size-5 text-indigo-300" aria-hidden />
-            </div>
-            <div>
-              <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">{t("dashboard.tagline")}</p>
-              <h1 className="text-2xl font-semibold tracking-tight">Worktree Switcher</h1>
-            </div>
+    <main className="min-h-screen lg:grid lg:grid-cols-[100px_minmax(0,1fr)]">
+      <aside className="hidden border-r border-border bg-sidebar lg:flex lg:min-h-screen lg:flex-col lg:items-center">
+        <div className="grid h-20 w-full place-items-center border-b border-border">
+          <div className="flex flex-col items-center text-primary">
+            <GitBranch className="size-6" aria-hidden />
+            <span className="mt-0.5 text-lg font-semibold tracking-tight">WS</span>
+          </div>
+        </div>
+        <nav className="flex w-full flex-1 flex-col gap-2 py-8" aria-label={t("dashboard.navigation")}>
+          <a href="#projects" className="relative flex min-h-20 flex-col items-center justify-center gap-2 bg-sidebar-accent text-xs font-medium text-primary before:absolute before:inset-y-0 before:left-0 before:w-1 before:rounded-r-full before:bg-primary">
+            <FolderGit2 className="size-5" aria-hidden />{t("dashboard.navProjects")}
+          </a>
+          <a href="#projects" className="flex min-h-20 flex-col items-center justify-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground">
+            <FlaskConical className="size-5" aria-hidden />{t("dashboard.navTests")}
+          </a>
+          <a href="#projects" className="flex min-h-20 flex-col items-center justify-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground">
+            <HardDrive className="size-5" aria-hidden />{t("dashboard.navResources")}
+          </a>
+        </nav>
+        <div className="flex w-full flex-col items-center gap-3 border-t border-border py-5 text-xs text-muted-foreground">
+          <Settings2 className="size-5" aria-hidden />{t("dashboard.navSettings")}
+        </div>
+      </aside>
+      <div className="min-w-0">
+        <header className="z-30 flex min-h-16 flex-wrap items-center justify-between gap-4 border-b border-border bg-background/92 px-4 py-3 backdrop-blur-xl sm:px-7 lg:sticky lg:top-0 lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex items-center gap-2 text-primary lg:hidden"><GitBranch className="size-5" aria-hidden /><span className="font-semibold">WS</span></div>
+            <span className="hidden text-sm text-muted-foreground sm:inline">{t("dashboard.navProjects")}</span>
+            <span className="hidden text-muted-foreground/50 sm:inline">/</span>
+            <h1 className="truncate text-sm font-medium">Worktree Switcher</h1>
           </div>
           <div className="flex max-w-full flex-wrap items-center gap-2">
             <Badge variant="outline" className="h-9 gap-2 px-3 font-normal">
@@ -59,6 +78,15 @@ export function Dashboard() {
           </div>
         </header>
 
+        <div className="mx-auto max-w-[1460px] px-4 py-7 sm:px-7 lg:px-8 lg:py-9">
+          <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.2em] text-primary">{t("dashboard.tagline")}</p>
+              <h2 className="text-3xl font-semibold tracking-[-0.035em] sm:text-4xl">{t("dashboard.projects")}</h2>
+            </div>
+            <p className="max-w-md text-sm leading-6 text-muted-foreground">{t("dashboard.projectLead")}</p>
+          </div>
+
         <div className="sr-only" aria-live="polite">{error ?? notice}</div>
         {error && (
           <Alert variant="destructive" className="mb-5">
@@ -76,12 +104,17 @@ export function Dashboard() {
         ) : data.projects.length === 0 ? (
           <EmptyState onAdd={() => setDialogOpen(true)} />
         ) : (
-          <section className="grid gap-5 xl:grid-cols-2" aria-label={t("dashboard.projects")}>
+          <section id="projects" className="grid gap-7" aria-label={t("dashboard.projects")}>
             {data.projects.map((snapshot) => (
               <ProjectCard key={snapshot.project.id} snapshot={snapshot} mutate={mutate} setError={setError} token={token} />
             ))}
           </section>
         )}
+        </div>
+        <footer className="flex min-h-14 items-center justify-between gap-4 border-t border-border px-4 text-xs text-muted-foreground sm:px-7 lg:px-8">
+          <span className="flex items-center gap-2"><span className="size-2 rounded-full bg-emerald-400" />{t("dashboard.connected")}</span>
+          <span>Worktree Switcher</span>
+        </footer>
       </div>
     </main>
   );
