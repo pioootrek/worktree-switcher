@@ -351,7 +351,7 @@ export class RemoteVerificationQueries {
       const result = this.database.prepare(`
         UPDATE remote_verification_attempts SET
           phase = 'uncertain', version = version + 1, last_reported_at = ?, finished_at = NULL
-        WHERE phase IN ('assigned', 'preparing', 'running', 'cancel_requested')
+        WHERE phase IN ('assigned', 'preparing', 'running')
       `).run(observedAt);
       if (result.changes > 0) {
         this.database.prepare(`

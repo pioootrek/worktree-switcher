@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type {
   AssignRemoteVerificationAttemptInput,
+  RemoteVerificationActor,
   RemoteVerificationAttempt,
   RemoteVerificationAttemptPhase,
   RemoteVerificationAttemptStore,
@@ -115,13 +116,21 @@ export class RemoteVerificationAttemptService {
     return persisted;
   }
 
-  report(input: ReportRemoteVerificationAttemptInput): RemoteVerificationAttempt {
+  report(input: ReportRemoteVerificationAttemptInput, actor: RemoteVerificationActor): RemoteVerificationAttempt {
     const attemptId = requiredText(input.attemptId, "Identyfikator attemptu");
     if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1) {
       throw new RemoteVerificationAttemptError("invalid_request", "Wersja attemptu ma nieprawidłowy format.");
     }
     const current = this.store.getRemoteVerificationAttempt(attemptId);
     if (!current) throw new RemoteVerificationAttemptError("attempt_not_found", "Attempt zdalnej weryfikacji nie istnieje.");
+    const worker = this.store.getRemoteWorker(current.workerId);
+    const principal = worker ? this.store.getRemotePrincipal(worker.principalId) : null;
+    if (
+      !worker || worker.status !== "active" || worker.principalId !== actor.principalId
+      || !principal || principal.kind !== "worker" || principal.status !== "active"
+    ) {
+      throw new RemoteVerificationAttemptError("worker_forbidden", "Tylko przypisany worker może raportować ten attempt.");
+    }
     if (current.version !== input.expectedVersion) {
       throw new RemoteVerificationAttemptError("stale_attempt", "Raport dotyczy nieaktualnej wersji attemptu.");
     }

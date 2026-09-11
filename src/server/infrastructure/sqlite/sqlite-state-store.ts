@@ -81,7 +81,7 @@ export class SqliteStateStore implements StateStore, RemoteVerificationStore, Re
       const cancellationRequestedAttempts = this.database.prepare(`
         UPDATE remote_verification_attempts
         SET phase = 'cancel_requested', version = version + 1, last_reported_at = ?
-        WHERE phase IN ('assigned', 'preparing', 'running') AND EXISTS (
+        WHERE phase IN ('assigned', 'preparing', 'running', 'uncertain') AND EXISTS (
           SELECT 1 FROM remote_worker_project_grants grant
           JOIN remote_verification_requests request ON request.id = remote_verification_attempts.request_id
           WHERE grant.worker_id = remote_verification_attempts.worker_id

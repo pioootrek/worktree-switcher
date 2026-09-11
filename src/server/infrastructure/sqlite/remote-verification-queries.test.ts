@@ -85,14 +85,24 @@ function submit(store: SqliteStateStore, id = "request-1", commitSha = SHA): Rem
   }, { principalId: "owner-1" });
 }
 
-function attemptService(store: SqliteStateStore, times: string[], ids: string[] = ["attempt-1"]): RemoteVerificationAttemptService {
+function attemptService(store: SqliteStateStore, times: string[], ids: string[] = ["attempt-1"]) {
   let timeIndex = 0;
   let idIndex = 0;
-  return new RemoteVerificationAttemptService(
+  const service = new RemoteVerificationAttemptService(
     store,
     () => times[Math.min(timeIndex++, times.length - 1)]!,
     () => ids[Math.min(idIndex++, ids.length - 1)]!,
   );
+  return {
+    assign: service.assign.bind(service),
+    report: (input: Parameters<RemoteVerificationAttemptService["report"]>[0]) => (
+      service.report(input, { principalId: "worker-principal-1" })
+    ),
+    reportAs: (input: Parameters<RemoteVerificationAttemptService["report"]>[0], principalId: string) => (
+      service.report(input, { principalId })
+    ),
+    recoverInterruptedAttempts: service.recoverInterruptedAttempts.bind(service),
+  };
 }
 
 function expectAttemptCode(operation: () => unknown, code: RemoteVerificationAttemptError["code"]): void {
@@ -325,6 +335,31 @@ describe("remote verification SQLite persistence", () => {
     store.close();
   });
 
+  it("rejects a report from an authenticated non-owning worker", () => {
+    const path = databasePath();
+    const store = new SqliteStateStore(path);
+    provision(store);
+    store.saveRemotePrincipal({ id: "worker-principal-2", kind: "worker", status: "active" }, "local-user");
+    store.saveRemoteWorker({
+      id: "worker-2",
+      principalId: "worker-principal-2",
+      name: "Other worker",
+      status: "active",
+      lastContactAt: null,
+    }, "local-user");
+    const accepted = submit(store);
+    const service = attemptService(store, ["2026-09-11T00:01:00.000Z"]);
+    const assigned = service.assign({ requestId: accepted.id, workerId: "worker-1" });
+
+    expectAttemptCode(() => service.reportAs({
+      attemptId: assigned.id,
+      expectedVersion: assigned.version,
+      phase: "preparing",
+    }, "worker-principal-2"), "worker_forbidden");
+    expect(store.getRemoteVerificationAttempt(assigned.id)).toEqual(assigned);
+    store.close();
+  });
+
   it("requires exact commit evidence before success", () => {
     const path = databasePath();
     const store = new SqliteStateStore(path);
@@ -396,30 +431,42 @@ describe("remote verification SQLite persistence", () => {
     const requested = service.report({ attemptId: assigned.id, expectedVersion: 1, phase: "cancel_requested" });
     expect(store.getRemoteVerificationRequest(accepted.id)?.phase).toBe("assigned");
     expect(requested.finishedAt).toBeNull();
-
-    const cancelled = service.report({ attemptId: assigned.id, expectedVersion: requested.version, phase: "cancelled" });
-    expect(cancelled.finishedAt).toBe("2026-09-11T00:03:00.000Z");
-    expect(store.getRemoteVerificationRequest(accepted.id)?.phase).toBe("cancelled");
     store.close();
+
+    const reopened = new SqliteStateStore(path);
+    const recovery = attemptService(reopened, ["2026-09-11T00:03:00.000Z"]);
+    expect(recovery.recoverInterruptedAttempts()).toBe(0);
+    expect(reopened.getRemoteVerificationAttempt(assigned.id)).toEqual(requested);
+
+    const cancelled = recovery.report({ attemptId: assigned.id, expectedVersion: requested.version, phase: "cancelled" });
+    expect(cancelled.finishedAt).toBe("2026-09-11T00:03:00.000Z");
+    expect(reopened.getRemoteVerificationRequest(accepted.id)?.phase).toBe("cancelled");
+    reopened.close();
   });
 
-  it("requests cancellation instead of claiming termination when an assigned project is removed", () => {
+  it("preserves a cancellation path when an uncertain project's local mapping is removed", () => {
     const path = databasePath();
     const store = new SqliteStateStore(path);
     const localProjectId = provision(store);
     const accepted = submit(store);
-    const service = attemptService(store, ["2026-09-11T00:01:00.000Z"]);
+    const service = attemptService(store, ["2026-09-11T00:01:00.000Z", "2026-09-11T00:02:00.000Z"]);
     const assigned = service.assign({ requestId: accepted.id, workerId: "worker-1" });
+    service.report({ attemptId: assigned.id, expectedVersion: assigned.version, phase: "preparing" });
+    store.close();
 
-    store.removeProject(localProjectId, "local-user");
+    const reopened = new SqliteStateStore(path);
+    const recovery = attemptService(reopened, ["2026-09-11T00:03:00.000Z"]);
+    expect(recovery.recoverInterruptedAttempts()).toBe(1);
+    expect(reopened.getRemoteVerificationAttempt(assigned.id)?.phase).toBe("uncertain");
+    reopened.removeProject(localProjectId, "local-user");
 
-    expect(store.getRemoteVerificationAttempt(assigned.id)).toMatchObject({
+    expect(reopened.getRemoteVerificationAttempt(assigned.id)).toMatchObject({
       phase: "cancel_requested",
-      version: 2,
+      version: 4,
       finishedAt: null,
     });
-    expect(store.getRemoteVerificationRequest(accepted.id)?.phase).toBe("assigned");
-    store.close();
+    expect(reopened.getRemoteVerificationRequest(accepted.id)?.phase).toBe("assigned");
+    reopened.close();
   });
 
   it("keeps terminal attempts immutable", () => {
