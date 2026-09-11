@@ -63,6 +63,31 @@ const REMOTE_VERIFICATION_SCHEMA = `
     ON remote_verification_requests(phase, created_at, id);
 `;
 
+const REMOTE_VERIFICATION_ATTEMPT_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS remote_verification_attempts (
+    id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL REFERENCES remote_verification_requests(id),
+    worker_id TEXT NOT NULL REFERENCES remote_workers(id),
+    sequence INTEGER NOT NULL CHECK(sequence > 0),
+    phase TEXT NOT NULL CHECK(phase IN (
+      'assigned', 'preparing', 'running', 'succeeded', 'failed',
+      'cancel_requested', 'cancelled', 'uncertain'
+    )),
+    version INTEGER NOT NULL CHECK(version > 0),
+    local_run_id TEXT,
+    executed_commit_sha TEXT,
+    failure_kind TEXT CHECK(failure_kind IN ('setup', 'execution')),
+    error_code TEXT,
+    accepted_at TEXT NOT NULL,
+    last_reported_at TEXT NOT NULL,
+    finished_at TEXT,
+    UNIQUE(request_id, sequence)
+  );
+
+  CREATE INDEX IF NOT EXISTS remote_verification_attempts_request
+    ON remote_verification_attempts(request_id, sequence DESC);
+`;
+
 const schema = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
@@ -177,6 +202,7 @@ const schema = `
     ON test_runs(actor, idempotency_key) WHERE idempotency_key IS NOT NULL;
 
   ${REMOTE_VERIFICATION_SCHEMA}
+  ${REMOTE_VERIFICATION_ATTEMPT_SCHEMA}
 
   INSERT OR IGNORE INTO schema_migrations(version, applied_at)
     VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -360,6 +386,12 @@ function applyMigrations(database: Database.Database): void {
     database.transaction(() => {
       database.exec(REMOTE_VERIFICATION_SCHEMA);
       recordMigration(database, 13);
+    })();
+  }
+  if (!hasMigration(database, 14)) {
+    database.transaction(() => {
+      database.exec(REMOTE_VERIFICATION_ATTEMPT_SCHEMA);
+      recordMigration(database, 14);
     })();
   }
 }

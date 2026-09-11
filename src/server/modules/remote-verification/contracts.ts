@@ -67,8 +67,29 @@ export interface RemoteVerificationAttempt {
   workerId: string;
   sequence: number;
   phase: RemoteVerificationAttemptPhase;
+  version: number;
+  localRunId: string | null;
+  executedCommitSha: string | null;
+  failureKind: "setup" | "execution" | null;
+  errorCode: string | null;
   acceptedAt: string;
   lastReportedAt: string;
+  finishedAt: string | null;
+}
+
+export interface AssignRemoteVerificationAttemptInput {
+  requestId: string;
+  workerId: string;
+}
+
+export interface ReportRemoteVerificationAttemptInput {
+  attemptId: string;
+  expectedVersion: number;
+  phase: RemoteVerificationAttemptPhase;
+  localRunId?: string;
+  executedCommitSha?: string;
+  failureKind?: "setup" | "execution";
+  errorCode?: string;
 }
 
 export interface SubmitRemoteVerificationInput {
@@ -93,6 +114,22 @@ export interface RemoteVerificationStore {
   findRemoteVerificationRequestByIdempotency(principalId: string, idempotencyKey: string): RemoteVerificationRequest | null;
   /** Atomically creates the request or returns the request that already owns its principal/key pair. */
   createOrReplayRemoteVerificationRequest(request: RemoteVerificationRequest): RemoteVerificationRequest;
+}
+
+export interface RemoteVerificationAttemptStore {
+  getRemoteVerificationRequest(id: string): RemoteVerificationRequest | null;
+  getRemoteVerificationAttempt(id: string): RemoteVerificationAttempt | null;
+  findRemoteVerificationAttemptForRequest(requestId: string): RemoteVerificationAttempt | null;
+  /** Atomically creates the first attempt and assigns its request, or returns that attempt on replay. */
+  createOrReplayRemoteVerificationAttempt(attempt: RemoteVerificationAttempt): RemoteVerificationAttempt | null;
+  /** Atomically applies an optimistic attempt update and keeps the parent request phase in sync. */
+  updateRemoteVerificationAttempt(
+    attempt: RemoteVerificationAttempt,
+    expectedVersion: number,
+    requestPhase: RemoteVerificationRequestPhase,
+  ): boolean;
+  /** Converts controller-owned in-flight attempts into honest, recoverable uncertainty after a restart. */
+  markRemoteVerificationAttemptsUncertain(observedAt: string): number;
 }
 
 export interface RemoteVerificationProvisioningStore {

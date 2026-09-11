@@ -4,8 +4,11 @@ import type {
   RemotePrincipal,
   RemotePrincipalProjectGrant,
   RemoteProjectIdentity,
+  RemoteVerificationAttempt,
+  RemoteVerificationAttemptStore,
   RemoteVerificationProvisioningStore,
   RemoteVerificationRequest,
+  RemoteVerificationRequestPhase,
   RemoteVerificationStore,
   RemoteWorkerProjectGrant,
   RemoteWorkerRegistration,
@@ -21,7 +24,7 @@ import { RemoteVerificationQueries } from "./remote-verification-queries";
 import { StorageQueries } from "./storage-queries";
 import { TestRunQueries } from "./test-run-queries";
 
-export class SqliteStateStore implements StateStore, RemoteVerificationStore, RemoteVerificationProvisioningStore {
+export class SqliteStateStore implements StateStore, RemoteVerificationStore, RemoteVerificationAttemptStore, RemoteVerificationProvisioningStore {
   private readonly database: Database.Database;
   private readonly testRuns: TestRunQueries;
   private readonly storage: StorageQueries;
@@ -75,10 +78,21 @@ export class SqliteStateStore implements StateStore, RemoteVerificationStore, Re
     if (!project) throw new Error("Nie znaleziono projektu.");
     const now = new Date().toISOString();
     this.database.transaction(() => {
+      const cancellationRequestedAttempts = this.database.prepare(`
+        UPDATE remote_verification_attempts
+        SET phase = 'cancel_requested', version = version + 1, last_reported_at = ?
+        WHERE phase IN ('assigned', 'preparing', 'running', 'uncertain') AND EXISTS (
+          SELECT 1 FROM remote_worker_project_grants grant
+          JOIN remote_verification_requests request ON request.id = remote_verification_attempts.request_id
+          WHERE grant.worker_id = remote_verification_attempts.worker_id
+            AND grant.project_id = request.project_id
+            AND grant.local_project_id = ?
+        )
+      `).run(now, projectId).changes;
       const cancelledRemoteRequests = this.database.prepare(`
         UPDATE remote_verification_requests
         SET phase = 'cancelled', updated_at = ?
-        WHERE phase IN ('pending', 'assigned') AND EXISTS (
+        WHERE phase = 'pending' AND EXISTS (
           SELECT 1 FROM remote_worker_project_grants grant
           WHERE grant.worker_id = remote_verification_requests.worker_id
             AND grant.project_id = remote_verification_requests.project_id
@@ -94,6 +108,7 @@ export class SqliteStateStore implements StateStore, RemoteVerificationStore, Re
         repositoryPath: project.repositoryPath,
         port: project.port,
         cancelledRemoteRequests,
+        cancellationRequestedAttempts,
       }), now);
       const result = this.database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
       if (result.changes === 0) throw new Error("Nie znaleziono projektu.");
@@ -375,6 +390,34 @@ export class SqliteStateStore implements StateStore, RemoteVerificationStore, Re
 
   createOrReplayRemoteVerificationRequest(request: RemoteVerificationRequest): RemoteVerificationRequest {
     return this.remoteVerification.createOrReplayRemoteVerificationRequest(request);
+  }
+
+  getRemoteVerificationRequest(id: string): RemoteVerificationRequest | null {
+    return this.remoteVerification.getRemoteVerificationRequest(id);
+  }
+
+  getRemoteVerificationAttempt(id: string): RemoteVerificationAttempt | null {
+    return this.remoteVerification.getRemoteVerificationAttempt(id);
+  }
+
+  findRemoteVerificationAttemptForRequest(requestId: string): RemoteVerificationAttempt | null {
+    return this.remoteVerification.findRemoteVerificationAttemptForRequest(requestId);
+  }
+
+  createOrReplayRemoteVerificationAttempt(attempt: RemoteVerificationAttempt): RemoteVerificationAttempt | null {
+    return this.remoteVerification.createOrReplayRemoteVerificationAttempt(attempt);
+  }
+
+  updateRemoteVerificationAttempt(
+    attempt: RemoteVerificationAttempt,
+    expectedVersion: number,
+    requestPhase: RemoteVerificationRequestPhase,
+  ): boolean {
+    return this.remoteVerification.updateRemoteVerificationAttempt(attempt, expectedVersion, requestPhase);
+  }
+
+  markRemoteVerificationAttemptsUncertain(observedAt: string): number {
+    return this.remoteVerification.markRemoteVerificationAttemptsUncertain(observedAt);
   }
 
   getWorktreeStorage(projectId: string, worktreePath: string): WorktreeStorageSnapshot | null {
