@@ -55,9 +55,15 @@ async function main() {
   const sha256 = await digest(tarball);
   const smokeSource = join(repositoryRoot, "scripts/package-smoke.mjs");
   const smokeTarget = join(output, "package-smoke.mjs");
+  const lifecycleSource = join(repositoryRoot, "scripts/package-lifecycle-trial.mjs");
+  const lifecycleTarget = join(output, "package-lifecycle-trial.mjs");
   const installSource = join(repositoryRoot, "docs/package-trial.md");
   const installTarget = join(output, "INSTALL.md");
-  await Promise.all([copyFile(smokeSource, smokeTarget), copyFile(installSource, installTarget)]);
+  await Promise.all([
+    copyFile(smokeSource, smokeTarget),
+    copyFile(lifecycleSource, lifecycleTarget),
+    copyFile(installSource, installTarget),
+  ]);
 
   const installText = await readFile(installTarget, "utf8");
   if (!installText.includes(packed[0].filename) || !installText.includes(metadata.version)) {
@@ -94,6 +100,8 @@ async function main() {
       installGuide: "INSTALL.md",
       smoke: "package-smoke.mjs",
       smokeSha256: await digest(smokeTarget),
+      lifecycle: "package-lifecycle-trial.mjs",
+      lifecycleSha256: await digest(lifecycleTarget),
     },
   };
   await Promise.all([

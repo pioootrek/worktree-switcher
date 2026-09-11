@@ -32,6 +32,7 @@ SHA256SUMS
 provenance.json
 INSTALL.md
 package-smoke.mjs
+package-lifecycle-trial.mjs
 ```
 
 Check that `provenance.json` names the expected version, full source commit,
