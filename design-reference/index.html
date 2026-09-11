@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="pl" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Worktree Switcher · katalog referencyjny</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="catalog.css">
+  <script src="catalog.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Przejdź do treści</a>
+  <header class="topbar">
+    <strong>Worktree Switcher <span class="muted">/ Design reference</span></strong>
+    <nav aria-label="Sekcje katalogu">
+      <a href="#reference">Wzorzec</a><a href="#tokens">Podstawy</a><a href="#components">Komponenty</a><a href="#playground">Tabela</a>
+    </nav>
+    <label class="theme-control" for="theme">Motyw
+      <select id="theme"><option value="dark">Ciemny</option><option value="light">Jasny</option></select>
+    </label>
+  </header>
+  <main id="main">
+    <section id="reference" aria-labelledby="reference-title">
+      <span class="eyebrow">Zatwierdzony kierunek · 11.09.2026</span>
+      <h1 id="reference-title">Jedno miejsce dla wzorców.</h1>
+      <p class="muted">Oryginalna makieta wyznacza kierunek. Próbki poniżej pomagają go sprawdzać i rozwijać, ale pozostają robocze. Ten katalog nie steruje aplikacją.</p>
+      <div class="samples">
+        <a class="button" href="../docs/backlog/notes/NOTE-20260911-approved-gui-direction/approved-project-worktrees.png">Otwórz zatwierdzony obraz</a>
+        <a href="../docs/backlog/notes/NOTE-20260911-approved-gui-direction/direction.md">Decyzja i zasady</a>
+        <a href="README.md">Jak pracować z katalogiem</a>
+      </div>
+      <details open>
+        <summary>Pokaż oryginalną makietę</summary>
+        <figure>
+          <img src="../docs/backlog/notes/NOTE-20260911-approved-gui-direction/approved-project-worktrees.png" alt="Zatwierdzony ciemny widok projektu Customer Portal: serwer działa na main, a feat/checkout jest wybranym celem przełączenia; akcent limonkowy, tabela worktrees i osobny pasek operacji." width="1487" height="1058">
+          <figcaption>Zatwierdzona makieta w trybie ciemnym. Przełącznik motywu zmienia katalog i próbki, nie oryginalny obraz.</figcaption>
+        </figure>
+      </details>
+    </section>
+    <section id="tokens" aria-labelledby="tokens-title">
+      <span class="eyebrow">Robocza interpretacja</span>
+      <h2 id="tokens-title">Kolory i typografia</h2>
+      <p class="muted">Antracyt w trybie ciemnym, jasne neutralne powierzchnie w trybie jasnym i wspólny limonkowy akcent. Jasny wariant oraz konkretne wartości tokenów są propozycją do oceny.</p>
+      <div class="palette">
+        <div><div class="swatch" style="background:var(--background)"></div>Tło <code data-token="--background">#181A18</code></div>
+        <div><div class="swatch" style="background:var(--surface)"></div>Powierzchnia <code data-token="--surface">#202320</code></div>
+        <div><div class="swatch" style="background:var(--primary)"></div>Akcent <code data-token="--primary">#C5E76C</code></div>
+        <div><div class="swatch" style="background:var(--foreground)"></div>Tekst <code data-token="--foreground">#ECEFE6</code></div>
+      </div>
+      <h3>Customer Portal</h3>
+      <p>Tekst interfejsu pozostaje czytelny również w gęstej tabeli.</p>
+      <p class="mono">feat/checkout · a31f92c</p>
+      <p class="muted">Identyfikatory, gałęzie i ścieżki korzystają z fontu monospace. Zwykły tekst ma font systemowy, dostępny bez sieci.</p>
+    </section>
+    <section id="components" aria-labelledby="components-title">
+      <span class="eyebrow">Próbki robocze · HTML</span>
+      <h2 id="components-title">Kontrolki i stany</h2>
+      <p class="muted">Próbki wizualne do późniejszego odwzorowania w komponentach shadcn. Przyciski poniżej jedynie pokazują komunikat demonstracyjny.</p>
+      <div class="samples">
+        <button class="primary" data-demo="Główna akcja">Przełącz serwer</button>
+        <button data-demo="Akcja pomocnicza">Uruchom testy</button>
+        <button class="danger" data-demo="Akcja destrukcyjna">Usuń cache</button>
+        <button disabled>Niedostępne</button>
+        <button disabled aria-busy="true">Zapisywanie…</button>
+      </div>
+      <p id="demo-message" class="muted" role="status">To tylko przykłady. Żadna operacja nie zostanie wykonana.</p>
+      <div class="samples" aria-label="Przykładowe statusy">
+        <span class="badge success">Działa</span><span class="badge muted">Zatrzymany</span><span class="badge">Rezerwacja: Codex</span><span class="badge failure">Błąd</span><span class="badge warning">Starszy commit</span><span class="badge muted">Brak danych</span>
+      </div>
+      <div class="sample-columns">
+        <div>
+          <label for="sample-branch">Gałąź lub commit<input id="sample-branch" placeholder="np. feat/checkout"></label>
+          <p class="muted">Przejdź klawiszem Tab, aby sprawdzić obramowanie fokusu.</p>
+        </div>
+        <div class="notice">
+          <strong>Wynik dotyczy starszego commita</strong>
+          <p class="muted">Zaliczone testy dla c672be1 nie potwierdzają poprawności aktualnego a31f92c.</p>
+        </div>
+      </div>
+    </section>
+    <section id="playground" aria-labelledby="playground-title">
+      <span class="eyebrow">Eksperyment · fikcyjne projekty</span>
+      <h2 id="playground-title">Czytelność przy 30 i 300 projektach</h2>
+      <p class="muted">Sprawdź wyszukiwanie, filtry, wybór wiersza i gęstość. To demonstracja listy w przeglądarce, nie test wydajności kontrolera.</p>
+      <noscript><p>Włącz JavaScript, aby uruchomić demonstrację tabeli. Wzorzec i próbki wyżej pozostają dostępne.</p></noscript>
+      <div class="toolbar">
+        <label for="search">Szukaj projektu<input id="search" type="search" placeholder="Nazwa lub gałąź…"></label>
+        <label for="state">Stan serwera<select id="state"><option value="all">Wszystkie</option><option value="running">Działa</option><option value="stopped">Zatrzymany</option><option value="failed">Błąd</option></select></label>
+        <label for="count">Zestaw danych<select id="count"><option value="30">30 projektów</option><option value="300">300 projektów</option></select></label>
+        <label for="density">Gęstość<select id="density"><option value="comfortable">Wygodna</option><option value="compact">Kompaktowa</option></select></label>
+      </div>
+      <div class="table-region" role="region" aria-label="Tabela projektów, przewijana poziomo na wąskim ekranie" tabindex="0">
+        <table>
+          <caption class="muted">Dane demonstracyjne · wybór wiersza nie uruchamia serwera</caption>
+          <thead><tr><th scope="col">Wybór</th><th scope="col">Projekt</th><th scope="col">Serwer</th><th scope="col">Uruchomiona gałąź</th><th scope="col">Rezerwacja</th><th scope="col">Ostatnia weryfikacja</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div id="empty" hidden><strong>Brak pasujących projektów</strong><p class="muted">Zmień zapytanie lub wyczyść filtry.</p></div>
+      <div class="pager">
+        <span id="results" class="muted" role="status"></span>
+        <div class="samples"><button id="reset">Wyczyść filtry</button><button id="previous">Poprzednia</button><button id="next">Następna</button></div>
+      </div>
+      <p id="selection" class="selection" role="status">Nie wybrano projektu.</p>
+    </section>
+    <footer class="footer">Katalog referencyjny, poza aplikacją. Zmiana próbki nie zmienia zatwierdzonego kierunku. Wygląd WinPath nie jest źródłem wzorców.</footer>
+  </main>
+</body>
+</html>

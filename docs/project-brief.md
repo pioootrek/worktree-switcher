@@ -190,6 +190,13 @@ remain deferred until real usage justifies their maintenance.
 
 ## Interface system
 
+The owner-approved redesign direction is recorded in
+[Approved GUI direction](backlog/notes/NOTE-20260911-approved-gui-direction/direction.md),
+including the canonical project-detail mock. Subsequent GUI design follows its
+charcoal and restrained lime visual system. WinPath may inform the component
+development process only; copying its appearance is explicitly prohibited.
+This approval records a design target, not a shipped redesign.
+
 The dashboard uses shadcn/ui source components with the `new-york` style,
 Radix primitives, Tailwind CSS, and CSS-variable design tokens. It is dark-first
 for a developer-tool context while retaining a light/system theme option.
