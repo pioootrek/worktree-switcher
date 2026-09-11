@@ -222,6 +222,7 @@
       "author": "agent:codex",
       "created": "2026-09-08",
       "files": [
+        "controller-package-trial.md",
         "implementation-plan.md"
       ],
       "id": "NOTE-20260908-portable-verification-plan",

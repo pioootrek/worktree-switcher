@@ -5,7 +5,9 @@
   "links": {
     "related_ids": [
       "FEAT-20260905-portable-verification",
-      "NOTE-20260829-readiness-assessment"
+      "NOTE-20260829-readiness-assessment",
+      "FEAT-20260829-user-service-installation",
+      "NOTE-20260908-portable-verification-plan"
     ]
   },
   "notes": [
@@ -33,11 +35,21 @@
       "author": "agent:codex",
       "date": "2026-09-05",
       "text": "Latest owner direction explicitly keeps reusability and exploratory adoption in scope. Raised the lightweight package trial to next; account systems and a public marketing campaign are not dependencies. MIT/public-source work is already completed."
+    },
+    {
+      "author": "human:pioootrek",
+      "date": "2026-09-11",
+      "text": "Requested a saved plan for the package trial after clarifying that the initial installation is a standalone local controller/service, with a connected worker role planned later."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-11",
+      "text": "Plan recorded in NOTE-20260908-portable-verification-plan/controller-package-trial.md against main 68d1edb. Reuses completed portable CI rather than rebuilding it. Six gated slices cover artifact identity, consumer CLI installation, packaged service lifecycle, upgrade and recovery, removal and owner trial, and release handoff. Early validation targets native SQLite prerequisites, source-independent paths, exact artifact identity, busy-controller protection, migration recovery and preserved data. GitHub Release and npm publication remain explicit later actions. Planning only; feature stays open."
     }
   ],
   "priority": "next",
   "problem": [
-    "MIT licensing, public GitHub metadata, and a historical package smoke test already exist. The package remains private and unpublished; a fresh install outside the source checkout is not yet a repeatable experiment path."
+    "MIT licensing, public source, automated exact-artifact packing and checkout-free package smoke are already implemented. The remaining gap is a documented consumer installation, packaged service/upgrade/removal trial and durable download handoff; the npm package remains private and unpublished."
   ],
   "risk": {
     "dimensions": [

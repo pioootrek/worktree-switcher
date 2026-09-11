@@ -2,14 +2,17 @@
   "author": "agent:codex",
   "body": {
     "baseline_commit": "2eb1f06640c6254f14e4b9b7ce7f20b0836bb2bb",
+    "controller_trial_baseline": "68d1edb",
+    "controller_trial_summary": "Next distribution slices reuse completed portable CI: standalone local controller tarball, consumer/global-prefix install, packaged service lifecycle, upgrade/recovery, removal and explicit release handoff. Connected worker mode remains separate remote feature work.",
     "summary": "Implemented the portable verification workflow and standalone package smoke harness. Local check/build and the final ten-stage clean-consumer runtime smoke passed, including controlled damaged-asset rejection and graceful cleanup. Real GitHub job evidence remains before backlog closure."
   },
   "created": "2026-09-08",
   "files": [
-    "implementation-plan.md"
+    "implementation-plan.md",
+    "controller-package-trial.md"
   ],
   "id": "NOTE-20260908-portable-verification-plan",
-  "last_reviewed": "2026-09-08",
+  "last_reviewed": "2026-09-11",
   "schema_version": 1,
   "status": "active",
   "tags": [
