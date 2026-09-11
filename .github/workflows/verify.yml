@@ -27,7 +27,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: 22.22.0
+          node-version: 22.23.2
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
@@ -46,13 +46,13 @@ jobs:
       - run: pnpm test:ui
       - run: pnpm test:e2e
       - name: Pack verified application
-        id: pack
         shell: bash
         run: |
-          mkdir -p portable-artifact
-          npm pack --json --pack-destination portable-artifact > portable-artifact/npm-pack.json
-          node -e 'const fs=require("fs");const crypto=require("crypto");const p=JSON.parse(fs.readFileSync("portable-artifact/npm-pack.json"))[0].filename;const f=`portable-artifact/${p}`;const sha=crypto.createHash("sha256").update(fs.readFileSync(f)).digest("hex");fs.copyFileSync("scripts/package-smoke.mjs","portable-artifact/package-smoke.mjs");const h=crypto.createHash("sha256").update(fs.readFileSync("portable-artifact/package-smoke.mjs")).digest("hex");fs.writeFileSync("portable-artifact/provenance.json",JSON.stringify({commit:process.env.GITHUB_SHA,tarball:p,sha256:sha,smokeSha256:h,node:process.version,pnpm:"11.22.0"},null,2)+"\n")'
-          rm portable-artifact/npm-pack.json
+          node scripts/package-trial.mjs \
+            --output portable-artifact \
+            --commit "$GITHUB_SHA" \
+            --verification-target ubuntu-24.04-linux-x64-node22.23.2 \
+            --verification-target ubuntu-24.04-linux-x64-node24.21.0
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: portable-package
@@ -64,10 +64,14 @@ jobs:
     needs: check-build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22.23.2, 24.21.0]
     steps:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: 22.22.0
+          node-version: ${{ matrix.node }}
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: portable-package
@@ -75,14 +79,14 @@ jobs:
       - name: Verify provenance and smoke installed artifact
         shell: bash
         run: |
-          node -e 'const fs=require("fs"),c=require("crypto"),p=require("./portable-artifact/provenance.json");for(const [f,want] of [[p.tarball,p.sha256],["package-smoke.mjs",p.smokeSha256]]){const got=c.createHash("sha256").update(fs.readFileSync(`portable-artifact/${f}`)).digest("hex");if(got!==want)throw Error(`checksum mismatch: ${f}`)}'
-          TARBALL=$(node -p 'require("./portable-artifact/provenance.json").tarball')
-          SHA256=$(node -p 'require("./portable-artifact/provenance.json").sha256')
-          node portable-artifact/package-smoke.mjs --tarball "portable-artifact/$TARBALL" --sha256 "$SHA256" --report portable-smoke-report.json
+          node -e 'const fs=require("fs"),c=require("crypto"),p=require("./portable-artifact/provenance.json");for(const [f,want] of [[p.artifact.filename,p.artifact.sha256],[p.files.smoke,p.files.smokeSha256]]){const got=c.createHash("sha256").update(fs.readFileSync(`portable-artifact/${f}`)).digest("hex");if(got!==want)throw Error(`checksum mismatch: ${f}`)}const sums=fs.readFileSync("portable-artifact/SHA256SUMS","utf8").trim();if(sums!==`${p.artifact.sha256}  ${p.artifact.filename}`)throw Error("SHA256SUMS does not match provenance")'
+          TARBALL=$(node -p 'require("./portable-artifact/provenance.json").artifact.filename')
+          SHA256=$(node -p 'require("./portable-artifact/provenance.json").artifact.sha256')
+          node portable-artifact/package-smoke.mjs --tarball "portable-artifact/$TARBALL" --sha256 "$SHA256" --report "portable-smoke-report-node-${{ matrix.node }}.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: portable-smoke-report
-          path: portable-smoke-report.json
+          name: portable-smoke-report-node-${{ matrix.node }}
+          path: portable-smoke-report-node-${{ matrix.node }}.json
           retention-days: 7
           if-no-files-found: ignore
