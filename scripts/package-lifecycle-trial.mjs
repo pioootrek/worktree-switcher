@@ -75,8 +75,8 @@ export function inspectSystemdDefinition(definition, expected) {
   for (const fragment of required) {
     if (!definition.includes(fragment)) throw new Error(`Service definition is missing the installed value: ${fragment}`);
   }
-  const escapedWorkingDirectory = expected.packageRoot.replaceAll("%", "%%").replaceAll("\\", "\\\\").replaceAll(" ", "\\x20");
-  if (!definition.includes(`WorkingDirectory=${escapedWorkingDirectory}`)) {
+  const quotedWorkingDirectory = `"${expected.packageRoot.replaceAll("%", "%%").replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+  if (!definition.includes(`WorkingDirectory=${quotedWorkingDirectory}`)) {
     throw new Error("Service definition does not use the installed package as its working directory.");
   }
   for (const forbidden of expected.forbiddenPaths) {

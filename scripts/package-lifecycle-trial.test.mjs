@@ -32,7 +32,7 @@ test("systemd definition must point at installed paths and omit builder paths", 
   };
   const definition = [
     `ExecStart="${expected.nodePath}" "${expected.entrypointPath}" "start" "--data-dir" "${expected.dataDirectory}" "--state-dir" "${expected.stateDirectory}" "--web-root" "${expected.webRoot}"`,
-    "WorkingDirectory=/tmp/user\\x20prefix/lib/node_modules/worktree-switcher",
+    'WorkingDirectory="/tmp/user prefix/lib/node_modules/worktree-switcher"',
     "KillMode=control-group",
     "WantedBy=default.target",
   ].join("\n");
