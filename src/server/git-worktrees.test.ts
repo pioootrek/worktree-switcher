@@ -74,6 +74,25 @@ describe("GitCommandAdmission", () => {
     await expect(running).rejects.toThrow("aborted");
     await expect(queued).rejects.toThrow("zamknięta");
   });
+
+  it("reserves capacity for local operations while serializing remote fetches", async () => {
+    const admission = new GitCommandAdmission(2, 2, 1);
+    const order: string[] = [];
+    let releaseRemote!: () => void;
+    const firstRemote = admission.run("remote", async () => {
+      order.push("remote-running");
+      await new Promise<void>((resolve) => { releaseRemote = resolve; });
+    });
+    const secondRemote = admission.run("remote", async () => { order.push("remote-queued"); });
+    const operational = admission.run("operational", async () => { order.push("operational"); });
+
+    await operational;
+    expect(order).toEqual(["remote-running", "operational"]);
+    releaseRemote();
+    await Promise.all([firstRemote, secondRemote]);
+    expect(order).toEqual(["remote-running", "operational", "remote-queued"]);
+    admission.close();
+  });
 });
 
 describe("SystemGitWorktreeReader.observe", () => {

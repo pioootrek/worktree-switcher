@@ -45,6 +45,11 @@
       "author": "agent:codex",
       "date": "2026-09-11",
       "text": "Detailed plan at NOTE-20260909-self-hosted-saas-plan/remote-verification-implementation.md (baseline d429eb9): six gated slices from durable identity/grants through worker-owned exact-SHA preparation, existing queue integration, outbound dispatch/recovery, MCP/CLI/UI, and installation acceptance. Automatic source fetching uses isolated attempt workspaces; never moves active worktrees or substitutes branch HEAD. Early tests cover authorization, source drift, dependency setup, duplicate delivery, offline cancellation, restarts and retention. Planning only; next implementation slice is identity/grants/state contracts."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-11",
+      "text": "Implementation resumed on t3code/remote-commit-verification by integrating the previously reviewed remote contracts, SQLite persistence, exact-SHA workspace and attempt-state series with current main. The integration preserves the main-line launch-preset repair and adds a regression-tested migration path for databases opened on the pre-merge remote branch. Focused tests, pnpm check and pnpm build pass. This is not feature completion: one-time enrollment, credential hashes/expiry/revocation, versioned worker protocol, queue execution and transports remain open."
     }
   ],
   "priority": "next",
