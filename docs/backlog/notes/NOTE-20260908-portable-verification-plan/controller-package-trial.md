@@ -209,5 +209,7 @@ development evidence, not a release checksum. CI matrix results are not yet know
 
 The concrete disposable-user/systemd, same-schema and migration upgrade, injected
 failure recovery, removal and real MCP-client contract is recorded in
-`package-lifecycle-harness.md`. Those slices remain unimplemented and unverified;
-the package release feature stays open.
+`package-lifecycle-harness.md`. Slice 3 now has a packaged lifecycle driver and a
+disposable GitHub runner path, but real systemd evidence remains pending until that
+job runs. Upgrade/recovery and real-client slices remain unimplemented and
+unverified; the package release feature stays open.

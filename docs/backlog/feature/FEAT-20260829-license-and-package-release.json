@@ -50,6 +50,11 @@
       "author": "agent:codex",
       "date": "2026-09-11",
       "text": "Implemented package-trial slices 1–2 locally with private version 0.1.0-trial.1: one stale-build-aware npm-pack path emits tarball, SHA256SUMS, provenance, install guide and smoke driver; CI consumes the exact artifact on Ubuntu x64 with Node 22.23.2 and 24.21.0. The smoke now uses a global user prefix containing spaces, PATH discovery, doctor, installed skill/docs/link and text audits, native SQLite provisioning evidence, offline/live CLI, packaged dashboard/API/MCP/version checks, project removal, full resolved dependencies and graceful cleanup. Local Node 24.19.0 check/build and the 12-stage dirty-worktree artifact smoke passed. Added a concrete disposable systemd/upgrade/fault-recovery/removal/real-client harness contract. Keep the feature open: CI matrix evidence, real service lifecycle, upgrade/rollback, owner trial and release handoff remain pending; nothing was published or installed as the user's service."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-11",
+      "text": "Implemented the slice 3 packaged-systemd harness and CI wiring. The exact producer artifact now carries a checksummed lifecycle driver. On a fresh Ubuntu runner it installs into a prefix containing spaces, validates installed Node/CLI/dashboard paths and an owner-only unit, exercises status/idempotent install/open/restart/stop, restarts the disposable user's systemd manager to prove enabled-session startup, checks foreground-singleton and occupied-port failures without interfering with their owners, and uninstalls twice while preserving state and credentials. Local helper tests, service-focused tests, lint, typecheck, build and exact-artifact package smoke passed. A host preflight correctly refused the owner's existing service before any mutation and left its PID unchanged. Keep slice 3 and the feature open until the new real systemd CI job produces green evidence; upgrade/recovery, owner trial and release handoff remain pending."
     }
   ],
   "priority": "next",

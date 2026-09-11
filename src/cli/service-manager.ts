@@ -280,7 +280,7 @@ function systemdQuote(value: string): string {
 
 function systemdDirectivePath(value: string): string {
   if (!value.startsWith("/") || /[\0\r\n]/.test(value)) throw new Error("The service working directory must be an absolute path without control characters.");
-  return value.replaceAll("%", "%%").replaceAll("\\", "\\\\").replaceAll(" ", "\\x20").replaceAll("\t", "\\t");
+  return value.replaceAll("%", "%%");
 }
 
 function xmlEscape(value: string): string {

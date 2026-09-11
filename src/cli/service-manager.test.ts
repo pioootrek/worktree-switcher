@@ -27,7 +27,7 @@ describe("user service definitions", () => {
       startArguments: [...installOptions.startArguments, "--public-url", "https://switcher.example.test"],
     });
     expect(unit).toContain('ExecStart="/opt/node/bin/node" "/opt/worktree switcher/dist/cli/index.js" "start"');
-    expect(unit).toContain("WorkingDirectory=/opt/worktree\\x20switcher");
+    expect(unit).toContain("WorkingDirectory=/opt/worktree switcher");
     expect(unit).toContain('"/home/me/data%%dir"');
     expect(unit).toContain("Restart=on-failure\nRestartSec=5");
     expect(unit).toContain("KillMode=control-group");
