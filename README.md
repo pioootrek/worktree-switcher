@@ -39,11 +39,16 @@ prevent an unrelated terminal or client from starting its own processes.
 
 ## Quick start
 
-**Status:** working prototype, installed from source. The CLI and data model may
-change; an npm release is still planned. Linux is the primary verified platform.
-macOS has a service installer, with limitations listed below.
+**Status:** working prototype. A private `0.1.0-trial.1` tarball flow is available;
+there is no npm registry release. The CLI and data model may change. Linux x64 is
+the primary verified platform. macOS has a service installer, with limitations
+listed below.
 
-Install [Node.js 22 or newer](https://nodejs.org/), Git and
+For the verified tarball, use the packaged
+[trial installation guide](docs/package-trial.md). It installs with npm into a
+user-owned prefix and does not require pnpm or a source checkout.
+
+To build from source, install [Node.js 22 or newer](https://nodejs.org/), Git and
 [pnpm](https://pnpm.io/installation). Use the pnpm version declared in
 [`package.json`](package.json), currently `11.22.0`.
 
@@ -240,7 +245,7 @@ Remote verification has implementation work on separate branches:
 [exact-commit workspaces](https://github.com/pioootrek/worktree-switcher/pull/30)
 and [attempt records](https://github.com/pioootrek/worktree-switcher/pull/31).
 These are foundations, not an available end-to-end remote worker feature on
-`main`. Follow the [remote verification plan](docs/remote-verification-plan.md)
+`main`. Follow the [remote verification plan](https://github.com/pioootrek/worktree-switcher/blob/main/docs/remote-verification-plan.md)
 for delivery gates, recovery tests and current scope.
 
 The longer-term direction is an optional, maintainer-operated SaaS for
@@ -248,7 +253,7 @@ coordination, with customer-owned execution workers. Self-hosting is intended to
 remain complete and independent. Hosted accounts, organization isolation, shared
 project memory and agent-fleet coordination are planned; there is no hosted
 signup or pricing offer today. See the
-[self-hosted and SaaS plan](docs/backlog/notes/NOTE-20260909-self-hosted-saas-plan/implementation-plan.md).
+[self-hosted and SaaS plan](https://github.com/pioootrek/worktree-switcher/blob/main/docs/backlog/notes/NOTE-20260909-self-hosted-saas-plan/implementation-plan.md).
 
 ## CLI and documentation
 
@@ -268,12 +273,13 @@ offline access takes the singleton lock before opening state.
 | Guide | Use it for |
 | --- | --- |
 | [User service](docs/user-service.md) | Installation, restarts, access links, logs and removal |
+| [Package trial](docs/package-trial.md) | Verified tarball, checksum, user-prefix install, upgrade and removal |
 | [Controller HTTPS](docs/controller-https.md) | Caddy, certificates, public origin and backend binding |
 | [Reservations and MCP](docs/reservations-and-mcp.md) | Ownership, client integration and agent permissions |
-| [Architecture](docs/architecture.md) | Controller, persistence and lifecycle boundaries |
-| [Module development](docs/module-development.md) | Code locations and focused verification commands |
-| [Resource budget](docs/resource-budget.md) | Measured overhead, benchmark method and acceptance thresholds |
-| [Backlog](docs/backlog/index.json) | Open work and links to implementation plans |
+| [Architecture](https://github.com/pioootrek/worktree-switcher/blob/main/docs/architecture.md) | Controller, persistence and lifecycle boundaries |
+| [Module development](https://github.com/pioootrek/worktree-switcher/blob/main/docs/module-development.md) | Code locations and focused verification commands |
+| [Resource budget](https://github.com/pioootrek/worktree-switcher/blob/main/docs/resource-budget.md) | Measured overhead, benchmark method and acceptance thresholds |
+| [Backlog](https://github.com/pioootrek/worktree-switcher/blob/main/docs/backlog/index.json) | Open work and links to implementation plans |
 
 Default persistent data is under `$XDG_DATA_HOME/worktree-switcher` (normally
 `~/.local/share/worktree-switcher`). Runtime state, the private access record
@@ -302,7 +308,8 @@ runs real-controller, HTTPS and E2E suites. `smoke:package` installs the built
 tarball into an isolated consumer and checks the CLI, native SQLite dependency,
 dashboard, HTTP and MCP. It does not alter your installed user service.
 Run builds and browser suites within your machine's resource policy.
-Read [AGENTS.md](AGENTS.md) before contributing code.
+Read [AGENTS.md](https://github.com/pioootrek/worktree-switcher/blob/main/AGENTS.md)
+before contributing code.
 
 ## License
 

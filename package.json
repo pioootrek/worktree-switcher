@@ -1,6 +1,6 @@
 {
   "name": "worktree-switcher",
-  "version": "0.0.1",
+  "version": "0.1.0-trial.1",
   "private": true,
   "description": "Switch development servers between Git worktrees without changing ports",
   "license": "MIT",
@@ -23,6 +23,7 @@
     "skills",
     "docs/controller-https.md",
     "docs/dependency-licenses.md",
+    "docs/package-trial.md",
     "docs/user-service.md",
     "docs/reservations-and-mcp.md",
     "LICENSE",
@@ -38,6 +39,7 @@
     "dev": "tsx src/cli/index.ts start --web-root out",
     "dev:web": "next dev",
     "lint": "eslint .",
+    "package:trial": "node scripts/package-trial.mjs",
     "start": "node dist/cli/index.js start",
     "smoke:package": "node scripts/package-smoke.mjs",
     "test": "vitest run",
@@ -49,7 +51,7 @@
     "test:https": "node scripts/build-fingerprint.mjs --check && vitest run --config vitest.https.config.ts",
     "test:e2e": "node scripts/build-fingerprint.mjs --check && playwright test --config playwright.e2e.config.ts",
     "bench:resources": "node scripts/resource-benchmark.mjs",
-    "test:resources": "node --test scripts/resource-metrics.test.mjs"
+    "test:resources": "node --test scripts/*.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

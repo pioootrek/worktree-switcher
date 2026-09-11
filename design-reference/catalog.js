@@ -79,7 +79,10 @@
 
   search.addEventListener("input", () => { page = 0; render(); });
   for (const input of [state, count]) input.addEventListener("change", () => { page = 0; render(); });
-  density.addEventListener("change", () => byId("playground").classList.toggle("compact", density.value === "compact"));
+  function applyDensity() {
+    byId("playground").classList.toggle("compact", density.value === "compact");
+  }
+  density.addEventListener("change", applyDensity);
   byId("previous").addEventListener("click", () => { page -= 1; render(); });
   byId("next").addEventListener("click", () => { page += 1; render(); });
   byId("reset").addEventListener("click", () => { search.value = ""; state.value = "all"; page = 0; render(); });
@@ -97,5 +100,6 @@
     });
   }
   applyTheme();
+  applyDensity();
   render();
 })();
