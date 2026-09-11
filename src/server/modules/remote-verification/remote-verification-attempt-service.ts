@@ -39,7 +39,7 @@ const TRANSITIONS: Record<RemoteVerificationAttemptPhase, ReadonlySet<RemoteVeri
 };
 
 const TERMINAL_PHASES = new Set<RemoteVerificationAttemptPhase>(["succeeded", "failed", "cancelled"]);
-const SHA_PATTERN = /^[0-9a-f]{40}$/i;
+const SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
 
 function requiredText(value: string, label: string): string {
   const normalized = value.trim();

@@ -75,11 +75,11 @@ function request(id: string, commitSha = SHA): RemoteVerificationRequest {
   };
 }
 
-function submit(store: SqliteStateStore, id = "request-1"): RemoteVerificationRequest {
+function submit(store: SqliteStateStore, id = "request-1", commitSha = SHA): RemoteVerificationRequest {
   return new RemoteVerificationService(store, () => "2026-09-11T00:00:00.000Z", () => id).submit({
     projectId: "project-1",
     workerId: "worker-1",
-    commitSha: SHA,
+    commitSha,
     presetId: "node:test",
     idempotencyKey: id,
   }, { principalId: "owner-1" });
@@ -351,6 +351,34 @@ describe("remote verification SQLite persistence", () => {
       "invalid_evidence",
     );
     expect(store.getRemoteVerificationRequest(accepted.id)?.phase).toBe("assigned");
+    store.close();
+  });
+
+  it("completes a request whose exact commit uses a 64-character object id", () => {
+    const path = databasePath();
+    const store = new SqliteStateStore(path);
+    provision(store);
+    const sha256 = "b".repeat(64);
+    const accepted = submit(store, "request-sha256", sha256);
+    const service = attemptService(store, [
+      "2026-09-11T00:01:00.000Z",
+      "2026-09-11T00:02:00.000Z",
+      "2026-09-11T00:03:00.000Z",
+      "2026-09-11T00:04:00.000Z",
+    ]);
+    const assigned = service.assign({ requestId: accepted.id, workerId: "worker-1" });
+    const preparing = service.report({ attemptId: assigned.id, expectedVersion: 1, phase: "preparing" });
+    const running = service.report({
+      attemptId: assigned.id,
+      expectedVersion: preparing.version,
+      phase: "running",
+      localRunId: "local-run-sha256",
+      executedCommitSha: sha256,
+    });
+    const succeeded = service.report({ attemptId: assigned.id, expectedVersion: running.version, phase: "succeeded" });
+
+    expect(succeeded).toMatchObject({ phase: "succeeded", executedCommitSha: sha256 });
+    expect(store.getRemoteVerificationRequest(accepted.id)?.phase).toBe("completed");
     store.close();
   });
 
