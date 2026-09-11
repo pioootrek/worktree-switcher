@@ -1,283 +1,172 @@
 # Worktree Switcher
 
-One dev server per project. Switch its Git worktree without changing the port.
+**Coordinate dev servers and test runs across Git worktrees, for you and your coding agents.**
 
-If you keep the same application checked out on several branches, you probably
-know the routine: find the terminal that owns the server, stop it, change
-directories, start it again, then check whether an old process kept the port.
-Worktree Switcher handles that routine from one local dashboard.
+Working on several branches with an AI coding agent? Give each project one
+stable development port. Use the dashboard to switch the running worktree,
+or let an MCP client claim it. Queue builds and tests with a shared concurrency
+limit, then read which code was checked and what happened.
 
-Register each repository once. The controller discovers its worktrees and gives
-the project a stable port. You can start, stop, restart, or move the server to a
-different worktree without disturbing the other projects in your stack.
+Worktree Switcher runs on your machine. It supports Node.js and Django projects,
+keeps state in SQLite, and needs no hosted account. It is MIT licensed.
 
-Coding agents can use the same controller through MCP. They can inspect state,
-claim a worktree, and release it when the task is done instead of starting a
-second copy behind your back.
+[Try it locally](#quick-start) · [Connect an MCP client](#mcp-for-coding-agents) · [Self-host over HTTPS](#self-hosting-and-https) · [Roadmap](#roadmap)
 
-> [!IMPORTANT]
-> This is a working prototype. The CLI and data model may still change. The npm
-> package has not been published yet.
+![Worktree Switcher dashboard showing two example projects, their selected branches, stable ports, runtime controls, and test tabs](https://raw.githubusercontent.com/pioootrek/worktree-switcher/main/.github/assets/dashboard.png)
 
-## What works
+*The actual dashboard with example project data. English and Polish are supported.*
 
-- Manage several repositories at once, each on its own port.
-- Discover worktrees through Git's porcelain output.
-- Start, stop, restart, and switch Node.js and Django development servers.
-- Detect `pnpm`, `npm`, `yarn`, and `bun` projects with a `dev` script.
-- Show the active branch, commit, dirty state, PID, failures, and recent logs.
-- Keep human locks and expiring agent claims in SQLite.
-- Let MCP clients inspect projects and manage their own claims.
-- Run Next.js development servers over HTTP or development HTTPS.
-- Run the controller in a terminal or as a user service on Linux and macOS.
-- Optionally cap the number of concurrently running managed servers.
-- Queue Node.js and Django verification commands per worktree with a configurable global parallel limit.
-- Monitor aggregate RAM, peak RAM, CPU, and process count for each managed server on Linux.
-- Track disk usage for every worktree, including `.next`, `.next/cache`, and `node_modules`.
-- Use the dashboard in English or Polish. English is the default.
+## When it helps
+
+You have a frontend on port 3000, an API on port 4000, and several Git worktrees.
+An agent needs to check a feature branch while you are using another one.
+
+- **Keep a branch available for your work.** A human lock pins the project's
+  managed server to a worktree. Agents using MCP must honor that lock.
+- **Give an agent temporary ownership.** A claim reserves a worktree and starts
+  or moves the project's server. Releasing the claim leaves the server running.
+- **Switch one project at a time.** Move the frontend to another worktree on
+  port 3000 while the API keeps running on port 4000.
+- **Put heavy checks in a queue.** Run discovered test, lint, typecheck and build
+  presets with a global parallel limit and at most one run per worktree.
+- **Read the evidence.** See the branch, commit, dirty state, source changes,
+  process outcome and logs associated with a test run.
+
+Use it alongside your editor, terminal and existing MCP-capable coding client.
+You create worktrees with Git or your usual tools; Switcher discovers them.
+Agents need to use the controller for its ownership rules to apply. It cannot
+prevent an unrelated terminal or client from starting its own processes.
 
 ## Quick start
 
-Worktree Switcher is not on npm yet, so run it from a local checkout.
+**Status:** working prototype, installed from source. The CLI and data model may
+change; an npm release is still planned. Linux is the primary verified platform.
+macOS has a service installer, with limitations listed below.
 
-You need Linux or macOS, Node.js 22 or newer, pnpm, and Git.
+Install [Node.js 22 or newer](https://nodejs.org/), Git and
+[pnpm](https://pnpm.io/installation). Use the pnpm version declared in
+[`package.json`](package.json), currently `11.22.0`.
 
 ```bash
 git clone https://github.com/pioootrek/worktree-switcher.git
 cd worktree-switcher
-corepack enable
 pnpm install --frozen-lockfile
 pnpm build
-pnpm start
-```
-
-The controller prints a private browser URL. Open that exact URL, select
-**Add project**, choose a Git repository, and assign its port. Worktree Switcher
-will find every worktree attached to that repository.
-
-The dashboard listens on `0.0.0.0:47831` by default, so other devices on the
-LAN can reach it if the host firewall allows the connection. MCP stays on
-`127.0.0.1:47832`.
-
-To keep the dashboard on the same machine:
-
-```bash
 node dist/cli/index.js start --host 127.0.0.1
 ```
 
-## Run it in the background
+Open the **full private URL** printed by the controller. It includes the token
+needed to pair your browser. Then:
 
-For daily use, install the built controller as a user service. The installer
-uses systemd on Linux and a LaunchAgent on macOS. It does not need `sudo`, edit
-firewall rules, or install a system-wide daemon.
+1. Select **Add project**, choose a local Git repository and assign a port.
+2. Pick one of its discovered worktrees and select **Start**.
+3. Open the application's port. Select another worktree and **Switch** to check
+   that branch at the same address.
+4. Open **Tests**, choose a discovered preset and run it. Dependency installation
+   is your responsibility for these local worktrees.
 
-Stop the foreground controller first, then run:
+The example binds the dashboard to loopback on port 47831. MCP uses loopback
+port 47832. The command's default host, when `--host` is omitted, is `0.0.0.0`.
+Use the [HTTPS setup](#self-hosting-and-https) for access from another device.
+
+### Keep it running in the background
+
+Stop the foreground controller first. From the built checkout:
 
 ```bash
-node dist/cli/index.js service install
+node dist/cli/index.js service install --host 127.0.0.1
 node dist/cli/index.js service status
 node dist/cli/index.js service open
 ```
 
-`service open` reads the current pairing URL from an owner-only file. The URL
-does not appear in the system journal or LaunchAgent logs.
+The installer uses a Linux systemd user service or a macOS LaunchAgent. It does
+not require `sudo` or change your firewall. See the
+[user-service guide](docs/user-service.md) for options, updates and removal.
 
-See [Running Worktree Switcher as a user service](docs/user-service.md) for
-configuration options, upgrades, logs, Linux session behavior, and removal.
+**After a restart, use `service open` or `service url` to obtain the current
+pairing link.** Each controller start changes the browser token and session;
+an old link will not pair a new browser session. MCP has a separate persistent
+token. Keep both kinds of credential out of issues and shared logs.
 
-## A typical workflow
+## What is available on main
 
-1. Add your frontend repository and give it port 3000.
-2. Add your API repository and give it port 4000.
-3. Pick a worktree for each project.
-4. Start both servers.
-5. Switch the frontend to another branch. The API keeps running on port 4000.
-
-Each project owns one runtime slot. A switch stops that project's current
-process tree, starts the selected worktree on the same port, and waits for the
-port to become ready. Operations for other projects continue independently.
-
-The gauge in the dashboard configures an optional controller-wide capacity.
-Each starting or running server consumes one slot. A switch retains its current
-slot, while a failed start releases it. Lowering the limit never stops an
-already running server; new starts remain blocked until usage falls below the
-configured limit.
-
-Each project card also shows resource use for the complete process group owned
-by the controller, including package-manager and Next.js worker processes. The
-sampler runs every five seconds only while a server is active and retains at
-most five minutes of RAM history. Stopped servers do not consume sampling work.
-On unsupported systems, the panel reports that metrics are unavailable without
-changing the server lifecycle.
-
-The **Storage** tab measures allocated disk space for every discovered
-worktree. It separates `.next`, `.next/cache`, `node_modules`, and other files,
-shows the five largest top-level directories, and keeps the first measurement
-plus 179 recent samples in SQLite. Scans never follow symlinks, run one at a time, and are scheduled at
-first discovery and at most once every six hours. Use the refresh button for an
-explicit new sample.
-Git administrative data under `.git` is excluded so linked worktrees remain
-comparable with the repository's main checkout.
-
-For detected Next.js projects, the Storage tab can remove the selected
-worktree's `.next` directory after an explicit confirmation. The action is
-available only when that worktree is stopped, unlocked, and not being scanned.
-The controller derives the directory from an allowlisted cache identifier,
-refuses symlinks and non-Next.js projects, records the outcome in the audit
-trail, and schedules a fresh disk measurement. It never accepts a deletion
-path or removes `node_modules`.
-
-Dirty worktrees are allowed. The dashboard warns you but does not block the
-server.
-
-## Managed tests
-
-The **Tests** tab discovers finite verification presets separately for every
-worktree. Node.js projects expose `test`, `test:*`, `check`, `lint`,
-`typecheck`, and `build` package scripts. Django projects expose
-`manage.py test` and resolve the Python interpreter inside the selected
-worktree.
-
-Runs enter one controller-wide FIFO queue. The configured parallel limit
-defaults to one, and no more than one run may execute in the same worktree at
-once. Each run records its worktree path, branch, commit, dirty state, actor,
-command, bounded output tail, exit code, and final state in SQLite. Complete
-logs are written under `logs/tests/`. A graceful controller stop cancels active
-runs; after an unexpected stop, unfinished records are marked as interrupted
-on the next start.
-
-Commands are discovered by typed Node.js and Django adapters and are spawned
-without a shell. The browser and MCP select only a discovered preset and an
-exact Git-discovered worktree; neither accepts arbitrary command text or a
-working directory.
-
-## How it works
-
-```mermaid
-flowchart LR
-    Browser[Web dashboard] --> Controller[Node.js controller]
-    Agent[MCP client] --> MCP[Loopback MCP listener]
-    MCP --> Controller
-    Controller --> Git[Git worktrees]
-    Controller --> SQLite[(SQLite)]
-    Controller --> Apps[Development servers]
-    Controller --> Tests[Test process queue]
-```
-
-Next.js builds the dashboard as static files. At runtime, one Node.js controller
-serves those files, owns SQLite, reads Git metadata, and manages child
-processes. There is no resident `next start` process behind the dashboard.
-
-Launch commands are stored as an executable and argument array. The controller
-spawns them without a shell. Neither the browser nor MCP can submit an arbitrary
-command.
-
-## Project commands and ports
-
-When you add a repository, Worktree Switcher detects Node.js from `package.json`
-or Django from a root-level `manage.py`. You can also select the preset
-explicitly. Node.js projects must have a `dev` script. Angular workspaces are
-detected from `angular.json` plus `@angular/cli`; they may use either
-`dev: ng serve` or the standard `start: ng serve` script.
-
-| Project type | How the port is passed |
+| Capability | What you can do today |
 | --- | --- |
-| Next.js | `PORT` environment variable |
-| Vite, Astro, Nuxt | Framework-specific `--port` argument |
-| Angular | `ng serve --host 127.0.0.1 --port {port}` through `dev` or `start` |
-| Other Node.js servers | `PORT` environment variable |
-| Django | `manage.py runserver 127.0.0.1:{port}` |
+| Development servers | Start, stop, restart and switch a project's worktree while keeping its configured port |
+| Project management | Add, list and remove projects through the CLI; add projects through the dashboard |
+| Human and agent ownership | Lock a worktree or use expiring, session-owned MCP claims |
+| Verification queue | Discover Node.js/Django presets, submit finite runs, cancel owned runs and retrieve durable results |
+| Source attribution | Compare Git observations around a run and distinguish changed or uncertain source from a passing command |
+| Capacity | Configure separate global limits for managed servers and test runs |
+| Environment profiles | Select named server profiles and configure test environment policies |
+| HTTPS | Serve the dashboard through Caddy; separately configure HTTPS for managed Next.js development servers |
+| Monitoring | Inspect runtime logs, Linux process-group RAM/CPU, and cached worktree disk usage |
+| Cache maintenance | Remove a stopped, unlocked Next.js worktree's `.next` cache with confirmation |
+| Dashboard | Use English or Polish, desktop or mobile layouts, and explicit Git metadata refresh |
 
-A custom Node.js server can read the same environment variable:
+For Node.js, Switcher detects pnpm, npm, Yarn and Bun projects with a `dev`
+script. Next.js uses `PORT`; Vite, Astro and Nuxt receive port arguments.
+Angular workspaces can use `dev: ng serve` or the standard `start: ng serve`.
+Django support targets a root-level `manage.py` and its development server;
+the resolver prefers `.venv/bin/python`, then `venv/bin/python`, then `python3`.
 
-```js
-const port = Number(process.env.PORT ?? 3000);
-server.listen(port);
-```
+### Tests and source evidence
 
-For every Django worktree, the resolver prefers `.venv/bin/python`, then
-`venv/bin/python`, then `python3`. It does not install dependencies, run
-migrations, or manage `collectstatic`. Custom commands, external virtual
-environments, ASGI servers, and Django LAN binding are not supported yet.
+The **Tests** tab discovers `test`, `test:*`, `check`, `lint`, `typecheck` and
+`build` scripts in Node.js worktrees, plus `manage.py test` for Django. The
+controller-wide FIFO queue defaults to one parallel run. Tests are separate
+from the development-server lifecycle; a test submission does not claim or
+switch the server.
 
-## Environment profiles
+Results persist in SQLite with bounded output tails; full logs are stored in
+the controller's state directory. A graceful controller stop cancels active
+runs. Recovery marks unfinished records interrupted after an unexpected stop.
 
-Every managed project has a `default` environment profile and may define
-additional named profiles such as `staging`, `e2e`, or `fixtures`. Profiles are
-framework-independent: the selected literal variables are injected into both
-Node.js and Django processes and remain selected when the project switches to
-another worktree. For Django, a profile can select settings without adding
-free-form command text, for example:
-
-```text
-DJANGO_SETTINGS_MODULE=config.settings.staging
-SWITCHER_TEST_VALUE=staging
-```
-
-`PORT` and `NODE_ENV` remain controller-owned. Variable names are validated,
-processes are still spawned without a shell, and audit events record variable
-names without their values. Editing or selecting a profile for an active server
-requires an explicit restart. Literal values are stored in SQLite; do not put
-secrets in them. Secret references, `.env` files, relative working directories,
-PATH prefixes, and required runtime directories remain planned work.
+Local tests run against the selected worktree, which may contain uncommitted
+edits. Source observations help detect changes before or during execution;
+they are not an immutable source snapshot. Fetching and testing a pushed SHA
+on another worker is [in development](#roadmap).
 
 ## MCP for coding agents
 
-MCP is enabled by default at:
-
-```text
-http://127.0.0.1:47832/mcp
-```
-
-It uses Streamable HTTP and a persistent bearer token. Print the client
-configuration with:
+Configure your MCP-capable client with the output of:
 
 ```bash
 node dist/cli/index.js config mcp
 ```
 
-The output contains the token. Treat it like a password. Keep it out of source
-files, issues, logs, and chat.
+This prints the loopback Streamable HTTP endpoint and its bearer token. Store
+that configuration privately in your client. Client configuration formats vary;
+Switcher does not require you to replace your current editor or agent.
 
-Available tools:
+The intended server workflow is:
 
-| Tool | What it does |
-| --- | --- |
-| `list_projects` | Lists registered projects and their runtime placement |
-| `get_server_capacity` | Reads the global server limit, usage, and slot holders |
-| `get_test_queue` | Reads the global test limit and current queue usage |
-| `get_project_status` | Reads runtime, claim, and selected-worktree state |
-| `get_project_status_compact` | Reads bounded placement, ownership, phase, capacity, and an opaque cursor |
-| `get_runtime_logs` | Reads an explicit bounded runtime log tail |
-| `get_project_storage` | Reads cached disk usage and history for project worktrees |
-| `list_worktrees` | Lists worktrees discovered for a project |
-| `list_test_presets` | Lists safe presets discovered for each project worktree |
-| `run_test` | Queues a preset for an exact worktree with an idempotency key |
-| `get_test_run` | Reads one run and its bounded output tail |
-| `get_test_run_status` | Reads compact process and source-attribution status without logs |
-| `wait_for_status_change` | Waits up to 20 seconds for a project or run cursor to change |
-| `cancel_test_run` | Cancels a run created by the current MCP session |
-| `set_project_environment` | Replaces the selected profile's literal variables while the server is stopped |
-| `list_environment_profiles` | Lists named profiles and the selected profile |
-| `save_environment_profile` | Creates or replaces a literal environment profile |
-| `select_environment_profile` | Selects a profile while the server is stopped |
-| `delete_environment_profile` | Deletes a non-default, inactive profile |
-| `claim_project` | Claims a worktree and moves or starts its server |
-| `renew_project_claim` | Extends a claim owned by the current MCP session |
-| `release_project_claim` | Releases a claim without stopping the server |
+```text
+list_projects → list_worktrees → claim_project → get_project_status
+               ...work with the managed server...
+release_project_claim
+```
 
-Claims are exclusive and tied to one discovered worktree. They expire after
-inactivity and have an eight-hour maximum lifetime. An MCP client cannot run
-arbitrary commands, choose arbitrary paths, or force-release somebody else's
-claim.
+For finite verification:
 
-Read [Reservations and MCP integration](docs/reservations-and-mcp.md) for the
-claim model and security boundaries.
+```text
+list_test_presets → run_test → get_test_run_status → get_test_run
+```
 
-### Install the agent skill
+Use an exact discovered worktree path and reuse the idempotency key when retrying
+the same submission. `wait_for_status_change` supports bounded waiting, and
+`get_project_status_compact` avoids repeatedly fetching full project data.
+`cancel_test_run` cancels runs owned by the current MCP session.
 
-The repository includes an Agent Skill for clients that work with managed
-development servers. From this checkout:
+Claims expire, belong to the creating MCP session, and cannot force-release
+another owner's reservation. The controller accepts discovered presets and typed
+operations rather than arbitrary remote command text or filesystem paths.
+See [reservations and MCP](docs/reservations-and-mcp.md) for details.
+
+### Teach your agent to use it
+
+The repository ships an [Agent Skill](skills/worktree-switcher/SKILL.md).
+For Codex, copy it from this checkout:
 
 ```bash
 codex_skill_dir="${CODEX_HOME:-$HOME/.codex}/skills"
@@ -285,196 +174,137 @@ mkdir -p "$codex_skill_dir"
 cp -R skills/worktree-switcher "$codex_skill_dir/"
 ```
 
-Restart the agent session after copying the skill. Configure MCP separately
-with the private output of `config mcp`. The skill contains no credentials.
-
-Add a short rule to each managed project's `AGENTS.md` or `CLAUDE.md`:
+Restart the agent session and configure MCP separately. In a managed project's
+agent instructions, add:
 
 ```md
-## Development server
-
-Use the `$worktree-switcher` skill before starting or switching this project's
-development server. When the Worktree Switcher MCP tools are available, let the
-controller own the server process and honor existing claims.
+Use the worktree-switcher skill and MCP tools before starting or switching this
+project's development server. Honor existing claims. Use its managed test queue
+for available verification presets.
 ```
 
-The full agent workflow lives in
-[`skills/worktree-switcher/SKILL.md`](skills/worktree-switcher/SKILL.md).
+## Self-hosting and HTTPS
 
-## Next.js development HTTPS
+Today, the browser is the client and one Node.js controller is the server. The
+controller manages repositories and processes on the machine where it runs.
+Next.js builds the panel into static files; it does not run a second resident
+application server. SQLite keeps state local. Self-hosting needs no SaaS account.
 
-Open the shield button on a project card to choose one of these modes:
+```mermaid
+flowchart LR
+    Browser[Browser on your laptop or phone] --> Proxy[Caddy HTTPS proxy]
+    Proxy --> Controller[Node.js controller]
+    Agent[Local MCP client] --> MCP[Loopback MCP listener]
+    MCP --> Controller
+    Controller --> Git[Local Git worktrees]
+    Controller --> State[(SQLite and logs)]
+    Controller --> Servers[Managed dev servers]
+    Controller --> Queue[Finite test queue]
+```
 
-- HTTP
-- HTTPS with a certificate generated by Next.js
-- HTTPS with a local private key, certificate, and optional CA file
+Caddy is optional for loopback use. For HTTPS access from another device, follow
+[Protect the controller with HTTPS](docs/controller-https.md). The guide covers
+a domain with trusted certificates and LAN use with a private CA. Keep the
+controller bound to loopback behind the proxy and configure `--public-url`.
+The dashboard proxy does not expose the loopback MCP listener.
 
-Stop the project's server before changing this setting. For custom
-certificates, Worktree Switcher saves canonical file paths. It never sends the
-private key contents through the dashboard.
+The shield button on a project card configures **that Next.js application's**
+development HTTPS, using generated or local custom certificates. This is separate
+from dashboard HTTPS. Stop the managed server before changing its TLS settings.
 
-This controls the managed Next.js server only. It does not add TLS to the
-Worktree Switcher dashboard.
+### Security and platform boundaries
 
-## Security model
+Switcher can execute project code under your OS user. Use trusted repositories
+and clients. Shell-free process spawning, claims and preset allowlists are not a
+sandbox for untrusted code.
 
-The dashboard can start and stop local processes, so its access URL is a
-credential.
+- Browser API requests and event streams require authentication; cross-origin
+  browser mutations are rejected.
+- The directory picker stays within its configured root. The controller stops
+  only verified process trees it owns, never an unknown process occupying a port.
+- Literal environment profile values are stored in SQLite. Use them for
+  non-secret configuration; worker-side secret references remain planned.
+- Managed-server resource metrics use Linux `/proc`. macOS reports that those
+  metrics are unavailable; its LaunchAgent still needs real-host lifecycle evidence.
+- Windows process-tree and service management are not supported.
 
-- Every controller start creates a new browser pairing token.
-- Dashboard API calls, log requests, and events require that token.
-- Browser mutations from another origin are rejected.
-- The directory picker stays below the configured browse root.
-- MCP listens on loopback and uses a separate persistent token.
-- The controller only stops process trees it started.
-- An unknown process on a configured port is reported, not killed.
+## Roadmap
 
-Direct mode uses HTTP. Keep it on loopback or a deliberately trusted LAN. For
-the supported Caddy transport, including LAN private-CA and public-domain
-variants, follow [Protect the controller with HTTPS](docs/controller-https.md).
-If a direct-mode host uses UFW, a LAN-only rule can look like this:
+The next complete workflow is **push a commit, ask your worker to verify it, and
+read the result from your existing client**. The worker will fetch the requested
+SHA itself into an isolated run workspace, without moving your active dev worktree.
+
+Remote verification has implementation work on separate branches:
+[request authorization](https://github.com/pioootrek/worktree-switcher/pull/28),
+[admission persistence](https://github.com/pioootrek/worktree-switcher/pull/29),
+[exact-commit workspaces](https://github.com/pioootrek/worktree-switcher/pull/30)
+and [attempt records](https://github.com/pioootrek/worktree-switcher/pull/31).
+These are foundations, not an available end-to-end remote worker feature on
+`main`. Follow the [remote verification plan](docs/remote-verification-plan.md)
+for delivery gates, recovery tests and current scope.
+
+The longer-term direction is an optional, maintainer-operated SaaS for
+coordination, with customer-owned execution workers. Self-hosting is intended to
+remain complete and independent. Hosted accounts, organization isolation, shared
+project memory and agent-fleet coordination are planned; there is no hosted
+signup or pricing offer today. See the
+[self-hosted and SaaS plan](docs/backlog/notes/NOTE-20260909-self-hosted-saas-plan/implementation-plan.md).
+
+## CLI and documentation
+
+From this source checkout:
 
 ```bash
-sudo ufw allow from 192.168.1.0/24 to any port 47831 proto tcp comment 'Worktree Switcher LAN'
+node dist/cli/index.js project add /path/to/repo --name "My app" --port 3000
+node dist/cli/index.js project list --json
+node dist/cli/index.js project remove <project-id>
+node dist/cli/index.js doctor
 ```
 
-Adjust the subnet to match your network. The service installer never changes
-the firewall.
+With no explicit port, `project add` selects an available port between 3000 and
+3999. Project commands use the authenticated service API when it is running;
+offline access takes the singleton lock before opening state.
 
-## CLI reference
+| Guide | Use it for |
+| --- | --- |
+| [User service](docs/user-service.md) | Installation, restarts, access links, logs and removal |
+| [Controller HTTPS](docs/controller-https.md) | Caddy, certificates, public origin and backend binding |
+| [Reservations and MCP](docs/reservations-and-mcp.md) | Ownership, client integration and agent permissions |
+| [Architecture](docs/architecture.md) | Controller, persistence and lifecycle boundaries |
+| [Module development](docs/module-development.md) | Code locations and focused verification commands |
+| [Resource budget](docs/resource-budget.md) | Measured overhead, benchmark method and acceptance thresholds |
+| [Backlog](docs/backlog/index.json) | Open work and links to implementation plans |
 
-From a source checkout, replace `worktree-switcher` in the examples below with
-`node dist/cli/index.js`.
+Default persistent data is under `$XDG_DATA_HOME/worktree-switcher` (normally
+`~/.local/share/worktree-switcher`). Runtime state, the private access record
+and logs are under `$XDG_STATE_HOME/worktree-switcher` (normally
+`~/.local/state/worktree-switcher`). These locations can be overridden at startup.
 
-```text
-worktree-switcher start [options]
+## Contributing and feedback
 
---port <port>          Dashboard port. Default: 47831
---host <address>       Dashboard bind address. Default: 0.0.0.0
---public-url <origin>  Advertised HTTPS origin; requires a loopback --host
---no-open              Do not open a browser
---browse-root <path>   Root exposed by the directory picker
---data-dir <path>      SQLite database and MCP token directory
---state-dir <path>     Lock, access record, and log directory
---mcp-port <port>      MCP port. Default: 47832
---no-mcp               Disable MCP
---memory-warning-mib N Show a warning when a managed process group reaches N MiB
-```
+Try Switcher with one repository and your usual coding client. Then
+[open an issue](https://github.com/pioootrek/worktree-switcher/issues/new) with
+your OS, framework, MCP client and the step that helped or got in the way.
+Please omit pairing URLs, tokens and secrets. Reports from actual worktree-heavy
+setups are especially useful while the installation and agent workflow take shape.
 
-Other commands:
-
-```text
-worktree-switcher config path
-worktree-switcher config mcp
-worktree-switcher project add <path> [--name <name>] [--port <port>] [--preset auto|node|django]
-worktree-switcher project list [--json]
-worktree-switcher project remove <id>
-worktree-switcher doctor
-worktree-switcher service install [start options] [--refresh]
-worktree-switcher service status
-worktree-switcher service start
-worktree-switcher service stop
-worktree-switcher service restart
-worktree-switcher service open
-worktree-switcher service url
-worktree-switcher service uninstall
-```
-
-When `--port` is omitted, `project add` selects the first available port from
-3000 through 3999. Project commands use the authenticated controller API while
-the user service is running. With no controller, they acquire the singleton
-lock and use the same control services directly; they never write concurrently
-to an owned database. `doctor` verifies Node.js, Git, application state, and
-worktree discovery without requiring a browser.
-
-## Data and logs
-
-By default, SQLite and the MCP token live here:
-
-```text
-$XDG_DATA_HOME/worktree-switcher/state.sqlite3
-~/.local/share/worktree-switcher/state.sqlite3
-```
-
-Runtime state and logs live here:
-
-```text
-$XDG_STATE_HOME/worktree-switcher/controller.lock
-$XDG_STATE_HOME/worktree-switcher/service-access.json
-$XDG_STATE_HOME/worktree-switcher/logs/controller.log
-$XDG_STATE_HOME/worktree-switcher/logs/projects/<project-id>.log
-$XDG_STATE_HOME/worktree-switcher/logs/tests/<run-id>.log
-```
-
-The access record, lock, and token are owner-only files. Logs rotate at 5 MiB
-and keep one previous copy. Worktree Switcher runs as a normal user and does
-not write to `/var/log`.
-
-## Development
+For source changes:
 
 ```bash
 pnpm check
 pnpm build
+pnpm test:ui
 pnpm smoke:package
 ```
 
-`smoke:package` packs the already-built application, installs that exact tarball
-with production dependencies in a fresh temporary consumer, and exercises the
-installed CLI, native SQLite dependency, packaged dashboard assets, authenticated
-HTTP API, and MCP claim/runtime/release flow. It never installs or modifies a user
-service. To verify an existing artifact, use
-`pnpm smoke:package --tarball /absolute/path/package.tgz --sha256 <digest>`.
-The command emits a bounded JSON report and removes its isolated state and fixture.
-
-Useful focused commands:
-
-```bash
-pnpm test
-pnpm test:watch
-pnpm typecheck
-pnpm lint
-```
-
-Read [the product brief](docs/project-brief.md) before changing product or
-architecture decisions. [Architecture decisions](docs/architecture.md)
-describes the current process, persistence, and security boundaries.
-
-## Release resource measurements
-
-Run `pnpm build`, then `pnpm bench:resources --report /tmp/switcher-resources.json`
-for the isolated Linux resource benchmark. It measures controller overhead above
-a bare Node baseline, CPU, and memory growth after switching and log output.
-See [the resource budget](docs/resource-budget.md) for the full procedure,
-acceptance thresholds and the bounded negative control. Run it separately from
-other builds and browser suites.
-
-## Contributing
-
-Bug reports, focused pull requests, and notes from worktree-heavy setups are
-welcome. Open an issue before a large change so the ownership and security
-model can be discussed first.
-
-Keep the controller independent from the repositories it manages. Changes
-should preserve shell-free process spawning, per-project isolation, and the
-rule that unrelated processes are never killed.
-
-## Current limitations
-
-- Node.js projects need a `dev` script; Django support currently targets the
-  built-in development server and a root-level `manage.py`.
-- The dashboard uses HTTP and is intended for loopback or a trusted network.
-- Project registration is available only in the dashboard. Project removal is
-  not implemented yet.
-- Managed-server resource monitoring currently uses Linux `/proc`; macOS shows
-  an explicit unsupported state.
-- The macOS LaunchAgent generator has unit coverage but still needs a real-host
-  lifecycle test.
-- Windows process-tree and service management are not supported.
-- The npm package is not published yet.
-
-The next release work is tracked in [`docs/backlog`](docs/backlog/).
+The browser suite exercises the exported dashboard with a fixture API. CI also
+runs real-controller, HTTPS and E2E suites. `smoke:package` installs the built
+tarball into an isolated consumer and checks the CLI, native SQLite dependency,
+dashboard, HTTP and MCP. It does not alter your installed user service.
+Run builds and browser suites within your machine's resource policy.
+Read [AGENTS.md](AGENTS.md) before contributing code.
 
 ## License
 
-Worktree Switcher is available under the [MIT License](LICENSE). Third-party
-attribution is recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). Dependency attribution is recorded in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
