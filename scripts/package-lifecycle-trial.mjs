@@ -162,6 +162,13 @@ async function systemdProperties(environment) {
   return { ...values, status: result.status };
 }
 
+async function serviceDiagnostic(environment) {
+  const properties = await systemdProperties(environment);
+  const journal = await runResult("journalctl", ["--user", "--unit", UNIT_NAME, "--no-pager", "--lines", "20", "--output", "cat"], { env: environment });
+  const journalText = redact(journal.stdout || journal.stderr).trim().slice(-4_000);
+  return `properties: ${JSON.stringify(properties)}${journalText ? `; journal: ${journalText}` : ""}`;
+}
+
 async function waitForActive(environment, previousPid = null) {
   try {
     return await waitFor(async () => {
@@ -172,9 +179,7 @@ async function waitForActive(environment, previousPid = null) {
       return { pid, restarts: Number(properties.NRestarts || 0) };
     }, "service did not become active");
   } catch (error) {
-    const journal = await runResult("journalctl", ["--user", "--unit", UNIT_NAME, "--no-pager", "--lines", "20", "--output", "cat"], { env: environment });
-    const diagnostic = redact(journal.stdout || journal.stderr).trim().slice(-4_000);
-    throw new Error(`${error instanceof Error ? error.message : String(error)}${diagnostic ? `; journal: ${diagnostic}` : ""}`);
+    throw new Error(`${error instanceof Error ? error.message : String(error)}; ${await serviceDiagnostic(environment)}`);
   }
 }
 
@@ -190,8 +195,13 @@ async function readCurrentAccess(stateDirectory) {
   return JSON.parse(await readFile(accessPath, "utf8"));
 }
 
-async function verifyDashboard(stateDirectory, expectedVersion) {
-  const access = await waitFor(() => readCurrentAccess(stateDirectory), "service access record was not created");
+async function verifyDashboard(stateDirectory, expectedVersion, environment) {
+  let access;
+  try {
+    access = await waitFor(() => readCurrentAccess(stateDirectory), "service access record was not created");
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}; ${await serviceDiagnostic(environment)}`);
+  }
   check(access.version === expectedVersion, "running service version does not match candidate provenance");
   const url = new URL(access.accessUrl);
   const token = new URLSearchParams(url.hash.slice(1)).get("token");
@@ -377,7 +387,7 @@ async function main() {
       await run(cli, installArguments, { env: serviceEnvironment });
       const active = await waitForActive(serviceEnvironment);
       firstServicePid = active.pid;
-      const dashboard = await verifyDashboard(options.stateDirectory, provenance.package.version);
+      const dashboard = await verifyDashboard(options.stateDirectory, provenance.package.version, serviceEnvironment);
       const definition = await readFile(definitionPath, "utf8");
       const definitionEvidence = inspectSystemdDefinition(definition, {
         nodePath: resolve(process.execPath),
@@ -405,7 +415,7 @@ async function main() {
       check(reinstall.stdout.includes("Service already up to date"), "repeated install was not reported as idempotent");
       const unchanged = await waitForActive(serviceEnvironment);
       check(unchanged.pid === firstServicePid, "idempotent install restarted the controller");
-      return { pidUnchanged: true, statusSafe: true, dashboard: await verifyDashboard(options.stateDirectory, provenance.package.version) };
+      return { pidUnchanged: true, statusSafe: true, dashboard: await verifyDashboard(options.stateDirectory, provenance.package.version, serviceEnvironment) };
     });
 
     await record("phases", "open-and-restart", async () => {
@@ -417,7 +427,7 @@ async function main() {
       await rm(browserRecord, { force: true });
       await run(cli, ["service", "restart", "--state-dir", options.stateDirectory], { env: serviceEnvironment });
       const restarted = await waitForActive(serviceEnvironment, firstServicePid);
-      await verifyDashboard(options.stateDirectory, provenance.package.version);
+      await verifyDashboard(options.stateDirectory, provenance.package.version, serviceEnvironment);
       return { fakeBrowserUsed: true, pidChanged: true, pid: restarted.pid };
     });
 
@@ -427,7 +437,7 @@ async function main() {
         await writeFile(options.sessionReady, `${before.pid}\n`, { mode: 0o600 });
         await waitFor(() => stat(options.sessionContinue), "session restart coordinator did not continue", SESSION_TIMEOUT);
         await waitForActive(serviceEnvironment, before.pid);
-        await verifyDashboard(options.stateDirectory, provenance.package.version);
+        await verifyDashboard(options.stateDirectory, provenance.package.version, serviceEnvironment);
         return { managerRestarted: true, enabledServiceStarted: true, pidChanged: true };
       });
     } else {
@@ -440,7 +450,7 @@ async function main() {
       check(!existsSync(join(options.stateDirectory, "service-access.json")), "clean stop left a service access record");
       await run(cli, installArguments, { env: serviceEnvironment });
       await waitForActive(serviceEnvironment);
-      await verifyDashboard(options.stateDirectory, provenance.package.version);
+      await verifyDashboard(options.stateDirectory, provenance.package.version, serviceEnvironment);
       await run(cli, ["service", "stop", "--state-dir", options.stateDirectory], { env: serviceEnvironment });
       await waitForInactive(serviceEnvironment);
       return { stopClean: true, repeatedInstallStartedService: true };
