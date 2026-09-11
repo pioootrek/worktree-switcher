@@ -107,7 +107,11 @@ export class SystemRemoteVerificationWorkspacePreparer implements RemoteVerifica
 
     let resolvedCommit: string;
     try {
-      resolvedCommit = (await this.git(["-C", repositoryPath, "rev-parse", "--verify", `${commitSha}^{commit}`], 5_000)).trim();
+      resolvedCommit = (await this.git(
+        ["-C", repositoryPath, "rev-parse", "--verify", `${commitSha}^{commit}`],
+        5_000,
+        "remote",
+      )).trim();
     } catch {
       throw new RemoteVerificationWorkspaceError("commit_unavailable", "Żądany commit nie jest dostępny w skonfigurowanym źródle.");
     }
@@ -116,7 +120,7 @@ export class SystemRemoteVerificationWorkspacePreparer implements RemoteVerifica
       containingRefs = (await this.git([
         "-C", repositoryPath, "for-each-ref", "--format=%(refname)", `--contains=${resolvedCommit}`,
         `refs/remotes/${sourceRemote}/`,
-      ], 10_000)).trim();
+      ], 10_000, "remote")).trim();
     } catch {
       throw new RemoteVerificationWorkspaceError("operation_unavailable", "Nie udało się potwierdzić pochodzenia żądanego commita.");
     }
@@ -125,24 +129,26 @@ export class SystemRemoteVerificationWorkspacePreparer implements RemoteVerifica
     }
 
     if (activeWorkspaceTargets.has(target)) {
-      throw new RemoteVerificationWorkspaceError("workspace_conflict", "Workspace zlecenia jest już przygotowywany lub używany.");
+      throw new RemoteVerificationWorkspaceError("workspace_conflict", "Workspace zlecenia jest już przygotowywany.");
     }
     activeWorkspaceTargets.add(target);
-    let prepared = false;
     try {
       if (await exists(target)) {
         await rm(target, { recursive: true, force: true });
       }
       await mkdir(target, { mode: 0o700 });
       try {
-        await this.git(["clone", "--quiet", "--no-checkout", "--", repositoryPath, target], 60_000);
-        await this.git(["-C", target, "checkout", "--quiet", "--detach", resolvedCommit], 30_000);
-        const executedCommitSha = (await this.git(["-C", target, "rev-parse", "HEAD"], 5_000)).trim().toLowerCase();
-        const status = await this.git(["-C", target, "status", "--porcelain=v1", "--untracked-files=all"], 10_000);
+        await this.git(["clone", "--quiet", "--no-checkout", "--", repositoryPath, target], 60_000, "remote");
+        await this.git(["-C", target, "checkout", "--quiet", "--detach", resolvedCommit], 30_000, "remote");
+        const executedCommitSha = (await this.git(["-C", target, "rev-parse", "HEAD"], 5_000, "remote")).trim().toLowerCase();
+        const status = await this.git(
+          ["-C", target, "status", "--porcelain=v1", "--untracked-files=all"],
+          10_000,
+          "remote",
+        );
         if (executedCommitSha !== commitSha || status.length > 0) {
           throw new RemoteVerificationWorkspaceError("workspace_invalid", "Przygotowany workspace nie odpowiada żądanemu commitowi.");
         }
-        prepared = true;
         return {
           requestId,
           path: await realpath(target),
@@ -157,7 +163,7 @@ export class SystemRemoteVerificationWorkspacePreparer implements RemoteVerifica
         throw new RemoteVerificationWorkspaceError("workspace_invalid", "Nie udało się przygotować workspace dla zlecenia.");
       }
     } finally {
-      if (!prepared) activeWorkspaceTargets.delete(target);
+      activeWorkspaceTargets.delete(target);
     }
   }
 
@@ -168,11 +174,7 @@ export class SystemRemoteVerificationWorkspacePreparer implements RemoteVerifica
     if (resolve(workspace.path) !== target) {
       throw new RemoteVerificationWorkspaceError("invalid_input", "Workspace nie należy do katalogu zleceń kontrolera.");
     }
-    try {
-      if (await exists(target)) await rm(target, { recursive: true, force: true });
-    } finally {
-      activeWorkspaceTargets.delete(target);
-    }
+    if (await exists(target)) await rm(target, { recursive: true, force: true });
   }
 
   private identifier(value: string, label: string): string {

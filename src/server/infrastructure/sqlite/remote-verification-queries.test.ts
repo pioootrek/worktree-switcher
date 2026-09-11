@@ -389,7 +389,7 @@ describe("remote verification SQLite persistence", () => {
     store.close();
   });
 
-  it("requires exact commit evidence before success", () => {
+  it("rejects mismatched commit evidence before it becomes immutable", () => {
     const path = databasePath();
     const store = new SqliteStateStore(path);
     provision(store);
@@ -402,19 +402,28 @@ describe("remote verification SQLite persistence", () => {
     ]);
     const assigned = service.assign({ requestId: accepted.id, workerId: "worker-1" });
     const preparing = service.report({ attemptId: assigned.id, expectedVersion: 1, phase: "preparing" });
+    expectAttemptCode(
+      () => service.report({
+        attemptId: assigned.id,
+        expectedVersion: preparing.version,
+        phase: "running",
+        localRunId: "local-run-1",
+        executedCommitSha: "a".repeat(40),
+      }),
+      "invalid_evidence",
+    );
+    expect(store.getRemoteVerificationAttempt(assigned.id)).toEqual(preparing);
+
     const running = service.report({
       attemptId: assigned.id,
       expectedVersion: preparing.version,
       phase: "running",
       localRunId: "local-run-1",
-      executedCommitSha: "a".repeat(40),
+      executedCommitSha: accepted.commitSha,
     });
-
-    expectAttemptCode(
-      () => service.report({ attemptId: assigned.id, expectedVersion: running.version, phase: "succeeded" }),
-      "invalid_evidence",
-    );
-    expect(store.getRemoteVerificationRequest(accepted.id)?.phase).toBe("assigned");
+    const succeeded = service.report({ attemptId: assigned.id, expectedVersion: running.version, phase: "succeeded" });
+    expect(succeeded.phase).toBe("succeeded");
+    expect(store.getRemoteVerificationRequest(accepted.id)?.phase).toBe("completed");
     store.close();
   });
 

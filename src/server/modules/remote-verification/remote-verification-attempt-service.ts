@@ -148,6 +148,9 @@ export class RemoteVerificationAttemptService {
     if (executedCommitSha && !SHA_PATTERN.test(executedCommitSha)) {
       throw new RemoteVerificationAttemptError("invalid_evidence", "Wykonany commit musi być pełnym identyfikatorem SHA.");
     }
+    if (executedCommitSha && executedCommitSha.toLowerCase() !== request.commitSha.toLowerCase()) {
+      throw new RemoteVerificationAttemptError("invalid_evidence", "Wykonany commit nie odpowiada zleconemu commitowi.");
+    }
     if ((input.phase === "running" || input.phase === "succeeded") && !localRunId) {
       throw new RemoteVerificationAttemptError("invalid_evidence", "Uruchomiony attempt wymaga identyfikatora lokalnego runu.");
     }

@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { GitCommandAdmission, SystemGitWorktreeReader } from "@/server/git-worktrees";
+import { GitCommandAdmission, type GitCommandPriority, SystemGitWorktreeReader } from "@/server/git-worktrees";
 import { SystemRemoteVerificationWorkspacePreparer } from "./remote-verification-workspace";
 
 const directories: string[] = [];
@@ -14,8 +14,17 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
 }
 
+class RecordingGitCommandAdmission extends GitCommandAdmission {
+  readonly priorities: GitCommandPriority[] = [];
+
+  override run<T>(priority: GitCommandPriority, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    this.priorities.push(priority);
+    return super.run(priority, operation);
+  }
+}
+
 function fixture(): {
-  firstCommit: string;
+  remoteOnlyCommit: string;
   remote: string;
   root: string;
   seed: string;
@@ -36,15 +45,15 @@ function fixture(): {
   writeFileSync(join(seed, "revision.txt"), "first\n");
   git(seed, "add", "revision.txt");
   git(seed, "commit", "-qm", "first");
-  const firstCommit = git(seed, "rev-parse", "HEAD");
   git(seed, "remote", "add", "origin", remote);
   git(seed, "push", "-q", "-u", "origin", "main");
   execFileSync("git", ["clone", "-q", remote, worker]);
 
   writeFileSync(join(seed, "revision.txt"), "second\n");
   git(seed, "commit", "-qam", "second");
+  const remoteOnlyCommit = git(seed, "rev-parse", "HEAD");
   git(seed, "push", "-q", "origin", "main");
-  return { firstCommit, remote, root, seed, worker, workspaceRoot };
+  return { remoteOnlyCommit, remote, root, seed, worker, workspaceRoot };
 }
 
 afterEach(() => {
@@ -58,22 +67,25 @@ describe("SystemRemoteVerificationWorkspacePreparer", () => {
     writeFileSync(join(setup.workspaceRoot, "unrelated.txt"), "keep\n");
     writeFileSync(join(setup.worker, "local-edit.txt"), "do not touch\n");
     const developmentHead = git(setup.worker, "rev-parse", "HEAD");
-    const preparer = new SystemRemoteVerificationWorkspacePreparer(setup.workspaceRoot, new GitCommandAdmission());
+    const admission = new RecordingGitCommandAdmission();
+    const preparer = new SystemRemoteVerificationWorkspacePreparer(setup.workspaceRoot, admission);
 
     const workspace = await preparer.prepare({
       requestId: "request-1",
       repositoryPath: setup.worker,
       sourceRemote: "origin",
-      commitSha: setup.firstCommit,
+      commitSha: setup.remoteOnlyCommit,
     });
 
-    expect(workspace.executedCommitSha).toBe(setup.firstCommit);
-    expect(git(workspace.path, "rev-parse", "HEAD")).toBe(setup.firstCommit);
+    expect(workspace.executedCommitSha).toBe(setup.remoteOnlyCommit);
+    expect(git(workspace.path, "rev-parse", "HEAD")).toBe(setup.remoteOnlyCommit);
     expect(git(workspace.path, "branch", "--show-current")).toBe("");
     expect(git(workspace.path, "status", "--porcelain")).toBe("");
     expect(existsSync(join(workspace.path, ".git", "objects", "info", "alternates"))).toBe(false);
-    expect(readFileSync(join(workspace.path, "revision.txt"), "utf8")).toBe("first\n");
+    expect(readFileSync(join(workspace.path, "revision.txt"), "utf8")).toBe("second\n");
     expect(git(setup.worker, "rev-parse", "HEAD")).toBe(developmentHead);
+    expect(git(setup.worker, "branch", "--contains", setup.remoteOnlyCommit)).toBe("");
+    expect(admission.priorities.slice(2)).toEqual(Array(7).fill("remote"));
     expect(readFileSync(join(setup.worker, "local-edit.txt"), "utf8")).toBe("do not touch\n");
     const discovered = await new SystemGitWorktreeReader().list(setup.worker);
     expect(discovered.map(({ path }) => path)).toEqual([setup.worker]);
@@ -84,7 +96,7 @@ describe("SystemRemoteVerificationWorkspacePreparer", () => {
       requestId: "request-1",
       repositoryPath: setup.worker,
       sourceRemote: "origin",
-      commitSha: setup.firstCommit,
+      commitSha: setup.remoteOnlyCommit,
     });
     await preparer.cleanup(recreated);
     await preparer.cleanup(recreated);
@@ -103,12 +115,22 @@ describe("SystemRemoteVerificationWorkspacePreparer", () => {
       requestId: "request-orphan",
       repositoryPath: setup.worker,
       sourceRemote: "origin",
-      commitSha: setup.firstCommit,
+      commitSha: setup.remoteOnlyCommit,
     });
 
-    expect(git(workspace.path, "rev-parse", "HEAD")).toBe(setup.firstCommit);
+    expect(git(workspace.path, "rev-parse", "HEAD")).toBe(setup.remoteOnlyCommit);
     expect(existsSync(join(workspace.path, "partial-clone.txt"))).toBe(false);
-    await preparer.cleanup(workspace);
+    writeFileSync(join(workspace.path, "abandoned.txt"), "abandoned\n");
+
+    const retried = await preparer.prepare({
+      requestId: "request-orphan",
+      repositoryPath: setup.worker,
+      sourceRemote: "origin",
+      commitSha: setup.remoteOnlyCommit,
+    });
+
+    expect(existsSync(join(retried.path, "abandoned.txt"))).toBe(false);
+    await preparer.cleanup(retried);
   });
 
   it("rejects a missing source and an unavailable commit without falling back to branch HEAD", async () => {
@@ -119,7 +141,7 @@ describe("SystemRemoteVerificationWorkspacePreparer", () => {
       requestId: "request-missing-source",
       repositoryPath: setup.worker,
       sourceRemote: "upstream",
-      commitSha: setup.firstCommit,
+      commitSha: setup.remoteOnlyCommit,
     })).rejects.toMatchObject({ code: "source_unavailable" });
     await expect(preparer.prepare({
       requestId: "request-missing-commit",
@@ -158,15 +180,15 @@ describe("SystemRemoteVerificationWorkspacePreparer", () => {
       requestId: "../escape",
       repositoryPath: setup.worker,
       sourceRemote: "origin",
-      commitSha: setup.firstCommit,
+      commitSha: setup.remoteOnlyCommit,
     })).rejects.toMatchObject({ code: "invalid_input" });
     await expect(preparer.cleanup({
       requestId: "request-1",
       path: setup.worker,
       repositoryPath: setup.worker,
       sourceRemote: "origin",
-      requestedCommitSha: setup.firstCommit,
-      executedCommitSha: setup.firstCommit,
+      requestedCommitSha: setup.remoteOnlyCommit,
+      executedCommitSha: setup.remoteOnlyCommit,
     })).rejects.toMatchObject({ code: "invalid_input" });
     expect(existsSync(setup.worker)).toBe(true);
   });
@@ -181,7 +203,7 @@ describe("SystemRemoteVerificationWorkspacePreparer", () => {
       requestId: "request-closed",
       repositoryPath: setup.worker,
       sourceRemote: "origin",
-      commitSha: setup.firstCommit,
+      commitSha: setup.remoteOnlyCommit,
     })).rejects.toMatchObject({ code: "operation_unavailable" });
   });
 
@@ -194,7 +216,7 @@ describe("SystemRemoteVerificationWorkspacePreparer", () => {
       requestId: "request-race",
       repositoryPath: setup.worker,
       sourceRemote: "origin",
-      commitSha: setup.firstCommit,
+      commitSha: setup.remoteOnlyCommit,
     };
 
     const results = await Promise.allSettled([first.prepare(input), second.prepare(input)]);
@@ -204,7 +226,7 @@ describe("SystemRemoteVerificationWorkspacePreparer", () => {
     expect(rejected).toHaveLength(1);
     expect(rejected[0]).toMatchObject({ reason: { code: "workspace_conflict" } });
     const workspace = (fulfilled[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof first.prepare>>>).value;
-    expect(git(workspace.path, "rev-parse", "HEAD")).toBe(setup.firstCommit);
+    expect(git(workspace.path, "rev-parse", "HEAD")).toBe(setup.remoteOnlyCommit);
     await first.cleanup(workspace);
   });
 });
