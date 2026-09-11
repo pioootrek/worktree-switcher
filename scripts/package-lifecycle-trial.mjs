@@ -155,20 +155,27 @@ async function systemdProperties(environment) {
   const result = await runResult("systemctl", [
     "--user", "show", UNIT_NAME,
     "--property=LoadState", "--property=ActiveState", "--property=SubState",
-    "--property=MainPID", "--property=NRestarts", "--property=ExecMainStatus",
+    "--property=MainPID", "--property=NRestarts", "--property=ExecMainCode",
+    "--property=ExecMainStatus", "--property=Result",
   ], { env: environment });
   const values = Object.fromEntries(result.stdout.split(/\r?\n/).map((line) => line.split("=", 2)).filter(([key]) => key));
   return { ...values, status: result.status };
 }
 
 async function waitForActive(environment, previousPid = null) {
-  return await waitFor(async () => {
-    const properties = await systemdProperties(environment);
-    const pid = Number(properties.MainPID);
-    check(properties.ActiveState === "active" && properties.SubState === "running" && pid > 0, "service is not active/running");
-    check(previousPid === null || pid !== previousPid, "service PID did not change");
-    return { pid, restarts: Number(properties.NRestarts || 0) };
-  }, "service did not become active");
+  try {
+    return await waitFor(async () => {
+      const properties = await systemdProperties(environment);
+      const pid = Number(properties.MainPID);
+      check(properties.ActiveState === "active" && properties.SubState === "running" && pid > 0, `service is not active/running (${JSON.stringify(properties)})`);
+      check(previousPid === null || pid !== previousPid, "service PID did not change");
+      return { pid, restarts: Number(properties.NRestarts || 0) };
+    }, "service did not become active");
+  } catch (error) {
+    const journal = await runResult("journalctl", ["--user", "--unit", UNIT_NAME, "--no-pager", "--lines", "20", "--output", "cat"], { env: environment });
+    const diagnostic = redact(journal.stdout || journal.stderr).trim().slice(-4_000);
+    throw new Error(`${error instanceof Error ? error.message : String(error)}${diagnostic ? `; journal: ${diagnostic}` : ""}`);
+  }
 }
 
 async function waitForInactive(environment) {
@@ -223,6 +230,7 @@ async function stopKnownProcess(child) {
 
 async function main() {
   const options = parseArguments(process.argv.slice(2));
+  const definitionPath = join(homedir(), ".config", "systemd", "user", UNIT_NAME);
   const startedAt = new Date().toISOString();
   const report = {
     schemaVersion: 1,
@@ -246,6 +254,7 @@ async function main() {
   let occupiedServer;
   let serviceMayExist = false;
   let browserRecord;
+  let firstServicePid;
 
   const record = async (collection, name, task) => {
     const phase = { name, startedAt: new Date().toISOString(), completedAt: null, outcome: "failed", evidence: null };
@@ -296,7 +305,6 @@ async function main() {
       bytes: provenance.artifact.bytes,
     };
 
-    const definitionPath = join(homedir(), ".config", "systemd", "user", UNIT_NAME);
     await record("preflight", "empty-owned-paths", async () => {
       for (const [path, label] of [
         [options.prefix, "prefix"], [options.dataDirectory, "data directory"],
@@ -365,9 +373,11 @@ async function main() {
       const metadata = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
       check(metadata.version === provenance.package.version, "installed package version does not match provenance");
       await run(process.execPath, ["-e", "require('better-sqlite3')"], { cwd: packageRoot, env: serviceEnvironment });
-      await run(cli, installArguments, { env: serviceEnvironment });
       serviceMayExist = true;
+      await run(cli, installArguments, { env: serviceEnvironment });
       const active = await waitForActive(serviceEnvironment);
+      firstServicePid = active.pid;
+      const dashboard = await verifyDashboard(options.stateDirectory, provenance.package.version);
       const definition = await readFile(definitionPath, "utf8");
       const definitionEvidence = inspectSystemdDefinition(definition, {
         nodePath: resolve(process.execPath),
@@ -383,10 +393,9 @@ async function main() {
       await run("systemd-analyze", ["--user", "verify", definitionPath], { env: serviceEnvironment });
       const enabled = await run("systemctl", ["--user", "is-enabled", UNIT_NAME], { env: serviceEnvironment });
       check(enabled.stdout.trim() === "enabled", "service is not enabled for the user session");
-      return { pid: active.pid, installedVersion: metadata.version, nativeSqlite: "loaded", definition: definitionEvidence, definitionMode: "0600", enabled: true };
+      return { pid: active.pid, installedVersion: metadata.version, nativeSqlite: "loaded", dashboard, definition: definitionEvidence, definitionMode: "0600", enabled: true };
     });
 
-    const firstActive = await waitForActive(serviceEnvironment);
     await record("phases", "status-and-idempotent-install", async () => {
       const status = await run(cli, ["service", "status", "--state-dir", options.stateDirectory], { env: serviceEnvironment });
       check(status.stdout.includes("Service: active/running"), "CLI status did not report active/running");
@@ -395,7 +404,7 @@ async function main() {
       const reinstall = await run(cli, installArguments, { env: serviceEnvironment });
       check(reinstall.stdout.includes("Service already up to date"), "repeated install was not reported as idempotent");
       const unchanged = await waitForActive(serviceEnvironment);
-      check(unchanged.pid === firstActive.pid, "idempotent install restarted the controller");
+      check(unchanged.pid === firstServicePid, "idempotent install restarted the controller");
       return { pidUnchanged: true, statusSafe: true, dashboard: await verifyDashboard(options.stateDirectory, provenance.package.version) };
     });
 
@@ -407,7 +416,7 @@ async function main() {
       check(opened.hostname === "127.0.0.1" && new URLSearchParams(opened.hash.slice(1)).has("token"), "service open did not pass a local authenticated URL");
       await rm(browserRecord, { force: true });
       await run(cli, ["service", "restart", "--state-dir", options.stateDirectory], { env: serviceEnvironment });
-      const restarted = await waitForActive(serviceEnvironment, firstActive.pid);
+      const restarted = await waitForActive(serviceEnvironment, firstServicePid);
       await verifyDashboard(options.stateDirectory, provenance.package.version);
       return { fakeBrowserUsed: true, pidChanged: true, pid: restarted.pid };
     });
@@ -510,7 +519,9 @@ async function main() {
       const graceful = await stopKnownProcess(foreground);
       if (!graceful) report.cleanup.graceful = false;
     }
-    if (serviceMayExist && cli && serviceEnvironment) {
+    const loadedService = serviceEnvironment ? await systemdProperties(serviceEnvironment) : null;
+    const cleanupNeeded = serviceMayExist || existsSync(definitionPath) || (loadedService && loadedService.LoadState !== "not-found");
+    if (cleanupNeeded && cli && serviceEnvironment) {
       const cleanup = await runResult(cli, ["service", "uninstall", "--state-dir", options.stateDirectory], { env: serviceEnvironment });
       if (cleanup.status !== 0) report.cleanup.diagnostic = redact(cleanup.stderr || cleanup.stdout);
       else report.cleanup.serviceAbsent = true;
