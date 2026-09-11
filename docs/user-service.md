@@ -178,20 +178,24 @@ find one, treat it as a security bug.
 
 ## Update the installed service
 
-Verify the replacement artifact, wait until managed projects and verification
-jobs are idle, and retain the old artifact and a consistent database backup.
-Stop the service before replacing the installed files, then refresh the service
-definition with every previously configured non-default option:
+Package upgrades against an existing data directory are not supported by the
+current tarball trial. There is no public consistent-backup command or tested
+rollback path yet. Do not replace the installed package or start a newer controller
+against that state. Evaluate a candidate with a separate prefix and empty,
+explicitly selected data and state directories as described in the
+[package trial guide](package-trial.md).
+
+`service install --refresh` updates only the service definition for the currently
+installed build. Use it after deliberately changing its executable, Node.js,
+dashboard, network or directory paths, and repeat every non-default option:
 
 ```bash
 worktree-switcher service stop
-npm install --global --prefix "$HOME/.local/worktree-switcher" ./verified-replacement.tgz
-worktree-switcher service install --refresh
+worktree-switcher service install --refresh --host 127.0.0.1
 ```
 
-Refresh is required when the Node.js path, CLI path, dashboard path, network
-settings, or data directories change. The explicit flag prevents an upgrade
-from silently pointing the service at a different executable.
+The explicit flag prevents a normal install from silently changing the existing
+definition. It does not make a package or database upgrade safe.
 
 After refresh:
 

@@ -105,15 +105,17 @@ async function verifyReadmeLinks(packageRoot) {
 }
 
 function resolvedDependencies(tree) {
-  const versions = {};
-  const visit = (dependencies = {}) => {
-    for (const [name, value] of Object.entries(dependencies)) {
-      if (value?.version) versions[name] = value.version;
-      visit(value?.dependencies);
+  const resolved = [];
+  const visit = (dependencies = {}, parents = []) => {
+    for (const [name, value] of Object.entries(dependencies).sort(([left], [right]) => left.localeCompare(right))) {
+      const version = value?.version ?? null;
+      const segment = `${name}@${version ?? "unknown"}`;
+      if (version) resolved.push({ path: [...parents, segment].join(" > "), name, version });
+      visit(value?.dependencies, [...parents, segment]);
     }
   };
   visit(tree.dependencies);
-  return Object.fromEntries(Object.entries(versions).sort(([left], [right]) => left.localeCompare(right)));
+  return resolved;
 }
 
 async function stopController() {
@@ -388,18 +390,27 @@ async function main() {
   });
 
   const dependencyTree = JSON.parse((await run("npm", ["ls", "--global", "--prefix", prefix, "--omit=dev", "--json", "--all"], { cwd: root, env: installEnv })).stdout);
+  const dependencies = resolvedDependencies(dependencyTree);
   const report = {
     ok: true, package: `${metadata.name}@${metadata.version}`, tarball: basename(tarball), sha256: checksum,
     bytes: (await stat(tarball)).size, archiveEntries: archiveFiles.length, node: process.version,
     npm: (await run("npm", ["--version"])).stdout.trim(), platform: `${process.platform}-${process.arch}`,
     install: { mode: "global-prefix", prefixContainsSpaces: prefix.includes(" ") },
     nativeSqlite: { load: "success", binary: nativeAddon, provisioning: nativeProvisioning },
-    dependencies: resolvedDependencies(dependencyTree),
+    dependencies,
     steps, cleanup: "graceful", durationMs: Date.now() - startedAt,
   };
   const reportPath = argument("--report");
   if (reportPath) await writeFile(resolve(reportPath), `${JSON.stringify(report, null, 2)}\n`);
-  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  const summary = {
+    ...report,
+    dependencies: {
+      copies: dependencies.length,
+      uniquePackageVersions: new Set(dependencies.map(({ name, version }) => `${name}@${version}`)).size,
+      report: reportPath ? resolve(reportPath) : null,
+    },
+  };
+  process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 }
 
 try {

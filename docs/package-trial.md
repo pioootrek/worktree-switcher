@@ -87,21 +87,15 @@ and [HTTPS guide](controller-https.md).
 
 ## Upgrade and recover
 
-Do not replace the installed executable while the controller owns running
-projects or verification jobs. Verify the new tarball first, wait until the
-controller is idle, and retain the old tarball. Back up SQLite with the supported
-SQLite backup procedure and save the service options and owner-only configuration.
+Upgrading an installation that contains existing state is not supported by this
+trial. Worktree Switcher does not yet expose the consistent SQLite backup API or
+the tested recovery path required to make that operation safe. Do not replace the
+installed package or run a newer controller against the existing data directory.
 
-Stop the service, install the verified replacement into the same prefix, then
-repeat every non-default service option with `service install --refresh`. Start
-once and verify `service status`, stored projects, dashboard access, and MCP.
-Never run an old binary against a database already migrated by a newer binary.
-If startup or migration fails, stop the failed controller before restoring both
-the retained old artifact and the matching pre-upgrade data/configuration.
-
-The automated old-to-new migration and rollback trial is a later acceptance
-gate. Until that evidence exists, treat upgrades as operator-controlled and keep
-the backup and old artifact.
+Evaluate another candidate with a separate npm prefix and empty, explicitly
+selected data and state directories. Keep the existing service stopped while its
+ports are reused. The old-to-new migration, backup and rollback harness is a later
+acceptance gate; this guide will gain upgrade commands only after that gate passes.
 
 ## Remove the trial
 
