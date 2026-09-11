@@ -94,19 +94,19 @@ export function ProjectCard({
   };
 
   return (
-    <Card data-project-id={project.id} className="overflow-hidden border-white/8 bg-card/75 shadow-xl shadow-black/10 backdrop-blur-sm">
+    <Card data-project-id={project.id} className="min-w-0 overflow-hidden border-white/8 bg-card/75 shadow-xl shadow-black/10 backdrop-blur-sm">
       <CardHeader className="pb-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Server className="size-4 text-indigo-300" aria-hidden />
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 max-w-full">
+            <CardTitle className="flex items-center gap-2 break-all text-lg">
+              <Server className="size-4 shrink-0 text-indigo-300" aria-hidden />
               {project.name}
             </CardTitle>
             <CardDescription className="mt-1 truncate font-mono text-xs" title={project.repositoryPath}>
               {project.repositoryPath}
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -141,7 +141,11 @@ export function ProjectCard({
         </div>
       </CardHeader>
       <CardContent>
-        {metadata && metadata.status !== "fresh" && (
+        {metadata?.status === "stale" && !metadata.error && !snapshot.discoveryError && metadata.lastSuccessfulAt ? (
+          <p className="mb-4 text-sm text-muted-foreground">
+            {t("metadata.lastSuccess", { time: new Date(metadata.lastSuccessfulAt).toLocaleString(locale === "pl" ? "pl-PL" : "en-US") })}
+          </p>
+        ) : metadata && metadata.status !== "fresh" && (
           <Alert className="mb-4 border-amber-400/20 bg-amber-400/5 text-amber-100">
             <AlertTriangle aria-hidden />
             <AlertTitle>{t(`metadata.${metadata.status}`)}</AlertTitle>
@@ -179,19 +183,19 @@ export function ProjectCard({
         )}
 
         <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-          <div className="space-y-2">
+          <div className="min-w-0 space-y-2">
             <Label htmlFor={`worktree-${project.id}`}>{t("project.activeWorktree")}</Label>
             <Select value={selected} onValueChange={setSelected} disabled={isBusy || worktrees.length === 0}>
-              <SelectTrigger id={`worktree-${project.id}`} className="w-full">
+              <SelectTrigger id={`worktree-${project.id}`} className="w-full min-w-0 *:data-[slot=select-value]:min-w-0">
                 <SelectValue placeholder={t("project.noWorktree")} />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent position="popper" className="max-w-[calc(100vw-2rem)]">
                 {worktrees.map((worktree) => (
-                  <SelectItem key={worktree.path} value={worktree.path} disabled={worktree.prunable}>
-                    <span className="flex items-center gap-2">
-                      {worktree.branch ?? "detached HEAD"}
-                      <span className="font-mono text-xs text-muted-foreground">{worktree.shortHead}</span>
-                      {worktree.dirty && <span className="text-amber-400">● dirty</span>}
+                  <SelectItem className="min-w-0 *:[span]:last:min-w-0" key={worktree.path} value={worktree.path} disabled={worktree.prunable}>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate" title={worktree.branch ?? "detached HEAD"}>{worktree.branch ?? "detached HEAD"}</span>
+                      <span className="shrink-0 font-mono text-xs text-muted-foreground">{worktree.shortHead}</span>
+                      {worktree.dirty && <span className="shrink-0 text-amber-400">● dirty</span>}
                     </span>
                   </SelectItem>
                 ))}
@@ -220,7 +224,7 @@ export function ProjectCard({
 
         <Separator className="my-5" />
         <Tabs defaultValue="status">
-          <TabsList>
+          <TabsList className="max-w-full flex-wrap group-data-horizontal/tabs:h-auto">
             <TabsTrigger value="status">{t("project.status")}</TabsTrigger>
             <TabsTrigger value="logs">{t("project.logs")} <span className="text-muted-foreground">{runtime.logs.length}</span></TabsTrigger>
             <TabsTrigger value="tests"><TestTube2 aria-hidden />{t("tests.tab")}</TabsTrigger>

@@ -153,7 +153,8 @@ test("stale metadata waits for an explicit refresh", async ({ page }) => {
     );
   });
   await expect.poll(() => bootstraps).toBe(1);
-  await expect(page.getByText(translate("en", "metadata.stale"), { exact: true })).toBeVisible();
+  await expect(page.getByText(translate("en", "metadata.stale"), { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/^Last successful read:/)).toBeVisible();
   expect(requests.filter(({ path }) => path === "/api/projects/web/metadata/refresh")).toEqual([]);
 });
 
@@ -203,5 +204,84 @@ for (const kind of ["bootstrap", "live"] as const) {
     await page.getByRole("button", { name: "Start", exact: true }).click();
     await expect(operationError).toBeHidden();
     expect(errors).toEqual([]);
+  });
+}
+
+for (const status of ["stale", "unavailable"] as const) {
+  test(`metadata ${status} with a read error remains a warning`, async ({ page }) => {
+    const data = dashboardFixture();
+    data.projects[0].metadata = {
+      status, error: "Git read failed", retryAt: null,
+      lastAttemptAt: "2026-01-01T12:00:00.000Z",
+      lastSuccessfulAt: status === "unavailable" ? null : "2026-01-01T11:59:00.000Z",
+    };
+    await mountDashboard(page, data);
+    await expect(page.getByRole("alert").filter({ hasText: translate("en", `metadata.${status}`) })).toBeVisible();
+  });
+}
+
+for (const width of [390, 768, 1440]) {
+  test(`long worktree names fit at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const data = dashboardFixture();
+    data.projects[0].worktrees[0].branch = "feat-dual-region-production-stacks-with-a-very-long-branch-name";
+    data.projects[0].worktrees[0].dirty = true;
+    data.projects[0].project.repositoryPath = "/home/example/development/a-very-long-repository-directory-name";
+    const { errors } = await mountDashboard(page, data);
+    await expect(page.getByText("Fixture Web", { exact: true })).toBeVisible();
+    await expect(page.locator("dt").filter({ hasText: /^Preset$/ }).locator("+ dd")).toHaveText(translate("en", "preset.node"));
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    for (const control of [page.getByRole("button", { name: "Start", exact: true }), page.locator("#worktree-web"), page.getByRole("button", { name: translate("en", "metadata.refresh"), exact: true })]) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    }
+    await page.locator("#worktree-web").click();
+    await expect(page.getByRole("option")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("option")).toBeHidden();
+    const path = page.locator('[data-slot="card-description"]');
+    const pathBox = await path.boundingBox();
+    expect(pathBox!.x + pathBox!.width).toBeLessThanOrEqual(width - 16);
+    await page.getByRole("button", { name: translate("en", "language.label") }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "pl");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    for (const tab of await page.getByRole("tab").all()) {
+      const box = await tab.boundingBox();
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width - 16);
+    }
+    await page.screenshot({ path: `test-results/dashboard-${width}.png`, fullPage: true });
+    expect(errors).toEqual([]);
+  });
+}
+
+for (const { width, count } of [{ width: 390, count: 12 }, { width: 1440, count: 12 }, { width: 390, count: 50 }, { width: 1440, count: 50 }]) {
+  test(`worktree menu shows multiple rows and selects the last of ${count} worktrees at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const data = dashboardFixture();
+    const initial = data.projects[0].worktrees[0];
+    data.projects[0].worktrees = Array.from({ length: count }, (_, index) => ({
+      ...initial, path: `${initial.path}-${index}`, branch: `feature-${index}-with-a-long-worktree-name`,
+    }));
+    data.projects[0].project.selectedWorktreePath = data.projects[0].worktrees[0].path;
+    await mountDashboard(page, data);
+    const trigger = page.locator("#worktree-web");
+    await trigger.click();
+    const options = page.getByRole("option");
+    await expect(options).toHaveCount(count);
+    const viewport = page.locator("[data-radix-select-viewport]");
+    const firstBox = await options.first().boundingBox();
+    const viewportBox = await viewport.boundingBox();
+    expect(viewportBox!.height).toBeGreaterThanOrEqual(firstBox!.height * 3);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await expect(options.first()).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(options.last()).toBeFocused();
+    await expect(options.last()).toBeInViewport();
+    await page.keyboard.press("Enter");
+    await expect(trigger).toContainText(`feature-${count - 1}-with-a-long-worktree-name`);
+    await expect(trigger).toBeFocused();
   });
 }
