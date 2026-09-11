@@ -6,6 +6,88 @@ const DEFAULT_TEST_PROFILES_JSON = JSON.stringify([
   { name: "tooling", policy: { mode: "clean", serverProfile: null }, environment: {}, nodeEnv: null, requiredVariables: [] },
 ]);
 
+const REMOTE_VERIFICATION_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS remote_principals (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK(kind IN ('owner', 'agent', 'worker')),
+    status TEXT NOT NULL CHECK(status IN ('active', 'revoked'))
+  );
+
+  CREATE TABLE IF NOT EXISTS remote_project_identities (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    source_remote TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('active', 'revoked'))
+  );
+
+  CREATE TABLE IF NOT EXISTS remote_workers (
+    id TEXT PRIMARY KEY,
+    principal_id TEXT NOT NULL UNIQUE REFERENCES remote_principals(id),
+    name TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('active', 'revoked')),
+    last_contact_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS remote_principal_project_grants (
+    principal_id TEXT NOT NULL REFERENCES remote_principals(id),
+    project_id TEXT NOT NULL REFERENCES remote_project_identities(id),
+    permissions_json TEXT NOT NULL,
+    revoked_at TEXT,
+    PRIMARY KEY(principal_id, project_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS remote_worker_project_grants (
+    worker_id TEXT NOT NULL REFERENCES remote_workers(id),
+    project_id TEXT NOT NULL REFERENCES remote_project_identities(id),
+    local_project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    preset_ids_json TEXT NOT NULL,
+    revoked_at TEXT,
+    PRIMARY KEY(worker_id, project_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS remote_verification_requests (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES remote_project_identities(id),
+    worker_id TEXT NOT NULL REFERENCES remote_workers(id),
+    requested_by TEXT NOT NULL REFERENCES remote_principals(id),
+    commit_sha TEXT NOT NULL,
+    preset_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    phase TEXT NOT NULL CHECK(phase IN ('pending', 'assigned', 'completed', 'cancelled')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(requested_by, idempotency_key)
+  );
+
+  CREATE INDEX IF NOT EXISTS remote_verification_requests_queue
+    ON remote_verification_requests(phase, created_at, id);
+`;
+
+const REMOTE_VERIFICATION_ATTEMPT_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS remote_verification_attempts (
+    id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL REFERENCES remote_verification_requests(id),
+    worker_id TEXT NOT NULL REFERENCES remote_workers(id),
+    sequence INTEGER NOT NULL CHECK(sequence > 0),
+    phase TEXT NOT NULL CHECK(phase IN (
+      'assigned', 'preparing', 'running', 'succeeded', 'failed',
+      'cancel_requested', 'cancelled', 'uncertain'
+    )),
+    version INTEGER NOT NULL CHECK(version > 0),
+    local_run_id TEXT,
+    executed_commit_sha TEXT,
+    failure_kind TEXT CHECK(failure_kind IN ('setup', 'execution')),
+    error_code TEXT,
+    accepted_at TEXT NOT NULL,
+    last_reported_at TEXT NOT NULL,
+    finished_at TEXT,
+    UNIQUE(request_id, sequence)
+  );
+
+  CREATE INDEX IF NOT EXISTS remote_verification_attempts_request
+    ON remote_verification_attempts(request_id, sequence DESC);
+`;
+
 const schema = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
@@ -118,6 +200,9 @@ const schema = `
   CREATE INDEX IF NOT EXISTS test_runs_phase_queue ON test_runs(phase, queued_at, id);
   CREATE UNIQUE INDEX IF NOT EXISTS test_runs_actor_idempotency
     ON test_runs(actor, idempotency_key) WHERE idempotency_key IS NOT NULL;
+
+  ${REMOTE_VERIFICATION_SCHEMA}
+  ${REMOTE_VERIFICATION_ATTEMPT_SCHEMA}
 
   INSERT OR IGNORE INTO schema_migrations(version, applied_at)
     VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -300,12 +385,32 @@ function applyMigrations(database: Database.Database): void {
   if (!hasMigration(database, 13)) {
     database.transaction(() => {
       // Missing presets previously reached the launch resolver as undefined, which means auto.
-      const columns = new Set((database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).map(({ name }) => name));
-      if (!columns.has("launch_preset")) {
-        database.exec("ALTER TABLE projects ADD COLUMN launch_preset TEXT NOT NULL DEFAULT 'auto' CHECK(launch_preset IN ('auto', 'node', 'django'))");
-      }
+      ensureLaunchPresetColumn(database);
       recordMigration(database, 13);
     })();
+  }
+  if (!hasMigration(database, 14)) {
+    database.transaction(() => {
+      // Migration 13 existed on the pre-merge remote-verification branch. Repeating
+      // this idempotent repair preserves databases created on either lineage.
+      ensureLaunchPresetColumn(database);
+      database.exec(REMOTE_VERIFICATION_SCHEMA);
+      recordMigration(database, 14);
+    })();
+  }
+  if (!hasMigration(database, 15)) {
+    database.transaction(() => {
+      ensureLaunchPresetColumn(database);
+      database.exec(REMOTE_VERIFICATION_ATTEMPT_SCHEMA);
+      recordMigration(database, 15);
+    })();
+  }
+}
+
+function ensureLaunchPresetColumn(database: Database.Database): void {
+  const columns = new Set((database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).map(({ name }) => name));
+  if (!columns.has("launch_preset")) {
+    database.exec("ALTER TABLE projects ADD COLUMN launch_preset TEXT NOT NULL DEFAULT 'auto' CHECK(launch_preset IN ('auto', 'node', 'django'))");
   }
 }
 
