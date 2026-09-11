@@ -2,10 +2,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
@@ -44,7 +44,11 @@ async function step(name, task) {
 }
 
 function redact(value) {
-  return value.replaceAll(SENTINEL, "[REDACTED]").replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, "Bearer [REDACTED]");
+  return value
+    .replaceAll(SENTINEL, "[REDACTED]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, "Bearer [REDACTED]")
+    .replace(/(https?:\/\/)[^@\s/]+@/gi, "$1[REDACTED]@")
+    .replace(/(_authToken\s*=\s*)\S+/gi, "$1[REDACTED]");
 }
 
 async function run(file, args, options = {}) {
@@ -81,6 +85,37 @@ async function sha256(path) {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
 
+async function filesUnder(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  return (await Promise.all(entries.map(async (entry) => {
+    const path = join(directory, entry.name);
+    return entry.isDirectory() ? await filesUnder(path) : [path];
+  }))).flat();
+}
+
+async function verifyReadmeLinks(packageRoot) {
+  const readme = await readFile(join(packageRoot, "README.md"), "utf8");
+  const links = [...readme.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)].map((match) => match[1]);
+  for (const link of links) {
+    if (/^(?:https?:|mailto:|#)/.test(link)) continue;
+    const localPath = decodeURIComponent(link.split(/[?#]/, 1)[0]);
+    const target = resolve(packageRoot, localPath);
+    check(localPath && target.startsWith(`${packageRoot}${sep}`) && existsSync(target), `Packaged README has a broken or escaping local link: ${link}`);
+  }
+}
+
+function resolvedDependencies(tree) {
+  const versions = {};
+  const visit = (dependencies = {}) => {
+    for (const [name, value] of Object.entries(dependencies)) {
+      if (value?.version) versions[name] = value.version;
+      visit(value?.dependencies);
+    }
+  };
+  visit(tree.dependencies);
+  return Object.fromEntries(Object.entries(versions).sort(([left], [right]) => left.localeCompare(right)));
+}
+
 async function stopController() {
   if (!controller || controller.exitCode !== null) return;
   controller.kill("SIGTERM");
@@ -99,11 +134,11 @@ async function stopController() {
 async function main() {
   root = await mkdtemp(join(tmpdir(), "worktree-switcher-package-smoke-"));
   const artifacts = join(root, "artifacts");
-  const consumer = join(root, "consumer");
+  const prefix = join(root, "user prefix");
   const fixture = join(root, "fixture");
   const data = join(root, "data");
   const state = join(root, "state");
-  await Promise.all([mkdir(artifacts), mkdir(consumer), mkdir(fixture), mkdir(data), mkdir(state)]);
+  await Promise.all([mkdir(artifacts), mkdir(prefix), mkdir(fixture), mkdir(data), mkdir(state)]);
 
   let tarball = argument("--tarball");
   if (!tarball) {
@@ -124,30 +159,83 @@ async function main() {
   const archiveFiles = await step("archive-manifest", async () => {
     const { stdout } = await run("tar", ["-tzf", tarball]);
     const files = stdout.trim().split("\n");
-    for (const required of ["package/dist/cli/index.js", "package/out/index.html", "package/LICENSE", "package/THIRD_PARTY_NOTICES.md"]) {
+    for (const required of [
+      "package/dist/cli/index.js",
+      "package/out/index.html",
+      "package/skills/worktree-switcher/SKILL.md",
+      "package/docs/package-trial.md",
+      "package/docs/user-service.md",
+      "package/LICENSE",
+      "package/README.md",
+      "package/THIRD_PARTY_NOTICES.md",
+    ]) {
       check(files.includes(required), `Packed artifact is missing ${required}.`);
     }
-    const forbidden = /(^|\/)(\.git|node_modules|\.env(?:\.|$)|state\.sqlite3(?:-|$)|mcp-token|service-access\.json|controller\.lock)(\/|$)/;
+    const forbidden = /(^|\/)(?:\.git|node_modules|\.env(?:\.[^/]*)?|\.npmrc|id_(?:rsa|ed25519)|state\.sqlite3(?:-(?:wal|shm))?|mcp-token|service-access\.json|controller\.lock)(?:\/|$)/;
     check(!files.some((file) => file.startsWith("/") || file.split("/").includes("..") || forbidden.test(file)), "Packed artifact contains forbidden or escaping paths.");
     return files;
   });
 
-  await writeFile(join(consumer, "package.json"), JSON.stringify({ private: true }, null, 2));
-  const npmCache = join(root, "npm-cache");
-  const installEnv = { PATH: process.env.PATH, LANG: "C.UTF-8", npm_config_cache: npmCache, npm_config_userconfig: join(root, "empty-npmrc") };
-  await writeFile(installEnv.npm_config_userconfig, "");
-  await step("production-install", () => run("npm", ["install", "--omit=dev", "--no-audit", "--no-fund", tarball], { cwd: consumer, env: installEnv, timeout: INSTALL_TIMEOUT }));
+  await step("archive-content-audit", async () => {
+    const extracted = join(artifacts, "extracted");
+    await mkdir(extracted);
+    await run("tar", ["-xzf", tarball, "-C", extracted]);
+    const extractedPackage = join(extracted, "package");
+    for (const path of await filesUnder(extractedPackage)) {
+      const info = await lstat(path);
+      if (info.isSymbolicLink()) {
+        const target = await realpath(path);
+        check(target === extractedPackage || target.startsWith(`${extractedPackage}${sep}`), `Packed symlink escapes the package: ${relative(extractedPackage, path)}`);
+      }
+      if (!/\.(?:css|html|js|json|md|ya?ml)$/i.test(path)) continue;
+      const text = await readFile(path, "utf8");
+      check(!text.includes(SENTINEL) && !/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:ghp|github_pat|npm)_[A-Za-z0-9_]{20,}|AKIA[A-Z0-9]{16}/.test(text), `Packed text contains secret material: ${relative(extractedPackage, path)}`);
+      if (/^(?:dist|out)(?:\/|$)/.test(relative(extractedPackage, path))) {
+        check(!/(?:\/home\/runner\/work\/|\/home\/pioootrek\/|\/Users\/[^/]+\/)/.test(text), `Packed runtime contains a builder-specific path: ${relative(extractedPackage, path)}`);
+      }
+    }
+    await verifyReadmeLinks(extractedPackage);
+  });
 
-  const packageRoot = join(consumer, "node_modules", "worktree-switcher");
-  const cli = join(consumer, "node_modules", ".bin", "worktree-switcher");
+  const npmCache = join(root, "npm-cache");
+  const forwardedNetwork = Object.fromEntries([
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+    "NODE_EXTRA_CA_CERTS", "npm_config_registry",
+  ].flatMap((name) => process.env[name] ? [[name, process.env[name]]] : []));
+  const installEnv = {
+    PATH: process.env.PATH,
+    LANG: "C.UTF-8",
+    ...forwardedNetwork,
+    npm_config_cache: npmCache,
+    npm_config_userconfig: join(root, "empty-npmrc"),
+    npm_config_globalconfig: join(root, "empty-global-npmrc"),
+  };
+  await Promise.all([writeFile(installEnv.npm_config_userconfig, ""), writeFile(installEnv.npm_config_globalconfig, "")]);
+  await step("production-install", () => run("npm", ["install", "--global", "--prefix", prefix, "--omit=dev", "--no-audit", "--no-fund", tarball], { cwd: root, env: installEnv, timeout: INSTALL_TIMEOUT }));
+
+  const packageRoot = join(prefix, "lib", "node_modules", "worktree-switcher");
+  const cli = join(prefix, "bin", "worktree-switcher");
   check((await stat(cli)).isFile(), "Installed CLI is missing.");
+  check((await realpath(cli)).startsWith(`${packageRoot}${sep}`), "Installed CLI does not resolve into the trial prefix.");
   check((await stat(join(packageRoot, "docs", "controller-https.md"))).isFile(), "Installed HTTPS guide is missing.");
+  check((await stat(join(packageRoot, "skills", "worktree-switcher", "SKILL.md"))).isFile(), "Installed agent skill is missing.");
   const metadata = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
+  check(metadata.private === true && /^0\./.test(metadata.version), "Trial package lost its private pre-1.0 identity.");
+  const runtimeEnv = { PATH: `${join(prefix, "bin")}:${process.env.PATH}`, LANG: "C.UTF-8" };
+  const cliCommand = "worktree-switcher";
+  let nativeAddon;
+  let nativeProvisioning;
   await step("native-sqlite", async () => {
-    const sqlite = await import(pathToFileURL(join(consumer, "node_modules", "better-sqlite3", "lib", "index.js")));
+    const sqliteRoot = join(packageRoot, "node_modules", "better-sqlite3");
+    const sqlite = await import(pathToFileURL(join(sqliteRoot, "lib", "index.js")));
     const database = new sqlite.default(":memory:");
     database.exec("select 1");
     database.close();
+    const binding = await import(pathToFileURL(join(sqliteRoot, "lib", "binding.js")));
+    const prebuilt = binding.default.getPrebuildPath();
+    const addon = prebuilt ?? join(sqliteRoot, "build", "Release", "better_sqlite3.node");
+    nativeAddon = relative(packageRoot, await realpath(addon));
+    nativeProvisioning = prebuilt ? "packaged prebuilt" : "npm lifecycle source build";
   });
 
   await step("damaged-asset-rejected", async () => {
@@ -158,8 +246,8 @@ async function main() {
     await Promise.all([mkdir(negativeData), mkdir(negativeState), rename(index, damaged)]);
     const port = await freePort();
     const mcp = await freePort();
-    const child = spawn(cli, ["start", "--service-mode", "--no-open", "--host", "127.0.0.1", "--port", String(port), "--mcp-port", String(mcp), "--data-dir", negativeData, "--state-dir", negativeState], {
-      cwd: root, env: { PATH: process.env.PATH, LANG: "C.UTF-8" }, stdio: "ignore",
+    const child = spawn(cliCommand, ["start", "--service-mode", "--no-open", "--host", "127.0.0.1", "--port", String(port), "--mcp-port", String(mcp), "--data-dir", negativeData, "--state-dir", negativeState], {
+      cwd: root, env: runtimeEnv, stdio: "ignore",
     });
     try {
       await waitFor(async () => {
@@ -189,18 +277,19 @@ async function main() {
   await run("git", ["-c", "user.name=Portable Smoke", "-c", "user.email=smoke@example.invalid", "-c", "commit.gpgsign=false", "add", "."], { cwd: fixture });
   await run("git", ["-c", "user.name=Portable Smoke", "-c", "user.email=smoke@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "fixture"], { cwd: fixture });
   const common = ["--data-dir", data, "--state-dir", state];
+  await step("doctor", () => run(cliCommand, ["doctor", ...common], { cwd: root, env: runtimeEnv }));
   await step("offline-cli", async () => {
-    await run(cli, ["project", "add", fixture, "--name", "Portable fixture", "--port", String(fixturePort), "--preset", "node", ...common], { cwd: root });
-    const listed = JSON.parse((await run(cli, ["project", "list", "--json", ...common], { cwd: root })).stdout);
+    await run(cliCommand, ["project", "add", fixture, "--name", "Portable fixture", "--port", String(fixturePort), "--preset", "node", ...common], { cwd: root, env: runtimeEnv });
+    const listed = JSON.parse((await run(cliCommand, ["project", "list", "--json", ...common], { cwd: root, env: runtimeEnv })).stdout);
     check(listed.length === 1 && listed[0].repositoryPath === fixture && listed[0].port === fixturePort, "Offline CLI registration mismatch.");
   });
-  const project = JSON.parse((await run(cli, ["project", "list", "--json", ...common], { cwd: root })).stdout)[0];
+  const project = JSON.parse((await run(cliCommand, ["project", "list", "--json", ...common], { cwd: root, env: runtimeEnv })).stdout)[0];
 
   let stdout = "";
   let stderr = "";
   const publicOrigin = "https://switcher.example.test";
-  controller = spawn(cli, ["start", "--service-mode", "--no-open", "--host", "127.0.0.1", "--port", String(dashboardPort), "--public-url", publicOrigin, "--mcp-port", String(mcpPort), "--browse-root", fixture, ...common], {
-    cwd: root, env: { PATH: process.env.PATH, LANG: "C.UTF-8" }, stdio: ["ignore", "pipe", "pipe"],
+  controller = spawn(cliCommand, ["start", "--service-mode", "--no-open", "--host", "127.0.0.1", "--port", String(dashboardPort), "--public-url", publicOrigin, "--mcp-port", String(mcpPort), "--browse-root", fixture, ...common], {
+    cwd: root, env: runtimeEnv, stdio: ["ignore", "pipe", "pipe"],
   });
   controller.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
   controller.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
@@ -215,6 +304,7 @@ async function main() {
   check(!stdout.includes("#token=") && !stdout.includes(SENTINEL), "Controller output exposed a secret.");
 
   const accessUrl = new URL(access.accessUrl);
+  check(access.version === metadata.version, "Controller access record version does not match the installed package.");
   check(accessUrl.origin === publicOrigin, "Packaged controller did not advertise the configured public origin.");
   check(access.publicDashboardEndpoint === publicOrigin, "Packaged controller did not record its public endpoint.");
   check(access.localDashboardEndpoint === `http://127.0.0.1:${dashboardPort}`, "Packaged controller did not record its local CLI endpoint.");
@@ -237,17 +327,18 @@ async function main() {
   });
 
   await step("live-cli-forwarding", async () => {
-    const listed = JSON.parse((await run(cli, ["project", "list", "--json", ...common], { cwd: root })).stdout);
+    const listed = JSON.parse((await run(cliCommand, ["project", "list", "--json", ...common], { cwd: root, env: runtimeEnv })).stdout);
     check(listed[0].id === project.id, "Live CLI did not forward to the singleton controller.");
   });
 
   const token = (await readFile(join(data, "mcp-token"), "utf8")).trim();
   const unauthorized = await fetch(`http://127.0.0.1:${mcpPort}/mcp`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   check(unauthorized.status === 401, "MCP accepted an unauthorized request.");
-  const { Client } = await import(pathToFileURL(join(consumer, "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm", "client", "index.js")));
-  const { StreamableHTTPClientTransport } = await import(pathToFileURL(join(consumer, "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm", "client", "streamableHttp.js")));
+  const { Client } = await import(pathToFileURL(join(packageRoot, "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm", "client", "index.js")));
+  const { StreamableHTTPClientTransport } = await import(pathToFileURL(join(packageRoot, "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm", "client", "streamableHttp.js")));
   client = new Client({ name: "portable-package-smoke", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${mcpPort}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+  check(client.getServerVersion()?.version === metadata.version, "MCP server version does not match the installed package.");
   const call = async (name, args = {}) => {
     const result = await client.callTool({ name, arguments: args });
     check(!result.isError, `${name} returned an MCP error.`);
@@ -290,13 +381,20 @@ async function main() {
   check(!existsSync(join(state, "service-access.json")), "Service access record survived graceful shutdown.");
   check(!existsSync(join(state, "controller.lock")), "Controller lock survived graceful shutdown.");
   check(!forcedCleanup, "Forced cleanup was required.");
+  await step("project-removal", async () => {
+    await run(cliCommand, ["project", "remove", project.id, ...common], { cwd: root, env: runtimeEnv });
+    const listed = JSON.parse((await run(cliCommand, ["project", "list", "--json", ...common], { cwd: root, env: runtimeEnv })).stdout);
+    check(listed.length === 0, "Installed CLI did not remove the fixture project.");
+  });
 
-  const dependencyTree = JSON.parse((await run("npm", ["ls", "--omit=dev", "--json", "--depth=0"], { cwd: consumer })).stdout);
+  const dependencyTree = JSON.parse((await run("npm", ["ls", "--global", "--prefix", prefix, "--omit=dev", "--json", "--all"], { cwd: root, env: installEnv })).stdout);
   const report = {
     ok: true, package: `${metadata.name}@${metadata.version}`, tarball: basename(tarball), sha256: checksum,
     bytes: (await stat(tarball)).size, archiveEntries: archiveFiles.length, node: process.version,
     npm: (await run("npm", ["--version"])).stdout.trim(), platform: `${process.platform}-${process.arch}`,
-    dependencies: Object.fromEntries(Object.entries(dependencyTree.dependencies ?? {}).map(([name, value]) => [name, value.version])),
+    install: { mode: "global-prefix", prefixContainsSpaces: prefix.includes(" ") },
+    nativeSqlite: { load: "success", binary: nativeAddon, provisioning: nativeProvisioning },
+    dependencies: resolvedDependencies(dependencyTree),
     steps, cleanup: "graceful", durationMs: Date.now() - startedAt,
   };
   const reportPath = argument("--report");

@@ -2,7 +2,9 @@
 
 Date: 2026-09-11. Inspected baseline: `68d1edb` on main.
 Owner: `FEAT-20260829-license-and-package-release`.
-Status: planned work; this document neither publishes a package nor installs a service.
+Status: implementation in progress; slices 1–2 are implemented locally, while
+service, upgrade, owner-trial and release gates remain open. This work neither
+publishes a package nor installs a service.
 
 ## What we distribute
 
@@ -172,3 +174,40 @@ record evidence and distinguish the completed tarball outcome from any deliberat
 deferred npm release under the backlog workflow. Coordinate real service platform
 acceptance with `FEAT-20260829-user-service-installation` rather than claiming it
 complete from service-definition unit tests alone.
+
+## Slice 1–2 implementation evidence, 2026-09-11
+
+Selected `0.1.0-trial.1` as the private, unpublished candidate identity. One
+`scripts/package-trial.mjs` path now runs the existing `npm pack`, rejects stale
+builds and non-private/non-prerelease manifests, and emits the exact tarball,
+`SHA256SUMS`, provenance, copied smoke driver and `INSTALL.md`. Provenance records
+the package/version, full source SHA, dirty state, artifact digest/size, Node/npm/
+pnpm toolchain, CI run identity when present, and declared verification targets.
+
+The packaged guide documents a sudo-free user prefix, foreground and user-service
+startup, limits, upgrade caution and removal order. Relative README links are now
+limited to packaged files; contributor-only documents use explicit repository
+links. The tarball audit checks required CLI/dashboard/skill/docs/notices, forbidden
+or escaping paths, symlinks, secret markers, builder-specific runtime paths and
+installed README links.
+
+The checkout-free smoke now installs through `npm install --global --prefix` into
+a prefix containing spaces and invokes `worktree-switcher` through that prefix's
+`PATH` from an unrelated directory. It verifies CLI provenance, `doctor`, native
+SQLite load and provisioning path, offline add/list, live forwarding, packaged
+assets/API, MCP version and runtime ownership, offline project removal, the full
+resolved production graph and graceful cleanup. CI reuses the exact producer
+artifact across Ubuntu 24.04 x64 jobs for Node 22.23.2 and 24.21.0, selected after
+checking the current official Node LTS schedule on 2026-09-11.
+
+Local evidence on Node 24.19.0/npm 11.17.0: lint, typecheck, 303 Vitest tests and
+four resource tests passed; the production build passed; the 531,271-byte tarball
+with 49 entries passed all 12 smoke stages in 20.3 seconds with a packaged
+`better-sqlite3` Linux x64 prebuild and graceful cleanup. Its dirty-worktree digest
+was `a3b2c1f69d0a5e26faf99702e0b443eecadc3a46edc9248b0906b27d2e325367` and is
+development evidence, not a release checksum. CI matrix results are not yet known.
+
+The concrete disposable-user/systemd, same-schema and migration upgrade, injected
+failure recovery, removal and real MCP-client contract is recorded in
+`package-lifecycle-harness.md`. Those slices remain unimplemented and unverified;
+the package release feature stays open.

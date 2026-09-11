@@ -1,0 +1,117 @@
+---
+audience: "people installing a verified Worktree Switcher trial tarball"
+last_reviewed: "2026-09-11"
+source_of_truth: "trial artifact installation, first run, upgrade, and removal"
+status: "active"
+---
+
+# Install the local controller trial
+
+The `0.1.0-trial.1` artifact installs the complete local Worktree Switcher
+controller: CLI, browser dashboard, MCP endpoint, SQLite state, user-service
+commands, and the bundled agent skill. It is not a remote worker and does not
+need a hosted account. The package remains private in the npm manifest and is
+distributed as an explicitly downloaded tarball, not through the npm registry.
+
+## Requirements and verified scope
+
+- Linux x64 is the first verified platform. CI exercises Node.js 22.23.2 and
+  Node.js 24.21.0 on Ubuntu 24.04.
+- Node.js 22 or newer, npm, and Git must already be available.
+- Installing production dependencies requires registry access. The native
+  `better-sqlite3` dependency may need a compatible prebuilt binary or local
+  compilation tools; the installer never installs operating-system tools.
+- Managed repositories keep their own runtime and dependency requirements.
+- macOS arm64 and Windows remain unverified for this tarball trial.
+
+The download set contains:
+
+```text
+worktree-switcher-0.1.0-trial.1.tgz
+SHA256SUMS
+provenance.json
+INSTALL.md
+package-smoke.mjs
+```
+
+Check that `provenance.json` names the expected version, full source commit,
+CI run, tarball digest, build toolchain, and verification targets. Then verify
+the bytes before installing:
+
+```bash
+sha256sum --check SHA256SUMS
+```
+
+## Install without sudo
+
+Use a writable, user-owned prefix. The example intentionally does not alter
+the system npm prefix:
+
+```bash
+mkdir -p "$HOME/.local/worktree-switcher"
+npm install --global \
+  --prefix "$HOME/.local/worktree-switcher" \
+  ./worktree-switcher-0.1.0-trial.1.tgz
+export PATH="$HOME/.local/worktree-switcher/bin:$PATH"
+worktree-switcher doctor
+```
+
+Persist the `PATH` addition in the startup file for your shell. Installation
+resolves production dependencies at that time; the tarball checksum does not
+freeze their transitive versions. Keep the smoke report supplied with a release
+candidate when exact resolved dependencies matter for diagnosis.
+
+To run without a service manager:
+
+```bash
+worktree-switcher start --host 127.0.0.1
+```
+
+Keep the private pairing URL printed by that foreground process out of logs and
+issues. Stop it with `Ctrl-C` before installing the background service.
+
+## Install the user service
+
+On a Linux desktop with a systemd user manager:
+
+```bash
+worktree-switcher service install --host 127.0.0.1
+worktree-switcher service status
+worktree-switcher service open
+```
+
+`service open` reads the current private pairing link; a link from an earlier
+controller process is intentionally stale. For custom ports, directories, or a
+public HTTPS origin, follow the bundled [user-service guide](user-service.md)
+and [HTTPS guide](controller-https.md).
+
+## Upgrade and recover
+
+Do not replace the installed executable while the controller owns running
+projects or verification jobs. Verify the new tarball first, wait until the
+controller is idle, and retain the old tarball. Back up SQLite with the supported
+SQLite backup procedure and save the service options and owner-only configuration.
+
+Stop the service, install the verified replacement into the same prefix, then
+repeat every non-default service option with `service install --refresh`. Start
+once and verify `service status`, stored projects, dashboard access, and MCP.
+Never run an old binary against a database already migrated by a newer binary.
+If startup or migration fails, stop the failed controller before restoring both
+the retained old artifact and the matching pre-upgrade data/configuration.
+
+The automated old-to-new migration and rollback trial is a later acceptance
+gate. Until that evidence exists, treat upgrades as operator-controlled and keep
+the backup and old artifact.
+
+## Remove the trial
+
+Remove the service definition before removing its executable:
+
+```bash
+worktree-switcher service uninstall
+npm uninstall --global --prefix "$HOME/.local/worktree-switcher" worktree-switcher
+```
+
+This preserves repositories, the SQLite database, MCP credential, configuration,
+and logs. Full data deletion is a separate, explicit operation. See
+[reservations and MCP](reservations-and-mcp.md) before connecting an MCP client.

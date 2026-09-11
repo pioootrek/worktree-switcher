@@ -1,6 +1,6 @@
 ---
 audience: "people running Worktree Switcher on a development machine"
-last_reviewed: "2026-08-29"
+last_reviewed: "2026-09-11"
 source_of_truth: "user-service installation, operation, logs, and removal"
 status: "active"
 ---
@@ -22,21 +22,23 @@ add CPU and memory limits.
 
 ## Before you install
 
-Build the project and stop any foreground Worktree Switcher process. The
-singleton lock does not let a service and a foreground controller share the
-same state directory.
+Install and verify the trial package as described in the
+[package trial guide](package-trial.md), then stop any foreground Worktree
+Switcher process. The singleton lock does not let a service and a foreground
+controller share the same state directory.
 
 ```bash
-pnpm build
+worktree-switcher doctor
 ```
 
-The examples below use the unpublished source checkout. Once an npm package is
-available, replace `node dist/cli/index.js` with `worktree-switcher`.
+The examples below use the executable installed into a user-owned npm prefix.
+When developing from a source checkout, use `node dist/cli/index.js` in its
+place after a successful build.
 
 ## Install the service
 
 ```bash
-node dist/cli/index.js service install
+worktree-switcher service install
 ```
 
 Installation writes one user-owned definition and starts it immediately:
@@ -63,7 +65,7 @@ for an explicit refresh.
 options as `start`:
 
 ```bash
-node dist/cli/index.js service install \
+worktree-switcher service install \
   --host 127.0.0.1 \
   --port 47831 \
   --mcp-port 47832 \
@@ -90,9 +92,9 @@ Commands that read the access record or MCP token do not parse the installed
 service definition. If you choose custom directories, pass the matching path:
 
 ```bash
-node dist/cli/index.js service status --state-dir /home/me/.local/state/worktree-switcher
-node dist/cli/index.js service open --state-dir /home/me/.local/state/worktree-switcher
-node dist/cli/index.js config mcp --data-dir /home/me/.local/share/worktree-switcher
+worktree-switcher service status --state-dir /home/me/.local/state/worktree-switcher
+worktree-switcher service open --state-dir /home/me/.local/state/worktree-switcher
+worktree-switcher config mcp --data-dir /home/me/.local/share/worktree-switcher
 ```
 
 ## Open the dashboard
@@ -100,7 +102,7 @@ node dist/cli/index.js config mcp --data-dir /home/me/.local/share/worktree-swit
 Check the service first:
 
 ```bash
-node dist/cli/index.js service status
+worktree-switcher service status
 ```
 
 Status reports the service state, definition path, controller PID, uptime,
@@ -115,13 +117,13 @@ show an explicit unsupported state.
 Open the dashboard:
 
 ```bash
-node dist/cli/index.js service open
+worktree-switcher service open
 ```
 
 On a headless machine, print the private URL and open it on an allowed device:
 
 ```bash
-node dist/cli/index.js service url
+worktree-switcher service url
 ```
 
 `service url` prints a credential. Do not paste it into logs, issues, source
@@ -131,9 +133,9 @@ with owner-only permissions and is removed during a clean stop.
 ## Start, stop, and restart
 
 ```bash
-node dist/cli/index.js service start
-node dist/cli/index.js service stop
-node dist/cli/index.js service restart
+worktree-switcher service start
+worktree-switcher service stop
+worktree-switcher service restart
 ```
 
 A clean stop sends the controller `SIGTERM`. The controller closes MCP and the
@@ -176,11 +178,15 @@ find one, treat it as a security bug.
 
 ## Update the installed service
 
-Rebuild or update Worktree Switcher first. Then refresh the definition:
+Verify the replacement artifact, wait until managed projects and verification
+jobs are idle, and retain the old artifact and a consistent database backup.
+Stop the service before replacing the installed files, then refresh the service
+definition with every previously configured non-default option:
 
 ```bash
-pnpm build
-node dist/cli/index.js service install --refresh
+worktree-switcher service stop
+npm install --global --prefix "$HOME/.local/worktree-switcher" ./verified-replacement.tgz
+worktree-switcher service install --refresh
 ```
 
 Refresh is required when the Node.js path, CLI path, dashboard path, network
@@ -190,7 +196,7 @@ from silently pointing the service at a different executable.
 After refresh:
 
 ```bash
-node dist/cli/index.js service status
+worktree-switcher service status
 ```
 
 Confirm the version, PID, endpoints, and log path.
@@ -211,7 +217,7 @@ Most development machines do not need it.
 ## Remove the service
 
 ```bash
-node dist/cli/index.js service uninstall
+worktree-switcher service uninstall
 ```
 
 Uninstall stops the controller, disables and removes its user-service
@@ -275,6 +281,5 @@ definition from a terminal where the command is available:
 
 ```bash
 command -v pnpm
-pnpm build
-node dist/cli/index.js service install --refresh
+worktree-switcher service install --refresh
 ```

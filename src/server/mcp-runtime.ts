@@ -6,6 +6,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod/v4";
 
+import packageJson from "../../package.json";
 import type { ClaimedRuntimeAction, ClaimedRuntimeReceipt, ProjectSnapshot } from "@/shared/contracts";
 import { localizeServerMessage } from "../i18n/server-errors";
 import type { ControlService } from "./control-service";
@@ -159,7 +160,7 @@ export class McpRuntime {
   }
 
   private createProtocolServer(session: McpSession): McpServer {
-    const server = new McpServer({ name: "worktree-switcher", version: "0.0.1" });
+    const server = new McpServer({ name: "worktree-switcher", version: packageJson.version });
     const owner = () => {
       if (!session.owner) throw new Error("MCP session is not initialized.");
       return session.owner;

@@ -223,7 +223,8 @@
       "created": "2026-09-08",
       "files": [
         "controller-package-trial.md",
-        "implementation-plan.md"
+        "implementation-plan.md",
+        "package-lifecycle-harness.md"
       ],
       "id": "NOTE-20260908-portable-verification-plan",
       "path": "notes/NOTE-20260908-portable-verification-plan",
