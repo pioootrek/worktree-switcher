@@ -299,10 +299,10 @@ function applyMigrations(database: Database.Database): void {
   }
   if (!hasMigration(database, 13)) {
     database.transaction(() => {
-      // Some legacy databases recorded migration 7 without its launch preset column.
+      // Missing presets previously reached the launch resolver as undefined, which means auto.
       const columns = new Set((database.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).map(({ name }) => name));
       if (!columns.has("launch_preset")) {
-        database.exec("ALTER TABLE projects ADD COLUMN launch_preset TEXT NOT NULL DEFAULT 'node' CHECK(launch_preset IN ('auto', 'node', 'django'))");
+        database.exec("ALTER TABLE projects ADD COLUMN launch_preset TEXT NOT NULL DEFAULT 'auto' CHECK(launch_preset IN ('auto', 'node', 'django'))");
       }
       recordMigration(database, 13);
     })();

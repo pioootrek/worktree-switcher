@@ -256,3 +256,32 @@ for (const width of [390, 768, 1440]) {
     expect(errors).toEqual([]);
   });
 }
+
+for (const { width, count } of [{ width: 390, count: 12 }, { width: 1440, count: 12 }, { width: 390, count: 50 }, { width: 1440, count: 50 }]) {
+  test(`worktree menu shows multiple rows and selects the last of ${count} worktrees at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const data = dashboardFixture();
+    const initial = data.projects[0].worktrees[0];
+    data.projects[0].worktrees = Array.from({ length: count }, (_, index) => ({
+      ...initial, path: `${initial.path}-${index}`, branch: `feature-${index}-with-a-long-worktree-name`,
+    }));
+    data.projects[0].project.selectedWorktreePath = data.projects[0].worktrees[0].path;
+    await mountDashboard(page, data);
+    const trigger = page.locator("#worktree-web");
+    await trigger.click();
+    const options = page.getByRole("option");
+    await expect(options).toHaveCount(count);
+    const viewport = page.locator("[data-radix-select-viewport]");
+    const firstBox = await options.first().boundingBox();
+    const viewportBox = await viewport.boundingBox();
+    expect(viewportBox!.height).toBeGreaterThanOrEqual(firstBox!.height * 3);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await expect(options.first()).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(options.last()).toBeFocused();
+    await expect(options.last()).toBeInViewport();
+    await page.keyboard.press("Enter");
+    await expect(trigger).toContainText(`feature-${count - 1}-with-a-long-worktree-name`);
+    await expect(trigger).toBeFocused();
+  });
+}

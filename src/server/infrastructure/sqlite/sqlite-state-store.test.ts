@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { TestRun } from "@/shared/contracts";
 import { legacySourceEvidence } from "@/server/test-source-attribution";
+import { ProjectLaunchCommandResolver } from "@/server/launch-command";
 import { SqliteStateStore } from "./index";
 
 const directories: string[] = [];
@@ -38,8 +39,12 @@ describe("SqliteStateStore", () => {
     legacy.exec("DELETE FROM schema_migrations WHERE version > 12; ALTER TABLE projects DROP COLUMN launch_preset;");
     legacy.close();
     const repaired = new SqliteStateStore(path);
-    expect(repaired.getProject(project.id)?.launchPreset).toBe("node");
-    expect(repaired.listProjects()[0].launchPreset).toBe("node");
+    expect(repaired.getProject(project.id)?.launchPreset).toBe("auto");
+    expect(repaired.listProjects()[0].launchPreset).toBe("auto");
+    writeFileSync(join(directory, "manage.py"), "");
+    const resolver = new ProjectLaunchCommandResolver();
+    expect(resolver.resolve(directory, 3218, repaired.getProject(project.id)?.launchPreset))
+      .toEqual(resolver.resolve(directory, 3218, undefined));
     const django = repaired.addProject({ ...projectInput("Django", "/code/django", 3217), launchPreset: "django" });
     repaired.close();
     const reopened = new SqliteStateStore(path);
