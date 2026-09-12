@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider } from "@/i18n/provider";
+import { ProjectSelectionProvider } from "@/features/dashboard/project-selection";
 
 import "./globals.css";
 
@@ -26,7 +27,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} dark`} suppressHydrationWarning>
       <body>
-        <I18nProvider><TooltipProvider>{children}</TooltipProvider></I18nProvider>
+        <I18nProvider><ProjectSelectionProvider><TooltipProvider>{children}</TooltipProvider></ProjectSelectionProvider></I18nProvider>
       </body>
     </html>
   );

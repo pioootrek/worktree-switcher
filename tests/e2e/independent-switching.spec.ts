@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { endpointIdentity, startControllerFixture } from "../support/controller-fixture";
+import { selectDashboardProject } from "../support/dashboard-actions";
 
 test("the real dashboard switches one project while two others remain live", async ({ page }) => {
   const fixture = await startControllerFixture(3);
@@ -10,11 +11,9 @@ test("the real dashboard switches one project while two others remain live", asy
     }
     const before = await Promise.all(fixture.projects.map((project) => endpointIdentity(project)));
     await page.goto(fixture.accessUrl);
-    await expect(page.getByText("project-a", { exact: true })).toBeVisible();
-    await expect(page.getByText("project-b", { exact: true })).toBeVisible();
-    await expect(page.getByText("project-c", { exact: true })).toBeVisible();
+    await expect(page.locator(`[data-project-id="${fixture.projects[0]!.id}"]`)).toBeVisible();
 
-    const card = page.locator(`[data-project-id="${fixture.projects[0]!.id}"]`);
+    const card = await selectDashboardProject(page, "project-a");
     await card.getByRole("combobox").click();
     await page.getByRole("option", { name: /alternate/ }).click();
     await card.getByRole("button", { name: "Switch", exact: true }).click();
