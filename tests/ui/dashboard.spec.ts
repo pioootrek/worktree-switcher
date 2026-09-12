@@ -115,6 +115,40 @@ test("rapid typed changes keep one live request in flight and one coalesced foll
   expect(maximumActive).toBe(1);
 });
 
+test("worktree row selection updates the operation target", async ({ page }) => {
+  const data = dashboardFixture();
+  const initial = data.projects[0].worktrees[0];
+  data.projects[0].worktrees.push({
+    ...initial,
+    path: "/fixture/web-alternate",
+    branch: "feature/alternate",
+    head: "1234567890abcdef",
+    shortHead: "1234567",
+  });
+  await mountDashboard(page, data);
+
+  await page.getByRole("button", { name: "Select worktree feature/alternate", exact: true }).click();
+
+  await expect(page.locator("#worktree-web")).toContainText("feature/alternate");
+  await expect(page.locator("[data-operation-target]")).toContainText("feature/alternate");
+  await expect(page.locator("[data-operation-target]")).toContainText("1234567");
+  await expect(page.locator("[data-operation-target]")).toContainText("No server is running");
+});
+
+test("a failed runtime reports its location without claiming it is running", async ({ page }) => {
+  const data = dashboardFixture();
+  const snapshot = data.projects[0];
+  snapshot.runtime.phase = "failed";
+  snapshot.runtime.worktreePath = snapshot.worktrees[0].path;
+  snapshot.runtime.error = "fixture failure";
+  await mountDashboard(page, data);
+
+  const card = page.locator('[data-project-id="web"]');
+  await expect(card.getByText("Failed", { exact: true })).toHaveCount(2);
+  await expect(card.getByText("Running", { exact: true })).toHaveCount(0);
+  await expect(card.locator("[data-operation-target]")).toContainText("No server is running");
+});
+
 test("an SSE ready event after reconnect reconciles a quiet dashboard", async ({ page }) => {
   await mountDashboard(page);
   await expect(page.getByText("Fixture Web", { exact: true })).toBeVisible();
