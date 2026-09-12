@@ -14,12 +14,16 @@ import { dashboardSummary } from "@/i18n/messages";
 import { useI18n } from "@/i18n/provider";
 import { AlertTriangle, FlaskConical, FolderGit2, GitBranch, HardDrive, Languages, LoaderCircle, Settings2 } from "lucide-react";
 import { useState } from "react";
+import { ProjectSwitcher } from "./project-switcher";
+import { useProjectSelection } from "./project-selection";
 import { useDashboard } from "./use-dashboard";
 
 export function Dashboard() {
   const { locale, setLocale, t } = useI18n();
   const { data, token, loading, error, notice, mutate, setError, runningCount } = useDashboard();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const { selectedProjectId, selectProject } = useProjectSelection();
+  const selectedSnapshot = data.projects.find(({ project }) => project.id === selectedProjectId) ?? data.projects[0];
 
   return (
     <main className="min-h-screen lg:grid lg:grid-cols-[100px_minmax(0,1fr)]">
@@ -49,9 +53,9 @@ export function Dashboard() {
         <header className="z-30 flex min-h-16 flex-wrap items-center justify-between gap-4 border-b border-border bg-background/92 px-4 py-3 backdrop-blur-xl sm:px-7 lg:sticky lg:top-0 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex items-center gap-2 text-primary lg:hidden"><GitBranch className="size-5" aria-hidden /><span className="font-semibold">WS</span></div>
-            <span className="hidden text-sm text-muted-foreground sm:inline">{t("dashboard.navProjects")}</span>
-            <span className="hidden text-muted-foreground/50 sm:inline">/</span>
-            <h1 className="truncate text-sm font-medium">Worktree Switcher</h1>
+            {data.projects.length > 0 ? (
+              <ProjectSwitcher projects={data.projects.map(({ project }) => project)} selectedProjectId={selectedSnapshot?.project.id ?? null} onSelect={selectProject} />
+            ) : <h1 className="truncate text-sm font-medium">Worktree Switcher</h1>}
           </div>
           <div className="flex max-w-full flex-wrap items-center gap-2">
             <Badge variant="outline" className="h-9 gap-2 px-3 font-normal">
@@ -105,9 +109,7 @@ export function Dashboard() {
           <EmptyState onAdd={() => setDialogOpen(true)} />
         ) : (
           <section id="projects" className="grid gap-7" aria-label={t("dashboard.projects")}>
-            {data.projects.map((snapshot) => (
-              <ProjectCard key={snapshot.project.id} snapshot={snapshot} mutate={mutate} setError={setError} token={token} />
-            ))}
+            {selectedSnapshot ? <ProjectCard key={selectedSnapshot.project.id} snapshot={selectedSnapshot} mutate={mutate} setError={setError} token={token} /> : null}
           </section>
         )}
         </div>

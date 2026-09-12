@@ -6,7 +6,7 @@ for (const locale of ["en", "pl"] as const) {
   test(`dashboard modules preserve actions and accessible dialogs (${locale})`, async ({ page }) => {
     const { requests, errors } = await mountDashboard(page);
     const t = (key: Parameters<typeof translate>[1]) => translate(locale, key);
-    await expect(page.getByText("Fixture Web", { exact: true })).toBeVisible();
+    await expect(page.locator('[data-project-id="web"]').getByText("Fixture Web", { exact: true })).toBeVisible();
     if (locale === "pl") await page.getByRole("button", { name: translate("en", "language.label") }).click();
     await expect(page.locator("html")).toHaveAttribute("lang", locale);
     await expect.poll(() => page.evaluate(() => (window as unknown as { fixtureEvents: { active: number } }).fixtureEvents.active)).toBe(1);
@@ -85,9 +85,54 @@ for (const locale of ["en", "pl"] as const) {
   });
 }
 
+test("the global project switcher filters projects and persists the selection", async ({ page }) => {
+  const data = dashboardFixture();
+  const second = structuredClone(data.projects[0]);
+  second.project.id = "api";
+  second.project.name = "Fixture API";
+  second.project.repositoryPath = "/fixture/api";
+  data.projects.push(second);
+  await mountDashboard(page, data);
+
+  const switcher = page.getByRole("combobox", { name: translate("en", "projectSwitcher.label") });
+  await expect(switcher).toContainText("Fixture Web");
+  await expect(page.locator('[data-project-id="web"]')).toBeVisible();
+  await expect(page.locator('[data-project-id="api"]')).toBeHidden();
+
+  await switcher.click();
+  const search = page.getByRole("textbox", { name: translate("en", "projectSwitcher.search") });
+  await search.fill("api");
+  await expect(page.getByRole("option", { name: /Fixture Web/ })).toBeHidden();
+  await search.press("ArrowDown");
+  const apiOption = page.getByRole("option", { name: /Fixture API/ });
+  await expect(apiOption).toBeFocused();
+  await page.screenshot({ path: test.info().outputPath("project-switcher-filtered.png") });
+  await apiOption.press("Enter");
+  await expect(switcher).toContainText("Fixture API");
+  await expect(page.locator('[data-project-id="api"]')).toBeVisible();
+  await expect(page.locator('[data-project-id="web"]')).toBeHidden();
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("worktree-switcher-project-selection"))).toBe(
+    JSON.stringify({ version: 1, projectId: "api" }),
+  );
+
+  await page.reload();
+  await expect(switcher).toContainText("Fixture API");
+  await expect(page.locator('[data-project-id="api"]')).toBeVisible();
+});
+
+test("a stale persisted project id falls back to an available project", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("worktree-switcher-project-selection", JSON.stringify({ version: 1, projectId: "removed-project" }));
+  });
+  await mountDashboard(page);
+
+  await expect(page.locator('[data-project-id="web"]')).toBeVisible();
+  await expect(page.getByRole("combobox", { name: /Choose project/ })).toContainText("Fixture Web");
+});
+
 test("rapid typed changes keep one live request in flight and one coalesced follow-up", async ({ page }) => {
   await mountDashboard(page);
-  await expect(page.getByText("Fixture Web", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-project-id="web"]').getByText("Fixture Web", { exact: true })).toBeVisible();
   const pending: Route[] = [];
   let active = 0;
   let maximumActive = 0;
@@ -151,7 +196,7 @@ test("a failed runtime reports its location without claiming it is running", asy
 
 test("an SSE ready event after reconnect reconciles a quiet dashboard", async ({ page }) => {
   await mountDashboard(page);
-  await expect(page.getByText("Fixture Web", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-project-id="web"]').getByText("Fixture Web", { exact: true })).toBeVisible();
   let bootstraps = 0;
   await page.route("**/api/dashboard", async (route) => {
     bootstraps += 1;
@@ -166,7 +211,7 @@ test("an SSE ready event after reconnect reconciles a quiet dashboard", async ({
 
 test("stale metadata waits for an explicit refresh", async ({ page }) => {
   const { requests } = await mountDashboard(page);
-  await expect(page.getByText("Fixture Web", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-project-id="web"]').getByText("Fixture Web", { exact: true })).toBeVisible();
   const stale = dashboardFixture();
   stale.projects[0].metadata = {
     status: "stale",
@@ -195,7 +240,7 @@ test("stale metadata waits for an explicit refresh", async ({ page }) => {
 for (const kind of ["bootstrap", "live"] as const) {
   test(`a ${kind} refresh preserves an operation error through connection recovery`, async ({ page }) => {
     const { errors } = await mountDashboard(page);
-    await expect(page.getByText("Fixture Web", { exact: true })).toBeVisible();
+    await expect(page.locator('[data-project-id="web"]').getByText("Fixture Web", { exact: true })).toBeVisible();
     const operationPath = "**/api/projects/web/operation";
     const message = "Server limit of 2 reached.";
     await page.route(operationPath, route => route.fulfill({ status: 409, json: { error: message } }));
@@ -262,7 +307,7 @@ for (const width of [390, 768, 1440]) {
     data.projects[0].worktrees[0].dirty = true;
     data.projects[0].project.repositoryPath = "/home/example/development/a-very-long-repository-directory-name";
     const { errors } = await mountDashboard(page, data);
-    await expect(page.getByText("Fixture Web", { exact: true })).toBeVisible();
+    await expect(page.locator('[data-project-id="web"]').getByText("Fixture Web", { exact: true })).toBeVisible();
     await expect(page.locator("dt").filter({ hasText: /^Preset$/ }).locator("+ dd")).toHaveText(translate("en", "preset.node"));
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     for (const control of [page.getByRole("button", { name: "Start", exact: true }), page.locator("#worktree-web"), page.getByRole("button", { name: translate("en", "metadata.refresh"), exact: true })]) {
