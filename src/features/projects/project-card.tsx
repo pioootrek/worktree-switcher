@@ -117,6 +117,7 @@ export function ProjectCard({
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
       setPending(null);
     }
   };

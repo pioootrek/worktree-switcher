@@ -127,6 +127,23 @@ test("the global project switcher filters projects and persists the selection", 
   await expect(page.locator('[data-project-id="api"]')).toBeVisible();
 });
 
+test("a failed refresh after project removal does not leave the stale card disabled", async ({ page }) => {
+  const { requests, errors } = await mountDashboard(page, dashboardFixture(), {
+    failDashboardRefreshAfterProjectRemoval: true,
+  });
+
+  await page.getByRole("button", { name: translate("en", "project.remove"), exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", {
+    name: translate("en", "project.confirmRemove"),
+    exact: true,
+  }).click();
+
+  await expect(page.getByRole("alert").getByText("Fixture dashboard refresh failed", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: translate("en", "project.remove"), exact: true })).toBeEnabled();
+  expect(requests.at(-1)).toEqual({ path: "/api/projects/web", method: "DELETE", body: {} });
+  expect(errors).toEqual([]);
+});
+
 test("a stale persisted project id falls back to an available project", async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("worktree-switcher-project-selection", JSON.stringify({ version: 1, projectId: "removed-project" }));

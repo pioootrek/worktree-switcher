@@ -37,7 +37,11 @@ export function dashboardFixture(): ControllerDashboardResponse {
 }
 
 /** Loads the real static export into Chromium; no HTTP listener or controller is started. */
-export async function mountDashboard(page: Page, data = dashboardFixture()) {
+export async function mountDashboard(
+  page: Page,
+  data = dashboardFixture(),
+  options: { failDashboardRefreshAfterProjectRemoval?: boolean } = {},
+) {
   const webRoot = resolve("out");
   if (!existsSync(resolve(webRoot, "index.html"))) throw new Error("Run pnpm build before pnpm test:ui.");
   const requests: Array<{ path: string; method: string; body: unknown }> = [];
@@ -107,7 +111,12 @@ export async function mountDashboard(page: Page, data = dashboardFixture()) {
         return route.fulfill({ status: 401, json: { error: "Missing fixture session" } });
       }
       if (request.method() === "GET") {
-        if (url.pathname === "/api/dashboard") return route.fulfill({ json: data });
+        if (url.pathname === "/api/dashboard") {
+          if (options.failDashboardRefreshAfterProjectRemoval && !data.projects.some(({ project }) => project.id === "web")) {
+            return route.fulfill({ status: 503, json: { error: "Fixture dashboard refresh failed" } });
+          }
+          return route.fulfill({ json: data });
+        }
         if (url.pathname === "/api/dashboard/live") {
           const sections = new Set(url.searchParams.getAll("section"));
           const snapshot = data.projects[0];
