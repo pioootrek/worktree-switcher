@@ -129,6 +129,10 @@ export async function mountDashboard(page: Page, data = dashboardFixture()) {
       requests.push({ path: url.pathname, method: request.method(), body });
       const snapshot = data.projects[0];
       switch (url.pathname) {
+        case "/api/projects/web":
+          if (request.method() !== "DELETE") return route.fulfill({ status: 405, json: { error: "Method not allowed" } });
+          data.projects = data.projects.filter(({ project }) => project.id !== "web");
+          break;
         case "/api/projects/web/metadata/refresh": break;
         case "/api/settings/capacity": Object.assign(data.capacity, body); break;
         case "/api/settings/test-queue": Object.assign(data.testQueue, body); break;

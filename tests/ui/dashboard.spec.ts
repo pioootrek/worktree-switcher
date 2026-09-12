@@ -81,6 +81,13 @@ for (const locale of ["en", "pl"] as const) {
     await expect(dialog).toBeHidden();
     await expect.poll(() => page.evaluate(() => (window as unknown as { fixtureEvents: { active: number } }).fixtureEvents.active)).toBe(1);
     await page.screenshot({ path: test.info().outputPath("dashboard-mobile.png"), fullPage: true });
+
+    await page.getByRole("button", { name: t("project.remove"), exact: true }).click();
+    dialog = page.getByRole("alertdialog");
+    await expect(dialog.getByRole("heading", { name: translate(locale, "project.removeTitle", { name: "Fixture Web" }) })).toBeVisible();
+    await dialog.getByRole("button", { name: t("project.confirmRemove"), exact: true }).click();
+    await expect(page.locator('[data-project-id="web"]')).toBeHidden();
+    expect(requests.at(-1)).toEqual({ path: "/api/projects/web", method: "DELETE", body: {} });
     expect(errors).toEqual([]);
   });
 }
