@@ -120,6 +120,16 @@ test("the global project switcher filters projects and persists the selection", 
   await expect(page.locator('[data-project-id="api"]')).toBeVisible();
 });
 
+test("a stale persisted project id falls back to an available project", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("worktree-switcher-project-selection", JSON.stringify({ version: 1, projectId: "removed-project" }));
+  });
+  await mountDashboard(page);
+
+  await expect(page.locator('[data-project-id="web"]')).toBeVisible();
+  await expect(page.getByRole("combobox", { name: /Choose project/ })).toContainText("Fixture Web");
+});
+
 test("rapid typed changes keep one live request in flight and one coalesced follow-up", async ({ page }) => {
   await mountDashboard(page);
   await expect(page.locator('[data-project-id="web"]').getByText("Fixture Web", { exact: true })).toBeVisible();

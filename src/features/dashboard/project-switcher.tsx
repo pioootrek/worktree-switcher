@@ -6,7 +6,7 @@ import { useI18n } from "@/i18n/provider";
 import type { ProjectView } from "@/shared/contracts";
 import { Check, ChevronsUpDown, FolderGit2, Search } from "lucide-react";
 import { Popover as PopoverPrimitive } from "radix-ui";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 const PROJECT_LIST_ID = "global-project-switcher-list";
 
@@ -20,6 +20,8 @@ export function ProjectSwitcher({ projects, selectedProjectId, onSelect }: Proje
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const labelId = useId();
+  const valueId = useId();
   const selected = projects.find((project) => project.id === selectedProjectId) ?? projects[0];
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -35,15 +37,15 @@ export function ProjectSwitcher({ projects, selectedProjectId, onSelect }: Proje
           role="combobox"
           aria-expanded={open}
           aria-controls={PROJECT_LIST_ID}
-          aria-label={t("projectSwitcher.label")}
+          aria-labelledby={`${labelId} ${valueId}`}
           className="h-10 min-w-0 max-w-[min(24rem,calc(100vw-9rem))] justify-start gap-2 rounded-md px-2 text-left hover:bg-accent/70 sm:px-3"
         >
           <span className="grid size-7 shrink-0 place-items-center rounded-md border border-primary/20 bg-primary/10 text-primary">
             <FolderGit2 className="size-4" aria-hidden />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{t("projectSwitcher.current")}</span>
-            <span className="block truncate text-sm font-semibold">{selected?.name ?? t("projectSwitcher.none")}</span>
+            <span id={labelId} className="block truncate text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{t("projectSwitcher.label")}</span>
+            <span id={valueId} className="block truncate text-sm font-semibold">{selected?.name ?? t("projectSwitcher.none")}</span>
           </span>
           <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
         </Button>
