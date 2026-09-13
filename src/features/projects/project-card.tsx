@@ -54,6 +54,7 @@ export function ProjectCard({
   const resources = runtime.resources ?? EMPTY_RESOURCES;
   const initial = project.selectedWorktreePath ?? worktrees[0]?.path ?? "";
   const [selected, setSelected] = useState(initial);
+  const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const selectedWorktree = worktrees.find((worktree) => worktree.path === selected);
   const isBusy = runtime.phase === "starting" || runtime.phase === "stopping" || pending !== null;
@@ -76,27 +77,29 @@ export function ProjectCard({
     }
   };
 
-  const act = async (operation: "start" | "stop" | "restart" | "switch") => {
+  const act = async (operation: "start" | "stop" | "restart" | "switch", worktreePath = selected) => {
+    setPendingPath(worktreePath);
     setPending(operation);
     try {
       await mutate(
         `/api/projects/${project.id}/operation`,
-        { operation, worktreePath: selected || undefined },
+        { operation, worktreePath: worktreePath || undefined },
         t("project.operationDone", { name: project.name, operation: t(`operation.${operation}`) }),
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setPending(null);
+      setPendingPath(null);
     }
   };
 
-  const reserve = async (action: "acquire" | "release" | "force-release") => {
+  const reserve = async (action: "acquire" | "release" | "force-release", worktreePath = selected) => {
     setPending(action);
     try {
       await mutate(
         `/api/projects/${project.id}/reservation`,
-        { action, worktreePath: selected || undefined },
+        { action, worktreePath: worktreePath || undefined },
         action === "acquire"
           ? t("project.reserved", { name: project.name })
           : t("project.released", { name: project.name }),
@@ -248,9 +251,9 @@ export function ProjectCard({
               <p className="mt-4 text-sm text-destructive">{runtime.error}</p>
             ) : null}
 
-        {section === "worktrees" && <WorktreeOverview snapshot={snapshot} selected={selected} onSelect={setSelected} busy={isBusy} refreshing={metadata?.status === "refreshing"} onRefresh={() => void refreshMetadata()} />}
+        {section === "worktrees" && <WorktreeOverview snapshots={[snapshot]} rowActions={() => ({ pendingPath, busy: isBusy, onOperate: (operation, path) => void act(operation, path), onReserve: (action, path) => void reserve(action, path) })} busy={isBusy} refreshing={metadata?.status === "refreshing"} onRefresh={() => void refreshMetadata()} />}
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        {section !== "worktrees" && <><div className="mt-4 grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
           <div className="min-w-0 space-y-2">
             <Label htmlFor={`worktree-${project.id}`}>{t("project.selectedWorktree")}</Label>
             <Select value={selected} onValueChange={setSelected} disabled={isBusy || worktrees.length === 0}>
@@ -304,19 +307,8 @@ export function ProjectCard({
           </p>
         </div>
 
-        <Separator className="my-5" />
-          {section === "worktrees" && <details className="mt-4"><summary className="mb-4 cursor-pointer text-sm text-muted-foreground">{t("project.technicalDetails")}</summary>
-            <dl className="grid grid-cols-2 gap-x-5 gap-y-3 text-sm sm:grid-cols-3">
-              <Metric label={t("project.port")} value={String(project.port)} />
-              <Metric label={t("project.preset")} value={t(`preset.${project.launchPreset}`)} />
-              <Metric label={t("project.protocol")} value={project.tlsMode === "off" ? "HTTP" : "HTTPS"} />
-              <Metric label="PID" value={runtime.pid ? String(runtime.pid) : "—"} />
-              <Metric label={t("project.process")} value={`${project.executable} ${project.args.join(" ")}`} mono />
-              <Metric label={t("project.commit")} value={selectedWorktree?.shortHead ?? "—"} mono />
-              <Metric label={t("project.branch")} value={selectedWorktree?.branch ?? "detached"} />
-              <Metric label={t("project.started")} value={runtime.startedAt ? new Date(runtime.startedAt).toLocaleTimeString(locale === "pl" ? "pl-PL" : "en-US") : "—"} />
-            </dl>
-          </details>}
+        </>}
+        {section !== "worktrees" && <Separator className="my-5" />}
           {section === "logs" && <div className="mt-4">
             <ScrollArea className="h-40 rounded-md border bg-muted p-3">
               <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-foreground">
@@ -366,7 +358,7 @@ export function ProjectCard({
             />
           </div>}
 
-        <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
+        {section !== "worktrees" && <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
           <p className="truncate text-xs text-muted-foreground" title={selectedWorktree?.path}>{selectedWorktree?.path ?? t("project.noSelection")}</p>
           {reservation ? (
             <Button
@@ -386,7 +378,7 @@ export function ProjectCard({
               <LockKeyhole aria-hidden />{t("project.reserve")}
             </Button>
           )}
-        </div>
+        </div>}
         </div>
       </CardContent>
     </Card>

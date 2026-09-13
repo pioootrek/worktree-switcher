@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
-import { Check, Circle, Clock3, GitBranch, GitMerge, HardDrive, RefreshCw, Server, ShieldCheck } from "lucide-react";
+import { Clock3, GitBranch, GitMerge, HardDrive, RefreshCw, Server, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { WorktreeRowActions, type WorktreeRowActionsProps } from "./worktree-row-actions";
 import { RuntimeBadge } from "@/features/runtime/runtime-badge";
 import { useI18n } from "@/i18n/provider";
 import type { ProjectSnapshot } from "@/shared/contracts";
@@ -29,17 +30,20 @@ function bytes(value: number) {
   return `${(value / 1024 ** unit).toFixed(unit ? 1 : 0)} ${units[unit]}`;
 }
 
-export function WorktreeOverview({ snapshot, selected, onSelect, busy, refreshing, onRefresh }: {
-  snapshot: ProjectSnapshot; selected: string; onSelect: (path: string) => void;
+export function WorktreeOverview({ snapshots, aggregate = false, rowActions, busy, refreshing, onRefresh }: {
+  snapshots: ProjectSnapshot[]; aggregate?: boolean;
+  rowActions: (snapshot: ProjectSnapshot) => Pick<WorktreeRowActionsProps, "busy" | "pendingPath" | "onOperate" | "onReserve">;
   busy: boolean; refreshing: boolean; onRefresh: () => void;
 }) {
+  const snapshot = snapshots[0];
+  const scopeId = aggregate ? "all-projects" : snapshot.project.id;
   const { t, locale } = useI18n();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<WorktreeFilter>("all");
   const [page, setPage] = useState(0);
   // Only advances when a dashboard snapshot changes, without an additional polling timer.
   const now = new Date().getTime();
-  const rows = worktreeInsights(snapshot, now);
+  const rows = snapshots.flatMap((entry) => worktreeInsights(entry, now));
   const sort = useSyncExternalStore(subscribe, readSort, () => "launched-desc" as WorktreeSort);
   const changeSort = (value: WorktreeSort) => {
     try { window.localStorage.setItem(SORT_KEY, value); window.dispatchEvent(new Event(SORT_KEY)); } catch { /* Storage unavailable. */ }
@@ -57,11 +61,12 @@ export function WorktreeOverview({ snapshot, selected, onSelect, busy, refreshin
   const review = rows.filter((r) => r.inactive === true || r.worktree.merged === true).length;
   const unknown = rows.filter((r) => r.inactive === null || r.worktree.merged == null).length;
   const runtimeRow = rows.find((r) => r.running);
-  const hasRuntime = ["running", "starting", "stopping"].includes(snapshot.runtime.phase);
+  const activeSnapshots = snapshots.filter((entry) => ["running", "starting", "stopping"].includes(entry.runtime.phase));
+  const hasRuntime = activeSnapshots.length > 0;
   const date = (value: string | null) => value ? new Date(value).toLocaleDateString(locale === "pl" ? "pl-PL" : "en-GB") : t("overview.unknown");
   const metrics = [
-    { label: t("overview.server"), value: hasRuntime ? runtimeRow?.worktree.branch ?? snapshot.runtime.worktreePath ?? "—" : t("overview.noServer"), icon: Server, hint: t("overview.oneServer"), action: () => { setQuery(""); changeFilter(hasRuntime ? "running" : "all"); } },
-    { label: t("overview.worktrees"), value: String(rows.length), icon: GitBranch, hint: t("overview.allWorktrees"), action: () => { setQuery(""); changeFilter("all"); } },
+    { label: t(aggregate ? "aggregate.servers" : "overview.server"), value: aggregate && hasRuntime ? String(activeSnapshots.length) : hasRuntime ? runtimeRow?.worktree.branch ?? snapshot.runtime.worktreePath ?? "—" : t("overview.noServer"), icon: Server, hint: aggregate ? t("aggregate.projectCount", { count: snapshots.length }) : t("overview.oneServer"), action: () => { setQuery(""); changeFilter(hasRuntime ? "running" : "all"); } },
+    { label: t("overview.worktrees"), value: String(rows.length), icon: GitBranch, hint: t(aggregate ? "projectSwitcher.all" : "overview.allWorktrees"), action: () => { setQuery(""); changeFilter("all"); } },
     { label: t("overview.disk"), value: measured.length ? `${measured.length < rows.length ? "≥ " : ""}${bytes(totalBytes)}` : t("overview.unknown"), icon: HardDrive, hint: t("overview.measured", { count: measured.length, total: rows.length }), action: () => { setQuery(""); changeFilter("all"); changeSort("size-desc"); } },
     { label: t("overview.review"), value: unknown ? `${review}+` : String(review), icon: Clock3, hint: t("overview.reviewCounts", { inactive, merged }), action: () => { setQuery(""); changeFilter("review"); } },
   ];
@@ -73,34 +78,39 @@ export function WorktreeOverview({ snapshot, selected, onSelect, busy, refreshin
           <Button variant="ghost" className="h-auto w-full flex-1 flex-col items-start justify-start gap-2 whitespace-normal rounded-[inherit] p-4 text-left" onClick={action}>
             <span className="flex items-center gap-2 text-xs text-muted-foreground"><Icon className="size-4" aria-hidden />{label}</span>
             <span className="w-full truncate text-xl font-semibold" title={value}>{value}</span>
-            {label === t("overview.server") ? <RuntimeBadge phase={snapshot.runtime.phase} /> : null}
+            {!aggregate && label === t("overview.server") ? <RuntimeBadge phase={snapshot.runtime.phase} /> : null}
             <span className="text-xs font-normal text-muted-foreground">{hint}</span>
           </Button>
         </CardContent>
       </Card>)}
     </div>
+    {aggregate && activeSnapshots.length > 0 ? <div className="flex flex-wrap gap-2" aria-label={t("aggregate.servers")}>
+      {activeSnapshots.map((entry) => <Button key={entry.project.id} variant="outline" size="sm" className="h-auto max-w-full whitespace-normal py-2 text-left" onClick={() => { setQuery(entry.project.name); changeFilter("running"); }}>
+        <Server aria-hidden /><span className="min-w-0 break-all">{entry.project.name} · {entry.worktrees.find((w) => w.path === entry.runtime.worktreePath)?.branch ?? entry.runtime.worktreePath}</span><RuntimeBadge phase={entry.runtime.phase} />
+      </Button>)}
+    </div> : null}
     <details className="text-xs text-muted-foreground">
       <summary className="cursor-pointer">{t("overview.definitions")}{unknown ? ` · ${t("overview.unknownCount", { count: unknown })}` : ""}</summary>
       <p className="mt-2 max-w-4xl leading-relaxed">{t("overview.method")}</p>
       <p className="mt-1">{t("overview.storageMethod")}</p>
-      {snapshot.metadata?.lastSuccessfulAt ? <p className="mt-1">{t("metadata.lastSuccess", { time: new Date(snapshot.metadata.lastSuccessfulAt).toLocaleString(locale === "pl" ? "pl-PL" : "en-US") })}</p> : null}
+      {!aggregate && snapshot.metadata?.lastSuccessfulAt ? <p className="mt-1">{t("metadata.lastSuccess", { time: new Date(snapshot.metadata.lastSuccessfulAt).toLocaleString(locale === "pl" ? "pl-PL" : "en-US") })}</p> : null}
     </details>
     <div className="flex flex-wrap items-end gap-3">
       <div className="min-w-0 flex-1 basis-64 space-y-2">
-        <Label htmlFor={`worktree-search-${snapshot.project.id}`}>{t("project.searchWorktrees")}</Label>
-        <Input id={`worktree-search-${snapshot.project.id}`} type="search" value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} placeholder={t("project.searchWorktreesHint")} />
+        <Label htmlFor={`worktree-search-${scopeId}`}>{t("project.searchWorktrees")}</Label>
+        <Input id={`worktree-search-${scopeId}`} type="search" value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} placeholder={t("project.searchWorktreesHint")} />
       </div>
       <div className="w-44 max-w-full space-y-2">
-        <Label htmlFor={`filter-${snapshot.project.id}`}>{t("overview.filter")}</Label>
+        <Label htmlFor={`filter-${scopeId}`}>{t("overview.filter")}</Label>
         <Select value={filter} onValueChange={(v) => changeFilter(v as WorktreeFilter)}>
-          <SelectTrigger id={`filter-${snapshot.project.id}`} className="w-full"><SelectValue /></SelectTrigger>
+          <SelectTrigger id={`filter-${scopeId}`} className="w-full"><SelectValue /></SelectTrigger>
           <SelectContent>{(["all", "running", "review", "inactive", "merged", "unmerged", "both"] as const).map((f) => <SelectItem key={f} value={f}>{t(`overview.filter.${f}`)}</SelectItem>)}</SelectContent>
         </Select>
       </div>
       <div className="w-52 max-w-full space-y-2">
-        <Label htmlFor={`sort-${snapshot.project.id}`}>{t("overview.sort")}</Label>
+        <Label htmlFor={`sort-${scopeId}`}>{t("overview.sort")}</Label>
         <Select value={sort} onValueChange={(v) => changeSort(v as WorktreeSort)}>
-          <SelectTrigger id={`sort-${snapshot.project.id}`} className="w-full"><SelectValue /></SelectTrigger>
+          <SelectTrigger id={`sort-${scopeId}`} className="w-full"><SelectValue /></SelectTrigger>
           <SelectContent>{worktreeSorts.map((s) => <SelectItem key={s} value={s}>{t(`overview.sort.${s}`)}</SelectItem>)}</SelectContent>
         </Select>
       </div>
@@ -109,15 +119,15 @@ export function WorktreeOverview({ snapshot, selected, onSelect, busy, refreshin
     <div className="rounded-md border border-border" role="region" aria-label={t("project.worktreeTable")} tabIndex={0}>
       <Table className="min-w-[1020px] text-left">
         <TableHeader><TableRow>
-          <TableHead className="w-12"><span className="sr-only">{t("project.selection")}</span></TableHead>
+          {aggregate ? <TableHead>{t("aggregate.project")}</TableHead> : null}
           <TableHead>{t("project.branch")}</TableHead><TableHead>{t("project.runtimeState")}</TableHead>
           <TableHead>{t("overview.disk")}</TableHead><TableHead>{t("overview.lastLaunch")}</TableHead>
-          <TableHead>{t("overview.lastCommit")}</TableHead><TableHead>{t("overview.condition")}</TableHead>
+          <TableHead>{t("overview.lastCommit")}</TableHead><TableHead>{t("overview.condition")}</TableHead><TableHead className="text-right">{t("row.actions")}</TableHead>
         </TableRow></TableHeader>
-        <TableBody>{visible.map(({ worktree: w, running, bytes: size, lastLaunch, lastCommit, inactive: idle, measuredAt, measurementStatus }) => <TableRow key={w.path} data-state={selected === w.path ? "selected" : undefined} className={selected === w.path ? "bg-primary/[0.07] shadow-[inset_3px_0_0_var(--primary)]" : undefined}>
-          <TableCell><Button variant="ghost" size="icon-sm" aria-label={t("project.selectWorktree", { branch: w.branch ?? "detached HEAD" })} aria-pressed={selected === w.path} disabled={busy || w.prunable} onClick={() => onSelect(w.path)}>{selected === w.path ? <Check aria-hidden /> : <Circle aria-hidden />}</Button></TableCell>
+        <TableBody>{visible.map(({ snapshot: rowSnapshot, worktree: w, running, bytes: size, lastLaunch, lastCommit, inactive: idle, measuredAt, measurementStatus }) => <TableRow key={JSON.stringify([rowSnapshot.project.id, w.path])} className={running ? "bg-primary/[0.04]" : undefined}>
+          {aggregate ? <TableCell className="max-w-40 truncate" title={rowSnapshot.project.name}>{rowSnapshot.project.name}</TableCell> : null}
           <TableCell className="max-w-[320px] py-3"><p className="truncate font-mono font-medium" title={w.branch ?? "detached HEAD"}>{w.branch ?? "detached HEAD"}</p><p className="truncate font-mono text-[11px] text-muted-foreground" title={w.path}>{w.path}</p><span className="font-mono text-[11px] text-muted-foreground">{w.shortHead}</span></TableCell>
-          <TableCell>{running ? <RuntimeBadge phase={snapshot.runtime.phase} /> : <span className="text-muted-foreground">—</span>}</TableCell>
+          <TableCell>{running ? <RuntimeBadge phase={rowSnapshot.runtime.phase} /> : <span className="text-muted-foreground">—</span>}</TableCell>
           <TableCell className="tabular-nums" title={measuredAt ? `${date(measuredAt)} · ${measurementStatus}` : undefined}>{size === null ? t("overview.unknown") : bytes(size)}</TableCell>
           <TableCell className="text-xs" title={lastLaunch ?? undefined}>{date(lastLaunch)}</TableCell>
           <TableCell className="text-xs" title={lastCommit ?? undefined}>{date(lastCommit)}</TableCell>
@@ -125,10 +135,11 @@ export function WorktreeOverview({ snapshot, selected, onSelect, busy, refreshin
             <Badge variant="outline" className={w.dirty ? "text-warning-foreground" : "text-muted-foreground"}>{w.dirty ? t("project.dirty") : t("project.clean")}</Badge>
             {w.isDefaultBranch ? <Badge variant="secondary">{t("overview.defaultBranch")}</Badge> : w.merged === true ? <Badge variant="secondary" title={t("overview.mergedInto", { branch: w.mergedInto ?? "?" })}><GitMerge aria-hidden />{t("overview.filter.merged")}</Badge> : w.merged == null ? <span className="text-xs text-muted-foreground">{t("overview.mergeUnknown")}</span> : null}
             {idle ? <Badge variant="outline"><Clock3 aria-hidden />{t("overview.filter.inactive")}</Badge> : null}
-            {w.locked || snapshot.reservation?.worktreePath === w.path ? <Badge variant="outline"><ShieldCheck aria-hidden />{t("overview.reserved")}</Badge> : null}
+            {w.locked || rowSnapshot.reservation?.worktreePath === w.path ? <Badge variant="outline"><ShieldCheck aria-hidden />{t("overview.reserved")}</Badge> : null}
           </div></TableCell>
+          <TableCell className="text-right"><WorktreeRowActions snapshot={rowSnapshot} worktree={w} {...rowActions(rowSnapshot)} /></TableCell>
         </TableRow>)}
-        {!visible.length ? <TableRow><TableCell colSpan={7} className="h-24 text-center text-muted-foreground">{t("project.noMatchingWorktrees")}</TableCell></TableRow> : null}
+        {!visible.length ? <TableRow><TableCell colSpan={aggregate ? 8 : 7} className="h-24 text-center text-muted-foreground">{t("project.noMatchingWorktrees")}</TableCell></TableRow> : null}
         </TableBody>
       </Table>
     </div>

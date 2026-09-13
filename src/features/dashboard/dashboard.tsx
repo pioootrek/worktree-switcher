@@ -17,7 +17,8 @@ import { AlertTriangle, CheckCircle2, Languages, LoaderCircle, X } from "lucide-
 import { useState } from "react";
 import { ProjectNavigation, projectSections, type ProjectSection } from "./project-navigation";
 import { ProjectSwitcher } from "./project-switcher";
-import { useProjectSelection } from "./project-selection";
+import { AllProjectsWorktrees } from "@/features/projects/all-projects-worktrees";
+import { ALL_PROJECTS, useProjectSelection } from "./project-selection";
 import { useDashboard } from "./use-dashboard";
 
 export function Dashboard() {
@@ -26,17 +27,18 @@ export function Dashboard() {
   const [section, setSection] = useState<ProjectSection>("worktrees");
   const [dialogOpen, setDialogOpen] = useState(false);
   const { selectedProjectId, selectProject } = useProjectSelection();
+  const allProjects = selectedProjectId === ALL_PROJECTS;
   const selectedSnapshot = data.projects.find(({ project }) => project.id === selectedProjectId) ?? data.projects[0];
 
   return (
     <SidebarProvider>
-      <ProjectNavigation section={section} projectName={selectedSnapshot?.project.name} onSelect={(next) => { setSection(next); window.scrollTo({ top: 0, behavior: "instant" }); }} />
+      <ProjectNavigation section={section} projectName={allProjects ? t("projectSwitcher.all") : selectedSnapshot?.project.name} onSelect={(next) => { setSection(next); window.scrollTo({ top: 0, behavior: "instant" }); }} />
       <main className="min-w-0 flex-1">
         <header className="z-30 flex min-h-16 flex-wrap items-center justify-between gap-4 border-b border-border bg-background/92 px-4 py-3 backdrop-blur-xl sm:px-7 sticky top-0 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <SidebarTrigger aria-label={t("dashboard.toggleNavigation")} />
             {data.projects.length > 0 ? (
-              <ProjectSwitcher projects={data.projects.map(({ project }) => project)} selectedProjectId={selectedSnapshot?.project.id ?? null} onSelect={(id) => { selectProject(id); window.scrollTo({ top: 0, behavior: "instant" }); }} />
+              <ProjectSwitcher projects={data.projects.map(({ project }) => project)} selectedProjectId={allProjects ? ALL_PROJECTS : selectedSnapshot?.project.id ?? null} onSelect={(id) => { selectProject(id); window.scrollTo({ top: 0, behavior: "instant" }); }} />
             ) : <h1 className="truncate text-sm font-medium">Worktree Switcher</h1>}
           </div>
           <div className="flex max-w-full flex-wrap items-center gap-2">
@@ -103,7 +105,7 @@ export function Dashboard() {
           <EmptyState onAdd={() => setDialogOpen(true)} />
         ) : (
           <section id="projects" className="grid gap-7" aria-label={t("dashboard.projects")}>
-            {selectedSnapshot ? <ProjectCard key={selectedSnapshot.project.id} snapshot={selectedSnapshot} section={section} mutate={mutate} setError={setError} token={token} /> : null}
+            {allProjects && section === "worktrees" ? <AllProjectsWorktrees snapshots={data.projects} mutate={mutate} setError={setError} /> : (allProjects ? data.projects : selectedSnapshot ? [selectedSnapshot] : []).map((snapshot) => <ProjectCard key={snapshot.project.id} snapshot={snapshot} section={section} mutate={mutate} setError={setError} token={token} />)}
           </section>
         )}
         </div>
