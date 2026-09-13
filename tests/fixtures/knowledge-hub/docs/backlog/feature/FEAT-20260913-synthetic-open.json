@@ -1,0 +1,42 @@
+{
+  "area": "core",
+  "created": "2026-09-13",
+  "id": "FEAT-20260913-synthetic-open",
+  "links": {
+    "related_ids": [
+      "FEAT-20260913-missing-target"
+    ]
+  },
+  "notes": [
+    {
+      "author": "agent:synthetic",
+      "date": "2026-09-13",
+      "text": "Fixture-only historical declaration, not an authenticated approval."
+    }
+  ],
+  "priority": "now",
+  "problem": [
+    "A synthetic record is needed to test loss-aware import."
+  ],
+  "risk": {
+    "dimensions": [
+      "data-migration"
+    ],
+    "level": "medium",
+    "rollback": "Delete the disposable imported fixture project."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Import this record and preserve its unresolved relation."
+  ],
+  "source": "Synthetic K0 fixture",
+  "status": "open",
+  "title": "Import a synthetic open item",
+  "type": "feature",
+  "validation": [
+    "The imported task retains the source payload and unresolved reference."
+  ],
+  "value": [
+    "The importer can be tested without exposing project data."
+  ]
+}

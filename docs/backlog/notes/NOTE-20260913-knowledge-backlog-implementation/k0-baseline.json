@@ -1,0 +1,29 @@
+{
+  "captured_at": "2026-09-13",
+  "controller": {
+    "git_scan_boundary": "SQLite list and detail reads do not scan Git; refreshProjectMetadata and other explicit discovery operations may scan.",
+    "singleton_lock": "Exclusive owner lock file with live-PID detection and token-checked release; covered by 2 unit tests.",
+    "runtime_removal": "Transactional DELETE FROM projects after remote-request cancellation; runtime-owned rows cascade, so knowledge must reference an independent project and only detach its mapping."
+  },
+  "source_commit": "7a17fb42b23cb4115f4955bdbc9fa6ebae054c5e",
+  "tests": {
+    "resource_contract": {
+      "attribution": "observed_match",
+      "duration_milliseconds": 74.93,
+      "preset": "node:test:resources",
+      "result": "passed",
+      "run_id": "a8384a07-145a-4a1c-a44d-e63ad15e90c6",
+      "source_worktree": "clean main worktree at the same source commit",
+      "tests_passed": 7
+    },
+    "unit": {
+      "attribution": "observed_match",
+      "duration_seconds": 23.86,
+      "files_passed": 47,
+      "preset": "node:test",
+      "result": "passed",
+      "run_id": "e3279952-3fe5-4071-85f3-4f0b52702242",
+      "tests_passed": 303
+    }
+  }
+}

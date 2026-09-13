@@ -1,0 +1,26 @@
+{
+  "changed": [
+    "Synthetic outcome recorded"
+  ],
+  "date": "2026-09-13",
+  "followup_ids": [
+    "FEAT-20260913-synthetic-open"
+  ],
+  "id": "DONE-20260913-synthetic-finished",
+  "item_id": "FEAT-20260912-synthetic-finished",
+  "item_snapshot": {
+    "custom_snapshot_field": {
+      "preserve": true
+    },
+    "status": "done"
+  },
+  "schema_version": 1,
+  "source": "Synthetic K0 fixture",
+  "summary": [
+    "A completed record exists without its original open-item file."
+  ],
+  "title": "Synthetic completed item",
+  "validation": [
+    "Import preserves the orphaned completion and snapshot."
+  ]
+}

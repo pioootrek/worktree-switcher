@@ -1,0 +1,10 @@
+{
+  "areas": [
+    "core",
+    "product"
+  ],
+  "docs_dir": "docs",
+  "health_stale_days": 30,
+  "notes_stale_days": 60,
+  "schema_version": 1
+}

@@ -1,0 +1,1 @@
+Synthetic nested attachment discovered from the directory, not the files field.
