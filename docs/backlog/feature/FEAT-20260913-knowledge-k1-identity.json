@@ -29,7 +29,7 @@
       "process"
     ],
     "level": "high",
-    "rollback": "Disable the scoped identity HTTP, MCP, and CLI entry points while retaining the legacy runtime token path. Revoke issued scoped credentials and keep migration 16 identity and grant rows for diagnosis or a later retry; do not drop or rewrite the SQLite schema during rollback. Restore service from the pre-K1 release and verify legacy dashboard, runtime MCP, and pairing flows before re-enabling identity administration."
+    "rollback": "Disable the scoped identity HTTP, MCP, and CLI entry points while retaining the legacy runtime token path. Revoke issued scoped credentials and keep migration 17 identity and grant rows for diagnosis or a later retry; do not drop or rewrite the SQLite schema during rollback. Restore service from the pre-K1 release and verify legacy dashboard, runtime MCP, and pairing flows before re-enabling identity administration."
   },
   "schema_version": 1,
   "scope": [

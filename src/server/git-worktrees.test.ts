@@ -7,6 +7,21 @@ import { join } from "node:path";
 import { GitCommandAdmission, parseWorktreePorcelain, SystemGitWorktreeReader } from "./git-worktrees";
 
 describe("parseWorktreePorcelain", () => {
+  it("reports commit dates and merged branches against main, without classifying main as merged", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "switcher-insights-"));
+    const reader = new SystemGitWorktreeReader();
+    const git = (...args: string[]) => execFileSync("git", ["-C", directory, ...args], { stdio: "pipe" });
+    try {
+      git("init", "-b", "main"); git("config", "user.name", "Test"); git("config", "user.email", "test@example.test");
+      git("commit", "--allow-empty", "-m", "initial");
+      git("worktree", "add", "-b", "finished", join(directory, "finished"));
+      const rows = await reader.list(directory, { includeInsights: true });
+      expect(rows.find((w) => w.branch === "main")).toMatchObject({ isDefaultBranch: true, merged: false, mergedInto: "main" });
+      expect(rows.find((w) => w.branch === "finished")).toMatchObject({ merged: true, mergedInto: "main", lastCommitAt: expect.any(String) });
+      execFileSync("git", ["-C", join(directory, "finished"), "commit", "--allow-empty", "-m", "new work"], { stdio: "pipe" });
+      expect((await reader.list(directory, { includeInsights: true })).find((w) => w.branch === "finished")?.merged).toBe(false);
+    } finally { reader.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
   it("parses branches, detached worktrees, and flags from nul-delimited output", () => {
     const output = [
       "worktree /code/app",

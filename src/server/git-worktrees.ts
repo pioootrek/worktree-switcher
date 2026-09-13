@@ -84,7 +84,7 @@ function execute(
 
 export interface GitWorktreeReader {
   canonicalRepositoryPath(path: string): Promise<string>;
-  list(repositoryPath: string, options?: { priority?: GitCommandPriority }): Promise<Worktree[]>;
+  list(repositoryPath: string, options?: { priority?: GitCommandPriority; includeInsights?: boolean }): Promise<Worktree[]>;
   observe(worktreePath: string): Promise<TestSourceObservation>;
   close?(): void;
 }
@@ -131,13 +131,14 @@ export class SystemGitWorktreeReader implements GitWorktreeReader {
     }
   }
 
-  async list(repositoryPath: string, options: { priority?: GitCommandPriority } = {}): Promise<Worktree[]> {
+  async list(repositoryPath: string, options: { priority?: GitCommandPriority; includeInsights?: boolean } = {}): Promise<Worktree[]> {
     const priority = options.priority ?? "operational";
     const { stdout } = await this.admission.run(priority, (signal) => execute(
       "git", ["-C", repositoryPath, "worktree", "list", "--porcelain", "-z"],
       { encoding: "utf8", timeout: 8000, maxBuffer: 2 * 1024 * 1024, signal },
     ));
     const worktrees = parseWorktreePorcelain(stdout);
+    const insights = options.includeInsights ? await this.branchInsights(repositoryPath, priority) : new Map<string, Partial<Worktree>>();
     return Promise.all(worktrees.map(async (worktree) => {
       let dirty = false;
       let statusError: string | undefined;
@@ -151,8 +152,30 @@ export class SystemGitWorktreeReader implements GitWorktreeReader {
         dirty = true;
         statusError = "Nie udało się odczytać stanu worktree.";
       }
-      return { ...worktree, dirty, ...(statusError ? { statusError } : {}) };
+      return { ...worktree, ...insights.get(worktree.branch ?? ""), dirty, ...(statusError ? { statusError } : {}) };
     }));
+  }
+
+  private async branchInsights(repositoryPath: string, priority: GitCommandPriority): Promise<Map<string, Partial<Worktree>>> {
+    const read = async (args: string[]) => (await this.admission.run(priority, (signal) => execute(
+      "git", ["-C", repositoryPath, ...args], { encoding: "utf8", timeout: 5000, maxBuffer: 2 * 1024 * 1024, signal },
+    ))).stdout.trim();
+    const result = new Map<string, Partial<Worktree>>();
+    try {
+      const refs = await read(["for-each-ref", "--format=%(refname:short)%09%(committerdate:iso-strict)", "refs/heads/"]);
+      for (const row of refs.split("\n").filter(Boolean)) {
+        const [branch, date] = row.split("\t");
+        result.set(branch, { lastCommitAt: date || null, merged: null, mergedInto: null });
+      }
+      let target: string | null = null;
+      try { target = (await read(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])).replace(/^origin\//, ""); } catch { /* local-only repository */ }
+      if (!target) target = result.has("main") ? "main" : result.has("master") ? "master" : null;
+      if (!target) return result;
+      const targetRef = result.has(target) ? `refs/heads/${target}` : `refs/remotes/origin/${target}`;
+      const merged = new Set((await read(["for-each-ref", `--merged=${targetRef}`, "--format=%(refname:short)", "refs/heads/"])).split("\n"));
+      for (const [branch, info] of result) result.set(branch, { ...info, mergedInto: target, merged: branch === target ? false : merged.has(branch), isDefaultBranch: branch === target });
+    } catch { /* Missing evidence stays unknown; ordinary worktree discovery still works. */ }
+    return result;
   }
 
   async observe(worktreePath: string): Promise<TestSourceObservation> {

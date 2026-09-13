@@ -451,14 +451,20 @@ function applyMigrations(database: Database.Database): void {
   }
   if (!hasMigration(database, 16)) {
     database.transaction(() => {
-      database.exec(IDENTITY_AND_KNOWLEDGE_ACCESS_SCHEMA);
+      database.exec("CREATE INDEX IF NOT EXISTS worktree_launch_history ON audit_events(project_id, id DESC) WHERE event_type = 'worktree.launched'");
       recordMigration(database, 16);
     })();
   }
   if (!hasMigration(database, 17)) {
     database.transaction(() => {
-      database.prepare("UPDATE principal_credentials SET token_prefix = 'wts_' || id").run();
+      database.exec(IDENTITY_AND_KNOWLEDGE_ACCESS_SCHEMA);
       recordMigration(database, 17);
+    })();
+  }
+  if (!hasMigration(database, 18)) {
+    database.transaction(() => {
+      database.prepare("UPDATE principal_credentials SET token_prefix = 'wts_' || id").run();
+      recordMigration(database, 18);
     })();
   }
 }

@@ -1,12 +1,13 @@
 "use client";
 
+import { ALL_PROJECTS } from "./project-selection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n/provider";
 import type { ProjectView } from "@/shared/contracts";
-import { Check, ChevronsUpDown, FolderGit2, Search } from "lucide-react";
+import { Check, ChevronsUpDown, FolderGit2, Layers, Search } from "lucide-react";
 import { Popover as PopoverPrimitive } from "radix-ui";
-import { useId, useMemo, useState } from "react";
+import { useId, useState } from "react";
 
 const PROJECT_LIST_ID = "global-project-switcher-list";
 
@@ -22,12 +23,10 @@ export function ProjectSwitcher({ projects, selectedProjectId, onSelect }: Proje
   const [query, setQuery] = useState("");
   const labelId = useId();
   const valueId = useId();
-  const selected = projects.find((project) => project.id === selectedProjectId) ?? projects[0];
-  const filtered = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase();
-    if (!normalized) return projects;
-    return projects.filter((project) => `${project.name} ${project.repositoryPath}`.toLocaleLowerCase().includes(normalized));
-  }, [projects, query]);
+  const options = [{ id: ALL_PROJECTS, name: t("projectSwitcher.all"), repositoryPath: t("aggregate.projectCount", { count: projects.length }) }, ...projects];
+  const selected = options.find((project) => project.id === selectedProjectId) ?? projects[0];
+  const normalized = query.trim().toLocaleLowerCase();
+  const filtered = options.filter((project) => `${project.name} ${project.repositoryPath}`.toLocaleLowerCase().includes(normalized));
 
   return (
     <PopoverPrimitive.Root open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery(""); }}>
@@ -41,7 +40,7 @@ export function ProjectSwitcher({ projects, selectedProjectId, onSelect }: Proje
           className="h-10 min-w-0 max-w-[min(24rem,calc(100vw-9rem))] justify-start gap-2 rounded-md px-2 text-left hover:bg-accent/70 sm:px-3"
         >
           <span className="grid size-7 shrink-0 place-items-center rounded-md border border-primary/20 bg-primary/10 text-primary">
-            <FolderGit2 className="size-4" aria-hidden />
+            {selected?.id === ALL_PROJECTS ? <Layers className="size-4" aria-hidden /> : <FolderGit2 className="size-4" aria-hidden />}
           </span>
           <span className="min-w-0 flex-1">
             <span id={labelId} className="block truncate text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{t("projectSwitcher.label")}</span>
@@ -85,7 +84,7 @@ export function ProjectSwitcher({ projects, selectedProjectId, onSelect }: Proje
                   type="button"
                   role="option"
                   aria-selected={active}
-                  onClick={() => { onSelect(project.id); setOpen(false); }}
+                  onClick={() => { onSelect(project.id); setOpen(false); setQuery(""); }}
                   onKeyDown={(event) => {
                     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
                     event.preventDefault();
@@ -99,7 +98,7 @@ export function ProjectSwitcher({ projects, selectedProjectId, onSelect }: Proje
                   className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left outline-none transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
                 >
                   <span className="grid size-8 shrink-0 place-items-center rounded-md border border-border bg-muted/60 text-muted-foreground">
-                    <FolderGit2 className="size-4" aria-hidden />
+                    {project.id === ALL_PROJECTS ? <Layers className="size-4" aria-hidden /> : <FolderGit2 className="size-4" aria-hidden />}
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{project.name}</span>

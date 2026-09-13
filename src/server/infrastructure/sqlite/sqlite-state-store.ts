@@ -517,6 +517,21 @@ export class SqliteStateStore implements StateStore, IdentityStore, RemoteVerifi
     this.audit(projectId, eventType, actor, details);
   }
 
+  listWorktreeLaunches(projectId: string): Record<string, string> {
+    // Audit retention is bounded here; absent evidence is unknown, never "never run".
+    const rows = this.database.prepare(`
+      SELECT details_json, created_at FROM audit_events
+      WHERE project_id = ? AND event_type = 'worktree.launched'
+      ORDER BY id DESC LIMIT 2000
+    `).all(projectId) as Array<{ details_json: string; created_at: string }>;
+    const launches: Record<string, string> = Object.create(null);
+    for (const row of rows) {
+      const details = JSON.parse(row.details_json) as { worktreePath?: string };
+      if (typeof details.worktreePath === "string" && !launches[details.worktreePath]) launches[details.worktreePath] = row.created_at;
+    }
+    return launches;
+  }
+
   getActiveReservation(projectId: string): Reservation | null {
     this.expireReservations(projectId);
     const row = this.database.prepare(`

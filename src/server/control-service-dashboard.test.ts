@@ -98,7 +98,7 @@ describe("ControlService dashboard projection", () => {
     const detailed = await service.projectSnapshot(projects[0].id);
     expect(detailed.worktrees).toEqual([addedWorktree]);
     expect(list).toHaveBeenCalledTimes(3);
-    expect(list).toHaveBeenLastCalledWith("/repo/0", { priority: "operational" });
+    expect(list).toHaveBeenLastCalledWith("/repo/0", { priority: "operational", includeInsights: true });
 
     events.close();
     store.close();
