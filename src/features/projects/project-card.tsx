@@ -16,19 +16,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ProjectSection } from "@/features/dashboard/project-navigation";
 import type { Mutate } from "@/features/control-client";
 import { EnvironmentSettingsDialog } from "@/features/environments/environment-settings-dialog";
-import { EMPTY_RESOURCES } from "@/features/runtime/defaults";
 import { localizedFailure } from "@/features/runtime/localized-failure";
-import { ResourceMonitor } from "@/features/runtime/resource-monitor";
 import { RuntimeBadge } from "@/features/runtime/runtime-badge";
 import { TlsSettingsDialog } from "@/features/runtime/tls-settings-dialog";
-import { WorktreeStoragePanel } from "@/features/storage/worktree-storage-panel";
 import { useI18n } from "@/i18n/provider";
 import type { ProjectSnapshot } from "@/shared/contracts";
 import { AlertTriangle, GitBranch, LockKeyhole, Play, RefreshCw, RotateCcw, Server, Square, Trash2, UnlockKeyhole } from "lucide-react";
@@ -50,7 +46,6 @@ export function ProjectCard({
 }) {
   const { locale, t } = useI18n();
   const { project, runtime, reservation, worktrees } = snapshot;
-  const resources = runtime.resources ?? EMPTY_RESOURCES;
   const initial = project.selectedWorktreePath ?? worktrees[0]?.path ?? "";
   const [selected, setSelected] = useState(initial);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
@@ -308,41 +303,6 @@ export function ProjectCard({
 
         </>}
         {section !== "worktrees" && <Separator className="my-5" />}
-          {section === "logs" && <div className="mt-4">
-            <ScrollArea className="h-40 rounded-md border bg-muted p-3">
-              <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-foreground">
-                {runtime.logs.length ? runtime.logs.join("\n") : t("project.noLogs")}
-              </pre>
-            </ScrollArea>
-          </div>}
-          {section === "resources" && <div className="mt-4 space-y-6">
-            <ResourceMonitor resources={resources} />
-            <WorktreeStoragePanel
-              key={runtime.worktreePath ?? selected}
-              storage={snapshot.storage ?? []}
-              defaultPath={runtime.worktreePath ?? selected}
-              refresh={(worktreePath) => mutate(
-                `/api/projects/${project.id}/storage/refresh`,
-                { worktreePath },
-                t("storage.refreshQueued"),
-              )}
-              deleteCache={async (worktreePath) => {
-                try {
-                  await mutate(
-                    `/api/projects/${project.id}/storage/cache`,
-                    { worktreePath, cache: "next" },
-                    t("storage.deleted"),
-                    "DELETE",
-                  );
-                } catch (cause) {
-                  setError(cause instanceof Error ? cause.message : String(cause));
-                  throw cause;
-                }
-              }}
-              activeWorktreePath={runtime.phase === "running" || runtime.phase === "starting" || runtime.phase === "stopping" ? runtime.worktreePath : null}
-              reservedWorktreePath={reservation?.worktreePath ?? null}
-            />
-          </div>}
 
         {section !== "worktrees" && <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
           <p className="truncate text-xs text-muted-foreground" title={selectedWorktree?.path}>{selectedWorktree?.path ?? t("project.noSelection")}</p>

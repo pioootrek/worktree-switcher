@@ -97,7 +97,8 @@ test("sidebar scopes the test dashboard and follows the project picker", async (
   await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
   await nav.getByRole("button", { name: "Resources", exact: true }).click();
-  await expect(page.getByText(translate("en", "storage.noWorktrees"), { exact: true })).toBeVisible();
+  await expect(page.locator("[data-resources-dashboard]")).toBeVisible();
+  await expect(page.getByRole("tabpanel").locator("tbody tr")).toHaveCount(2);
   await nav.getByRole("button", { name: "Worktrees", exact: true }).click();
   await expect(page.getByRole("button", { name: "Select worktree feature/alternate", exact: true })).toHaveCount(0);
   await nav.getByRole("button", { name: "Logs", exact: true }).click();
@@ -548,8 +549,9 @@ for (const { width, count } of [{ width: 390, count: 12 }, { width: 1440, count:
     data.projects[0].project.selectedWorktreePath = data.projects[0].worktrees[0].path;
     await mountDashboard(page, data);
     if (width < 768) await page.getByRole("button", { name: "Toggle navigation", exact: true }).click();
-    await page.getByRole("navigation").getByRole("button", { name: "Resources", exact: true }).click();
-    const trigger = page.locator("#worktree-web");
+    await page.getByRole("navigation").getByRole("button", { name: "Tests", exact: true }).click();
+    await page.getByRole("button", { name: "Run test", exact: true }).click();
+    const trigger = page.getByRole("dialog").getByRole("combobox", { name: "Worktree", exact: true });
     await trigger.click();
     const options = page.getByRole("option");
     await expect(options).toHaveCount(count);
