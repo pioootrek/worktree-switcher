@@ -14,16 +14,15 @@ test("the real dashboard switches one project while two others remain live", asy
     await expect(page.locator(`[data-project-id="${fixture.projects[0]!.id}"]`)).toBeVisible();
 
     const card = await selectDashboardProject(page, "project-a");
-    await card.getByRole("combobox").click();
-    await page.getByRole("option", { name: /alternate/ }).click();
-    await card.getByRole("button", { name: "Switch", exact: true }).click();
+    const alternate = card.locator("tbody tr").filter({ has: page.getByText("alternate", { exact: true }) });
+    await alternate.getByRole("button", { name: "Switch here", exact: true }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Switch here", exact: true }).click();
 
     const switched = await endpointIdentity(fixture.projects[0]!, "project-a:alternate");
     expect(switched.identity).toBe("project-a:alternate");
     expect(switched.boot).not.toBe(before[0]!.boot);
     expect(await Promise.all(fixture.projects.slice(1).map((project) => endpointIdentity(project)))).toEqual(before.slice(1));
-    await expect(card.getByRole("combobox")).toContainText("alternate");
-    await expect(card.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+    await expect(alternate.getByRole("button", { name: "Open", exact: true })).toBeVisible();
   } finally {
     await page.close();
     await fixture.close();

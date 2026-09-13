@@ -240,6 +240,8 @@ export interface RuntimeFailure {
 }
 
 export interface ProjectSnapshot {
+  /** Includes the full bounded retained test history, not only the legacy 20-run preview. */
+  testHistoryComplete?: boolean;
   lastLaunchedAt?: Record<string, string>;
   project: ProjectView;
   runtime: RuntimeSnapshot;
@@ -265,6 +267,7 @@ export interface DashboardChangeEvent {
 }
 
 export interface ProjectLiveSnapshot {
+  testHistoryComplete?: boolean;
   lastLaunchedAt?: Record<string, string>;
   projectId: string;
   runtime?: RuntimeSnapshot;

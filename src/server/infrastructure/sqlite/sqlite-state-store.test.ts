@@ -37,6 +37,11 @@ describe("SqliteStateStore", () => {
     store.recordProjectEvent(other.id, "worktree.launched", "controller", { worktreePath: "/code/other" });
     const launches = store.listWorktreeLaunches(project.id);
     expect(Object.keys(launches)).toEqual(["/code/branch"]);
+    for (let index = 0; index < 2001; index++) {
+      store.recordProjectEvent(other.id, "worktree.launched", "controller", { worktreePath: "/code/other" });
+      store.recordProjectEvent(project.id, "agent.runtime_completed", "controller", {});
+    }
+    expect(store.listWorktreeLaunches(project.id)).toEqual(launches);
     store.close();
     const reopened = new SqliteStateStore(join(directories.at(-1)!, "state.sqlite3"));
     expect(reopened.listWorktreeLaunches(project.id)).toEqual(launches);

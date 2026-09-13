@@ -6,47 +6,55 @@ import { selectDashboardProject } from "../support/dashboard-actions";
 test("the real dashboard configures, queues, cancels, and retains managed test results", async ({ page }) => {
   const fixture = await startControllerFixture(2);
   try {
-    const [a, b] = fixture.projects;
+    const [a] = fixture.projects;
     await page.goto(fixture.accessUrl);
-
     await page.getByRole("button", { name: "Open test queue settings" }).click();
     const settings = page.getByRole("dialog");
     await settings.getByLabel("Maximum parallel tests").fill("1");
     await settings.getByRole("button", { name: "Save", exact: true }).click();
 
-    const first = await selectDashboardProject(page, "project-a");
-    await first.getByRole("tab", { name: "Tests", exact: true }).click();
-    await first.getByLabel("Test preset").click();
-    await page.getByRole("option", { name: "test:hold · node", exact: true }).click();
-    await first.getByRole("button", { name: "Run test", exact: true }).click();
-    await expect(first.getByText("Running", { exact: true })).toBeVisible();
+    const screen = page.locator("[data-tests-dashboard]");
+    const launch = async (preset: string) => {
+      await screen.getByRole("button", { name: "Run test", exact: true }).click();
+      const form = page.getByRole("dialog");
+      await form.getByRole("combobox", { name: "Worktree", exact: true }).click();
+      await page.getByRole("option", { name: /^main ·/ }).click();
+      await form.getByLabel("Test preset", { exact: true }).click();
+      await page.getByRole("option", { name: `${preset} · node`, exact: true }).click();
+      await form.getByRole("button", { name: "Run test", exact: true }).click();
+      await expect(form).toBeHidden();
+    };
+    await selectDashboardProject(page, "project-a");
+    await page.getByRole("navigation").getByRole("button", { name: "Tests", exact: true }).click();
+    await launch("test:hold");
+    await expect(screen.locator("tbody tr").filter({ hasText: "test:hold" }).first()).toContainText("Running");
     await expect(page.getByRole("button", { name: "Open test queue settings" })).toContainText("1/1");
 
-    const second = await selectDashboardProject(page, "project-b");
-    await second.getByRole("tab", { name: "Tests", exact: true }).click();
-    await second.getByRole("button", { name: "Run test", exact: true }).click();
-    await expect(second.getByText("Queued", { exact: true })).toBeVisible();
-    await expect(second.getByText(/Queue position: 1/)).toBeVisible();
+    await selectDashboardProject(page, "project-b");
+    await launch("test:hold");
+    await expect(screen.getByText("Queue position: 1", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Open test queue settings" })).toContainText("+1");
-
-    await second.getByRole("button", { name: "Cancel test", exact: true }).click();
-    await expect(second.getByText("Cancelled", { exact: true })).toBeVisible();
-    await expect(second.getByRole("button", { name: "Cancel test", exact: true })).toBeHidden();
+    await screen.getByRole("button", { name: "Cancel test", exact: true }).click();
+    await expect(screen.getByRole("button", { name: "Cancel test", exact: true })).toHaveCount(0);
+    await screen.getByRole("tab", { name: "History", exact: true }).click();
+    await expect(screen.getByRole("tabpanel").locator("tbody tr").filter({ hasText: "test:hold" })).toContainText("Cancelled");
 
     await fixture.releaseTestGate(a!);
     await selectDashboardProject(page, "project-a");
-    await first.getByRole("tab", { name: "Tests", exact: true }).click();
-    await expect(first.getByText("Passed", { exact: true })).toBeVisible({ timeout: 15_000 });
-    await first.getByText("Show output", { exact: true }).click();
-    await expect(first.locator("pre")).toContainText("verification project-a:main hold");
-    await expect(first.getByText("Source matched at observation points")).toBeVisible();
+    const hold = screen.getByRole("tabpanel").locator("tbody tr").filter({ hasText: "test:hold" });
+    await expect(hold).toContainText("Passed", { timeout: 15_000 });
+    await hold.getByRole("button", { name: "Result: test:hold · main", exact: true }).click();
+    const details = page.getByRole("dialog");
+    await expect(details.locator("pre").first()).toContainText("verification project-a:main hold");
+    await expect(details).toContainText("Source matched at observation points");
+    await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Open test queue settings" })).toContainText("0/1");
 
-    await first.getByLabel("Test preset").click();
-    await page.getByRole("option", { name: "test:fail · node", exact: true }).click();
-    await first.getByRole("button", { name: "Run test", exact: true }).click();
-    await expect(first.getByText("Failed", { exact: true })).toBeVisible();
-    await expect(first.getByText("The test process exited with code 9.", { exact: true })).toBeVisible();
+    await launch("test:fail");
+    const failed = screen.getByRole("tabpanel").locator("tbody tr").filter({ hasText: "test:fail" });
+    await expect(failed).toContainText("Failed");
+    await failed.getByRole("button", { name: "Result: test:fail · main", exact: true }).click();
+    await expect(details).toContainText("The test process exited with code 9.");
   } finally {
     await page.close();
     await fixture.close();

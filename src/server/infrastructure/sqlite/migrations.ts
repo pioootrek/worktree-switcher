@@ -405,6 +405,12 @@ function applyMigrations(database: Database.Database): void {
       recordMigration(database, 15);
     })();
   }
+  if (!hasMigration(database, 16)) {
+    database.transaction(() => {
+      database.exec("CREATE INDEX IF NOT EXISTS worktree_launch_history ON audit_events(project_id, id DESC) WHERE event_type = 'worktree.launched'");
+      recordMigration(database, 16);
+    })();
+  }
 }
 
 function ensureLaunchPresetColumn(database: Database.Database): void {

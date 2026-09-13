@@ -4,6 +4,8 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { testRunFixture } from "../../../../tests/ui/dashboard-fixture";
+import { latestTestResults, testResults } from "@/features/verification/test-results-model";
 import type { Worktree } from "@/shared/contracts";
 import type { GitWorktreeReader } from "../../git-worktrees";
 import { ProcessManager } from "../../process-manager";
@@ -52,6 +54,24 @@ function fixture(options: DashboardQueryOptions = {}) {
 }
 
 describe("DashboardQueryService", () => {
+  it("includes the full retained history and quiet presets beyond twenty runs in both projections", async () => {
+    const { project, service, store } = fixture();
+    for (let index = 0; index < 50; index++) {
+      store.saveTestRun(testRunFixture({ id: `retained-${index}`, projectId: project.id, presetId: index === 0 ? "node:quiet" : "node:frequent", presetName: index === 0 ? "quiet" : "frequent", queuedAt: new Date(Date.UTC(2026, 8, 13, 0, index)).toISOString() }));
+    }
+    // Active work does not crowd the fifty retained terminal records out of the view.
+    for (let index = 0; index < 100; index++) {
+      store.saveTestRun(testRunFixture({ id: `queued-${index}`, projectId: project.id, phase: "queued" }));
+    }
+    const snapshot = (await service.dashboard()).projects[0];
+    expect(snapshot.testHistoryComplete).toBe(true);
+    expect(snapshot.testRuns).toHaveLength(150);
+    expect(latestTestResults(testResults([snapshot])).map((row) => row.run.presetId).sort()).toEqual(["node:frequent", "node:quiet"]);
+    const live = service.live([project.id], ["tests"]).projects[0];
+    expect(live.testRuns).toEqual(snapshot.testRuns);
+    expect(live.testHistoryComplete).toBe(true);
+    store.close();
+  });
   it("shares cold discovery and never rescans warm metadata merely because it expired", async () => {
     const { discoverPresets, ensureFresh, list, now, service, store } = fixture();
     const [first, second] = await Promise.all([service.dashboard(), service.dashboard()]);

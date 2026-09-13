@@ -110,7 +110,7 @@ export function TestsDashboard({ snapshots, aggregate, mutate, setError, now }: 
         <Filter label={t("testView.sourceFilter")} value={source} onChange={change(setSource)} options={[["current", t("testView.source.current")], ["unverified", t("testView.unverified")]]} />
         <Filter label={t("testView.period")} value={period} onChange={change(setPeriod)} options={(["24h", "7d", "30d"] as const).map((v) => [v, t(`testView.${v}`)])} />
       </div>
-      <p className="my-2 text-xs text-muted-foreground">{t("testView.rangeHint")}</p>
+      <p className="my-2 text-xs text-muted-foreground">{t(snapshots.every((snapshot) => snapshot.testHistoryComplete) ? "testView.retainedHint" : "testView.rangeHint")}</p>
       {(["latest", "history"] as const).map((tab) => <TabsContent key={tab} value={tab}>{table(filtered.slice(currentPage * 10, currentPage * 10 + 10))}</TabsContent>)}
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-muted-foreground" aria-live="polite">{t("testView.results", { from: filtered.length ? currentPage * 10 + 1 : 0, to: Math.min(filtered.length, currentPage * 10 + 10), count: filtered.length })}</p><nav aria-label={t("testView.resultPages")} className="flex items-center gap-2"><Button size="sm" variant="outline" disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>{t("project.previousPage")}</Button><span className="text-xs">{currentPage + 1} / {pages}</span><Button size="sm" variant="outline" disabled={currentPage + 1 >= pages} onClick={() => setPage(currentPage + 1)}>{t("project.nextPage")}</Button></nav></div>
     </Tabs>

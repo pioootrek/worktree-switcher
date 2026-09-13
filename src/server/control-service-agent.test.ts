@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,7 +59,8 @@ describe("ControlService agent claims", () => {
     });
     const processes = { snapshot: () => ({ ...runtime }), start, stop } as unknown as ProcessManager;
     const git = { list: vi.fn(async () => [worktree]) } as unknown as GitWorktreeReader;
-    const service = new ControlService(store, git, processes);
+    const service = new ControlService(store, git, processes, undefined,
+      { resolve: () => ({ preset: "node", executable: "pnpm", args: ["run", "dev"], portMethod: "environment", tls: { mode: "off", keyPath: null, certPath: null, caPath: null } }) });
 
     const claim = await service.claimProject({
       projectId: project.id,
@@ -77,6 +79,17 @@ describe("ControlService agent claims", () => {
     await service.releaseAgentClaim(project.id, claim.reservation.id, "agent:mcp:session-1", claim.leaseToken);
     await service.operate(project.id, "stop");
     expect(stop).toHaveBeenCalledOnce();
+    const recordEvent = store.recordProjectEvent.bind(store);
+    vi.spyOn(store, "recordProjectEvent").mockImplementation((projectId, event, owner, details) => {
+      if (event === "worktree.launched") throw new Error("fixture database full");
+      recordEvent(projectId, event, owner, details);
+    });
+    for (const operation of ["start", "restart", "switch"] as const) {
+      await expect(service.operate(project.id, operation, worktree.path)).resolves.toBeUndefined();
+      expect(runtime.phase).toBe("running");
+      expect(runtime.worktreePath).toBe(worktree.path);
+    }
+    expect(store.getProject(project.id)?.selectedWorktreePath).toBe(worktree.path);
     store.close();
   });
 
@@ -104,6 +117,11 @@ describe("ControlService agent claims", () => {
     store.setServerCapacitySettings({ enabled: true, limit: 1 });
     const claim = await service.claimProject({ projectId: project.id, worktreePath: worktree.path, owner: "agent:mcp:runtime", reason: "Runtime test", idempotencyKey: "claim" });
     const actor = { owner: "agent:mcp:runtime", leaseToken: claim.leaseToken };
+    const recordEvent = store.recordProjectEvent.bind(store);
+    const audit = vi.spyOn(store, "recordProjectEvent").mockImplementation((projectId, event, owner, details) => {
+      if (event === "worktree.launched") throw new Error("fixture database full");
+      recordEvent(projectId, event, owner, details);
+    });
 
     const noop = await service.operateClaimedRuntime(project.id, claim.reservation.id, "start", actor);
     expect(noop.outcome).toBe("noop");
@@ -112,6 +130,8 @@ describe("ControlService agent claims", () => {
     expect(restarted).toMatchObject({ outcome: "completed", leaseHeld: true, occupiesCapacity: true, capacity: { limit: 1, used: 1, available: 0 } });
     expect(start).toHaveBeenCalledTimes(2);
     expect(stop).toHaveBeenCalledOnce();
+    expect(audit).toHaveBeenCalledWith(project.id, "worktree.launched", `mcp:${createHash("sha256").update(actor.owner).digest("hex").slice(0, 12)}`, { worktreePath: worktree.path });
+    expect(audit.mock.calls.some(([, event]) => event === "agent.runtime_failed")).toBe(false);
     const stopped = await service.operateClaimedRuntime(project.id, claim.reservation.id, "stop", actor);
     expect(stopped).toMatchObject({ outcome: "completed", leaseHeld: true, occupiesCapacity: false });
     expect((await service.operateClaimedRuntime(project.id, claim.reservation.id, "stop", actor)).outcome).toBe("noop");

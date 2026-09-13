@@ -435,9 +435,9 @@ export class SqliteStateStore implements StateStore, RemoteVerificationStore, Re
   listWorktreeLaunches(projectId: string): Record<string, string> {
     // Audit retention is bounded here; absent evidence is unknown, never "never run".
     const rows = this.database.prepare(`
-      SELECT details_json, created_at FROM (
-        SELECT project_id, event_type, details_json, created_at FROM audit_events ORDER BY id DESC LIMIT 2000
-      ) WHERE project_id = ? AND event_type = 'worktree.launched'
+      SELECT details_json, created_at FROM audit_events
+      WHERE project_id = ? AND event_type = 'worktree.launched'
+      ORDER BY id DESC LIMIT 2000
     `).all(projectId) as Array<{ details_json: string; created_at: string }>;
     const launches: Record<string, string> = Object.create(null);
     for (const row of rows) {

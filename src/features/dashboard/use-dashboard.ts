@@ -110,6 +110,7 @@ export function useDashboard() {
                   reservation: update.reservation !== undefined ? update.reservation : snapshot.reservation,
                   storage: update.storage ?? snapshot.storage,
                   testRuns: update.testRuns ?? snapshot.testRuns,
+                  testHistoryComplete: update.testHistoryComplete ?? snapshot.testHistoryComplete,
                 };
               }),
             }));

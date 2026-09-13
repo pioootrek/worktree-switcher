@@ -635,6 +635,7 @@ for (const width of [390, 1440]) {
   test(`tests dashboard separates outcomes, filters history and opens details at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 });
     const data = dashboardFixture();
+    data.projects[0].testHistoryComplete = true;
     data.projects[0].testRuns = Array.from({ length: 24 }, (_, i) => testRunFixture({ id: `result-${i}`, presetId: `node:test-${i}`, presetName: `test-${i}`, phase: "failed", queuedAt: new Date(Date.now() - i * 60000).toISOString(), error: "Source verification incomplete" }));
     const active = testRunFixture({ id: "active", presetId: "node:hold", presetName: "hold", phase: "running", finishedAt: null });
     data.projects[0].testRuns.push(active);
@@ -642,6 +643,7 @@ for (const width of [390, 1440]) {
     if (width < 768) await page.getByRole("button", { name: "Toggle navigation", exact: true }).click();
     await page.getByRole("navigation").getByRole("button", { name: "Tests", exact: true }).click();
     const screen = page.locator("[data-tests-dashboard]");
+    await expect(screen).toContainText("Full retained history: up to 50 completed attempts per project plus the active queue.");
     await expect(screen.getByRole("button", { name: /^Failed results/ })).toContainText("0");
     await expect(screen.getByRole("button", { name: /^Running\s/ })).toContainText("1");
     await expect(screen.locator('[data-slot="badge"]').filter({ hasText: /^Failed$/ })).toHaveCount(0);
