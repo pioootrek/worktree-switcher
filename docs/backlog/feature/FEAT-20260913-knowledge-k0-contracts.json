@@ -7,6 +7,7 @@
       "FEAT-20260829-local-web-accounts",
       "FEAT-20260829-scoped-mcp-agent-tokens",
       "FEAT-20260905-shared-project-memory",
+      "FEAT-20260913-knowledge-k1-identity",
       "NOTE-20260913-knowledge-backlog-implementation"
     ]
   },
@@ -25,6 +26,11 @@
       "author": "agent:codex",
       "date": "2026-09-13",
       "text": "Review follow-up corrected the baseline-diff description and added a canonical three-run controller resource measurement. All resource budgets passed with graceful cleanup; the post-cycle RSS growth was 26.50, 27.00, and 27.25 MiB."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-13",
+      "text": "K1 runtime identity, authentication, and grant work is tracked separately in FEAT-20260913-knowledge-k1-identity with its own rollback procedure. This K0 item remains limited to contracts, fixtures, and baselines."
     }
   ],
   "priority": "now",

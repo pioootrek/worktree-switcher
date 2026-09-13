@@ -15,7 +15,7 @@ const KNOWLEDGE_PERMISSIONS = new Set<KnowledgePermission>([
   "attachments:read", "attachments:write",
 ]);
 const AVAILABLE_COMMANDS = [
-  "bootstrap-owner", "recover-owner", "create-agent", "list-agents", "revoke-agent",
+  "bootstrap-owner", "recover-owner", "renew-owner", "create-agent", "list-agents", "revoke-agent",
   "issue-agent-token", "list-agent-tokens", "revoke-token", "create-knowledge-project",
   "grant-knowledge", "list-knowledge-grants", "revoke-knowledge-grant",
 ].join(", ");
@@ -59,6 +59,8 @@ function permissions(args: string[]): KnowledgePermission[] {
 function administrationPayload(args: string[]): Record<string, unknown> {
   const action = args[0]!;
   switch (action) {
+    case "renew-owner":
+      return { action, ...sessionInput(args) };
     case "create-agent":
     case "list-agents":
       return { action };
@@ -123,6 +125,26 @@ async function runThroughController(
   write(JSON.stringify(body, null, 2));
 }
 
+async function bootstrapThroughController(
+  args: string[],
+  endpoint: string,
+  accessUrl: string,
+  write: (line: string) => void,
+): Promise<void> {
+  const parsed = new URL(accessUrl);
+  const token = new URLSearchParams(parsed.hash.slice(1)).get("token");
+  if (!token) throw new Error("The running controller access record has no pairing token.");
+  const response = await fetch(`${endpoint.replace(/\/$/, "")}/api/identity/bootstrap`, {
+    method: "POST",
+    headers: { "X-Worktree-Switcher-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify(sessionInput(args)),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const body = await response.json() as { error?: string } & Record<string, unknown>;
+  if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+  write(JSON.stringify(body, null, 2));
+}
+
 export async function runIdentityCommand(
   args: string[],
   paths: AppPaths,
@@ -133,9 +155,13 @@ export async function runIdentityCommand(
     throw new Error(`Available identity commands: ${AVAILABLE_COMMANDS}`);
   }
   const write = dependencies.write ?? console.log;
-  if (action !== "bootstrap-owner" && action !== "recover-owner") {
-    const access = readServiceAccess(paths.serviceAccessPath);
-    if (access && processExists(access.pid)) {
+  const access = readServiceAccess(paths.serviceAccessPath);
+  if (access && processExists(access.pid)) {
+    if (action === "bootstrap-owner") {
+      await bootstrapThroughController(args, localDashboardEndpoint(access), access.accessUrl, write);
+      return;
+    }
+    if (action !== "recover-owner") {
       await runThroughController(args, localDashboardEndpoint(access), dependencies, write);
       return;
     }
@@ -158,6 +184,9 @@ export async function runIdentityCommand(
     switch (action) {
       case "create-agent":
         result = { principal: service.createAgent(actor) };
+        break;
+      case "renew-owner":
+        result = service.renewOwnerSession(sessionInput(args), actor);
         break;
       case "list-agents":
         result = { principals: service.listAgents(actor) };

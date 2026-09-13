@@ -197,6 +197,25 @@ describe("controller access boundary", () => {
     expect(revokeCredential).toHaveBeenCalledWith("agent-token", actor);
   });
 
+  it("bootstraps the first owner through authenticated controller access", async () => {
+    const bootstrapOwnerSession = vi.fn(() => ({ principalId: "owner-1", token: "owner-token" }));
+    const { base } = await fixture({ identity: { bootstrapOwnerSession } as unknown as IdentityService });
+
+    expect((await fetch(`${base}/api/identity/bootstrap`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    })).status).toBe(401);
+    const response = await fetch(`${base}/api/identity/bootstrap`, {
+      method: "POST",
+      headers: { "X-Worktree-Switcher-Token": "test-access-token", "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "First owner", sessionLifetimeSeconds: 300 }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ principalId: "owner-1", token: "owner-token" });
+    expect(bootstrapOwnerSession).toHaveBeenCalledWith({ label: "First owner", sessionLifetimeSeconds: 300 });
+  });
+
   it("requires the event token in a header and rejects cross-origin event reads", async () => {
     const { base } = await fixture({ publicOrigin: "https://switcher.example.test" });
     expect((await fetch(`${base}/api/events?token=test-access-token`)).status).toBe(401);

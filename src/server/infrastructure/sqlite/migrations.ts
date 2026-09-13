@@ -455,6 +455,12 @@ function applyMigrations(database: Database.Database): void {
       recordMigration(database, 16);
     })();
   }
+  if (!hasMigration(database, 17)) {
+    database.transaction(() => {
+      database.prepare("UPDATE principal_credentials SET token_prefix = 'wts_' || id").run();
+      recordMigration(database, 17);
+    })();
+  }
 }
 
 function ensureLaunchPresetColumn(database: Database.Database): void {

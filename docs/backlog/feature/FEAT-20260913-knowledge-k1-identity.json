@@ -1,0 +1,54 @@
+{
+  "area": "core",
+  "created": "2026-09-13",
+  "id": "FEAT-20260913-knowledge-k1-identity",
+  "links": {
+    "related_ids": [
+      "FEAT-20260829-local-web-accounts",
+      "FEAT-20260829-scoped-mcp-agent-tokens",
+      "FEAT-20260905-shared-project-memory",
+      "FEAT-20260913-knowledge-k0-contracts",
+      "NOTE-20260913-knowledge-backlog-implementation"
+    ]
+  },
+  "notes": [
+    {
+      "author": "agent:codex",
+      "date": "2026-09-13",
+      "text": "Started K1 after the K0 contracts were established. The implementation adds durable owner and agent principals, verifier-only scoped credentials, project grants, owner administration through HTTP and CLI, and a scoped MCP identity surface while preserving the legacy runtime token behavior."
+    }
+  ],
+  "priority": "now",
+  "problem": [
+    "Knowledge writes and approvals require durable caller identity, revocable credentials, project-scoped grants, and a separate owner authentication path that does not expand legacy runtime credentials."
+  ],
+  "risk": {
+    "dimensions": [
+      "auth-rbac",
+      "data-migration",
+      "process"
+    ],
+    "level": "high",
+    "rollback": "Disable the scoped identity HTTP, MCP, and CLI entry points while retaining the legacy runtime token path. Revoke issued scoped credentials and keep migration 16 identity and grant rows for diagnosis or a later retry; do not drop or rewrite the SQLite schema during rollback. Restore service from the pre-K1 release and verify legacy dashboard, runtime MCP, and pairing flows before re-enabling identity administration."
+  },
+  "schema_version": 1,
+  "scope": [
+    "Persist one owner principal, agent principals, verifier-only revocable credentials, knowledge projects, project grants, and runtime links in the controller-owned SQLite connection.",
+    "Expose owner bootstrap, recovery, renewal, agent and credential management, and grant management through shared identity operations used by HTTP and CLI.",
+    "Authenticate scoped MCP credentials on every request, bind sessions to one credential, expose only identity data, and preserve the legacy runtime bearer behavior without granting knowledge rights.",
+    "Keep the default owner session active until explicit rotation or revocation, while allowing an explicitly requested bounded lifetime."
+  ],
+  "source": "K1 in NOTE-20260913-knowledge-backlog-implementation",
+  "status": "in-progress",
+  "title": "Add durable knowledge identity and scoped access",
+  "type": "feature",
+  "validation": [
+    "Verify owner bootstrap, online renewal, offline recovery, agent lifecycle, token revocation, grant revocation, and RFC3339 expiry normalization.",
+    "Verify that persisted credentials and audit events contain verifier hashes and identifier-only display prefixes, never raw token secret bytes.",
+    "Verify that changing credentials on an existing MCP session is rejected and that scoped credentials cannot list or call runtime tools.",
+    "Run Hub fmt and validate, managed repository checks, the production build, and legacy pairing/runtime regression tests."
+  ],
+  "value": [
+    "Knowledge operations can enforce durable project-scoped authority and distinguish owner approval from agent or legacy runtime access."
+  ]
+}

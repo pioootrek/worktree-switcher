@@ -144,4 +144,61 @@ describe("identity management CLI", () => {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
   });
+
+  it("bootstraps and renews owner access through a running controller", async () => {
+    const appPaths = paths();
+    const requests: Array<{ url?: string; authorization?: string; pairing?: string; body: unknown }> = [];
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      request.on("end", () => {
+        requests.push({
+          url: request.url,
+          authorization: request.headers.authorization,
+          pairing: request.headers["x-worktree-switcher-token"] as string | undefined,
+          body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+        });
+        response.setHeader("Content-Type", "application/json");
+        response.end(JSON.stringify({ principalId: "owner-1", token: "new-owner-token" }));
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    writeServiceAccess(appPaths.serviceAccessPath, {
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      version: "0.0.1",
+      dashboardEndpoint: endpoint,
+      localDashboardEndpoint: endpoint,
+      mcpEndpoint: null,
+      accessUrl: `${endpoint}/#token=pairing-token`,
+      logDirectory: appPaths.logDirectory,
+    });
+    const lock = acquireControllerLock(appPaths.controllerLockPath);
+    try {
+      const output: string[] = [];
+      await runIdentityCommand(["bootstrap-owner"], appPaths, { write: (line) => output.push(line) });
+      await runIdentityCommand(["renew-owner", "--label", "Rotated"], appPaths, {
+        environment: { WORKTREE_SWITCHER_OWNER_TOKEN: "owner-token" },
+        write: (line) => output.push(line),
+      });
+      expect(output).toHaveLength(2);
+      expect(requests).toEqual([
+        {
+          url: "/api/identity/bootstrap", authorization: undefined, pairing: "pairing-token",
+          body: {},
+        },
+        {
+          url: "/api/identity/admin", authorization: "Bearer owner-token", pairing: undefined,
+          body: { action: "renew-owner", label: "Rotated" },
+        },
+      ]);
+    } finally {
+      lock.release();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
 });

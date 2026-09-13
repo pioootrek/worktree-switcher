@@ -132,6 +132,26 @@ describe("MCP loopback server", () => {
     expect(JSON.stringify(result)).toContain("knowledge:read");
     expect(JSON.stringify(result)).not.toContain("verifierHash");
 
+    const legacyTransport = new StreamableHTTPClientTransport(endpoint, {
+      requestInit: { headers: { Authorization: "Bearer legacy-runtime-token" } },
+    });
+    const legacyClient = new Client({ name: "legacy-test", version: "1.0.0" });
+    await legacyClient.connect(legacyTransport);
+    expect(legacyTransport.sessionId).toBeTruthy();
+    const credentialSwap = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer scoped-token",
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        "Mcp-Session-Id": legacyTransport.sessionId!,
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 99, method: "tools/list", params: {} }),
+    });
+    expect(credentialSwap.status).toBe(401);
+    expect(await credentialSwap.text()).toContain("MCP session authentication changed");
+    await legacyClient.close();
+
     active = false;
     await expect(client.listTools()).rejects.toThrow();
     await client.close().catch(() => undefined);

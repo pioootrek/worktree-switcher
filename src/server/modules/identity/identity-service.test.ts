@@ -98,6 +98,18 @@ function expectCode(operation: () => unknown, code: IdentityError["code"]): void
 }
 
 describe("IdentityService", () => {
+  it("keeps the default owner session active until explicit rotation or revocation", () => {
+    const { service, principals, credentials } = fixture();
+    principals.delete("owner-1");
+    credentials.delete(OWNER_CREDENTIAL_ID);
+
+    const result = service.bootstrapOwnerSession();
+    expect(result.credential.expiresAt).toBeNull();
+    expect(service.authenticateBearer(result.token)).toMatchObject({
+      principalId: result.principalId, authenticationMethod: "owner_session",
+    });
+  });
+
   it("bootstraps exactly one short-lived owner session", () => {
     const { service, principals, credentials } = fixture();
     principals.delete("owner-1");
@@ -128,6 +140,19 @@ describe("IdentityService", () => {
     });
   });
 
+  it("renews an authenticated owner session without offline database access", () => {
+    const { service } = fixture();
+    const renewed = service.renewOwnerSession(
+      { label: "Rotated owner", sessionLifetimeSeconds: 300 },
+      service.authenticateBearer(OWNER_TOKEN),
+    );
+    expect(renewed).toMatchObject({
+      principalId: "owner-1",
+      credential: { label: "Rotated owner", expiresAt: "2026-09-13T12:05:00.000Z" },
+    });
+    expect(service.authenticateBearer(renewed.token)).toMatchObject({ principalId: "owner-1" });
+  });
+
   it("authenticates a bearer and gives malformed or unknown values one error", () => {
     const { service, credentials } = fixture();
     expect(service.authenticateBearer(OWNER_TOKEN)).toEqual({
@@ -152,8 +177,19 @@ describe("IdentityService", () => {
     expect(credentials.get(AGENT_CREDENTIAL_ID)).toMatchObject({
       principalId: "agent-1",
       kind: "agent_token",
+      tokenPrefix: `wts_${AGENT_CREDENTIAL_ID}`,
       verifierHash: hash(issued.token),
     });
+    expect(JSON.stringify(credentials.get(AGENT_CREDENTIAL_ID))).not.toContain("b".repeat(8));
+  });
+
+  it("accepts and normalizes an RFC3339 expiry without fractional seconds", () => {
+    const { service } = fixture();
+    const owner = service.authenticateBearer(OWNER_TOKEN);
+    const issued = service.issueAgentToken({
+      principalId: "agent-1", label: "Codex", expiresAt: "2027-01-01T00:00:00Z",
+    }, owner);
+    expect(issued.credential.expiresAt).toBe("2027-01-01T00:00:00.000Z");
   });
 
   it("rechecks credential and grant revocation for every knowledge operation", () => {

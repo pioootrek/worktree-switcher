@@ -128,6 +128,14 @@ export class IdentityService {
     return { principalId: principal.id, credential: publicCredential(issued.record), token: issued.token };
   }
 
+  renewOwnerSession(input: BootstrapOwnerInput, actor: AuthenticatedPrincipal): BootstrappedOwner {
+    this.requireOwnerSession(actor);
+    const now = this.clock();
+    const issued = this.createOwnerSessionToken(actor.principalId, input, now, "Local owner renewal");
+    this.store.saveCredential(issued.record, actor.principalId);
+    return { principalId: actor.principalId, credential: publicCredential(issued.record), token: issued.token };
+  }
+
   authenticateBearer(token: string): AuthenticatedPrincipal {
     const parsed = parseToken(token);
     const record = parsed ? this.store.getCredentialForAuthentication(parsed.id) : null;
@@ -185,15 +193,16 @@ export class IdentityService {
       throw new IdentityError("invalid_request", "Etykieta tokenu musi mieć od 1 do 120 znaków.");
     }
     const now = this.clock();
-    if (input.expiresAt && (
-      !Number.isFinite(Date.parse(input.expiresAt))
-      || new Date(input.expiresAt).toISOString() !== input.expiresAt
-      || input.expiresAt <= now
-    )) {
+    const expiresAtTimestamp = input.expiresAt === undefined ? null : Date.parse(input.expiresAt);
+    if (expiresAtTimestamp !== null && !Number.isFinite(expiresAtTimestamp)) {
+      throw new IdentityError("invalid_request", "Nieprawidłowa data wygaśnięcia.");
+    }
+    const expiresAt = expiresAtTimestamp === null ? null : new Date(expiresAtTimestamp).toISOString();
+    if (expiresAt !== null && expiresAt <= now) {
       throw new IdentityError("invalid_request", "Data wygaśnięcia musi być w przyszłości.");
     }
 
-    const issued = this.createTokenRecord(principal.id, "agent_token", label, now, input.expiresAt ?? null);
+    const issued = this.createTokenRecord(principal.id, "agent_token", label, now, expiresAt);
     this.store.saveCredential(issued.record, actor.principalId);
     return { credential: publicCredential(issued.record), token: issued.token };
   }
@@ -357,7 +366,7 @@ export class IdentityService {
         principalId,
         kind,
         label,
-        tokenPrefix: `${TOKEN_PREFIX}_${credentialId}_${secret.slice(0, 8)}`,
+        tokenPrefix: `${TOKEN_PREFIX}_${credentialId}`,
         verifierHash: hashToken(token).toString("hex"),
         status: "active",
         expiresAt,
@@ -374,15 +383,15 @@ export class IdentityService {
     now: string,
     defaultLabel: string,
   ): { record: CredentialAuthenticationRecord; token: string } {
-    const lifetime = input.sessionLifetimeSeconds ?? 900;
-    if (!Number.isInteger(lifetime) || lifetime < 60 || lifetime > 3600) {
+    const lifetime = input.sessionLifetimeSeconds;
+    if (lifetime !== undefined && (!Number.isInteger(lifetime) || lifetime < 60 || lifetime > 3600)) {
       throw new IdentityError("invalid_request", "Sesja właściciela musi trwać od 60 do 3600 sekund.");
     }
     const label = (input.label ?? defaultLabel).trim();
     if (!label || label.length > 120) {
       throw new IdentityError("invalid_request", "Etykieta sesji musi mieć od 1 do 120 znaków.");
     }
-    const expiresAt = new Date(Date.parse(now) + lifetime * 1000).toISOString();
+    const expiresAt = lifetime === undefined ? null : new Date(Date.parse(now) + lifetime * 1000).toISOString();
     return this.createTokenRecord(principalId, "owner_session", label, now, expiresAt);
   }
 }

@@ -310,9 +310,17 @@ function identityAdministration(
   actor: AuthenticatedPrincipal,
   value: unknown,
 ): unknown {
-  const record = strictRecord(value, ["action", "principalId", "credentialId", "projectId", "label", "expiresAt", "name", "permissions"]);
+  const record = strictRecord(value, ["action", "principalId", "credentialId", "projectId", "label", "expiresAt", "name", "permissions", "sessionLifetimeSeconds"]);
   const action = requiredString(record, "action", 80);
   switch (action) {
+    case "renew-owner": {
+      const lifetime = record.sessionLifetimeSeconds;
+      if (lifetime !== undefined && typeof lifetime !== "number") throw new Error("Nieprawidłowe pole sessionLifetimeSeconds.");
+      return service.renewOwnerSession({
+        label: optionalString(record, "label", 120),
+        sessionLifetimeSeconds: lifetime,
+      }, actor);
+    }
     case "create-agent":
       return { principal: service.createAgent(actor) };
     case "list-agents":
@@ -384,6 +392,33 @@ export function createControllerServer(options: {
     try {
       if (url.pathname.startsWith("/api/")) {
         response.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+        if (url.pathname === "/api/identity/bootstrap") {
+          if (request.headers.origin && !hasValidOrigin(request, options.publicOrigin)) {
+            json(response, 403, { error: localizeServerMessage("Odrzucono żądanie z obcego originu.", locale) });
+            return;
+          }
+          if (!hasValidToken(request, options.accessToken)) {
+            json(response, 401, { error: localizeServerMessage("Brak prawidłowego klucza dostępu.", locale) });
+            return;
+          }
+          if (request.method !== "POST") {
+            response.setHeader("Allow", "POST");
+            json(response, 405, { error: "Method not allowed." });
+            return;
+          }
+          if (!options.identity) {
+            json(response, 503, { error: "Identity service is unavailable." });
+            return;
+          }
+          const value = strictRecord(await readJson(request), ["label", "sessionLifetimeSeconds"]);
+          const lifetime = value.sessionLifetimeSeconds;
+          if (lifetime !== undefined && typeof lifetime !== "number") throw new Error("Nieprawidłowe pole sessionLifetimeSeconds.");
+          json(response, 200, options.identity.bootstrapOwnerSession({
+            label: optionalString(value, "label", 120),
+            sessionLifetimeSeconds: lifetime,
+          }));
+          return;
+        }
         if (url.pathname === "/api/identity/admin") {
           if (request.headers.origin && !hasValidOrigin(request, options.publicOrigin)) {
             json(response, 403, { error: localizeServerMessage("Odrzucono żądanie z obcego originu.", locale) });

@@ -54,6 +54,7 @@ describe("identity and knowledge access SQLite persistence", () => {
       DROP TABLE knowledge_projects;
       DROP TABLE principal_credentials;
       DELETE FROM schema_migrations WHERE version = 16;
+      DELETE FROM schema_migrations WHERE version = 17;
     `);
     legacy.close();
 
@@ -65,6 +66,22 @@ describe("identity and knowledge access SQLite persistence", () => {
       id: "knowledge-after-k1", name: "Migrated", status: "active", revision: 1, createdAt: NOW, updatedAt: NOW,
     }, "bootstrap");
     expect(migrated.getKnowledgeProject("knowledge-after-k1")?.name).toBe("Migrated");
+    migrated.close();
+  });
+
+  it("scrubs legacy display prefixes that contained token secret bytes", () => {
+    const path = databasePath();
+    const store = new SqliteStateStore(path);
+    store.savePrincipal({ id: "owner-1", kind: "owner", status: "active" }, "bootstrap");
+    store.saveCredential({ ...ownerCredential(), tokenPrefix: `wts_${OWNER_CREDENTIAL_ID}_aaaaaaaa` }, "bootstrap");
+    store.close();
+
+    const legacy = new Database(path);
+    legacy.prepare("DELETE FROM schema_migrations WHERE version = 17").run();
+    legacy.close();
+
+    const migrated = new SqliteStateStore(path);
+    expect(migrated.listPrincipalCredentials("owner-1")[0]?.tokenPrefix).toBe(`wts_${OWNER_CREDENTIAL_ID}`);
     migrated.close();
   });
 
