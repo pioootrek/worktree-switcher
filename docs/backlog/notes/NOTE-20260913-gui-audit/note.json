@@ -1,0 +1,55 @@
+{
+  "author": "agent:codex",
+  "body": {
+    "audited_commit": "a94ee75f63302d4702eead1d2e301e7b144b1d83",
+    "browser_constraint": "Używać tylko karty już otwartej przez użytkownika.",
+    "findings": 25,
+    "handoff": "stan-sesji.md",
+    "implementation_status": "Propozycje; duże poprawki wymagają wcześniejszej zgody użytkownika.",
+    "priorities": {
+      "P1": 5,
+      "P2": 16,
+      "P3": 4
+    },
+    "report": "raport.md",
+    "summary": "25 ustaleń, 13 pozycji shadcn i 8 propozycji; raport, 2 zrzuty, 16 plików dowodowych JSON i stan sesji. Bez zmian aplikacji.",
+    "visual_verification": "Częściowa: dwa zaakceptowane zrzuty; dalsza weryfikacja DOM/CSS i klawiaturą. Nowe screenshoty blokuje timeout narzędzia."
+  },
+  "created": "2026-09-13",
+  "files": [
+    "01-desktop-en.png",
+    "02-desktop-pl.png",
+    "03-dom-baseline.json",
+    "04-dom-project-picker.json",
+    "05-empty-search.json",
+    "06-winpath-worktrees.json",
+    "07-tests-target.json",
+    "08-storage-target.json",
+    "09-test-queue.json",
+    "13-capacity-confirmed.json",
+    "14-tls-light.json",
+    "15-environment.json",
+    "16-add-project.json",
+    "17-mobile-add.json",
+    "18-mobile-directory.json",
+    "19-short-screen-directory.json",
+    "20-mcp-light.json",
+    "21-verification-summary.json",
+    "SHA256SUMS.txt",
+    "findings.json",
+    "raport.md",
+    "stan-sesji.md"
+  ],
+  "id": "NOTE-20260913-gui-audit",
+  "last_reviewed": "2026-09-13",
+  "schema_version": 1,
+  "status": "active",
+  "tags": [
+    "gui",
+    "audit",
+    "shadcn",
+    "accessibility",
+    "browser-verification"
+  ],
+  "title": "Audyt GUI: naprawy, migracja shadcn i dowody z przeglądarki"
+}

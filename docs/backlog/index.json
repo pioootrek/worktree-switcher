@@ -135,6 +135,45 @@
   "notes": [
     {
       "author": "agent:codex",
+      "created": "2026-09-13",
+      "files": [
+        "01-desktop-en.png",
+        "02-desktop-pl.png",
+        "03-dom-baseline.json",
+        "04-dom-project-picker.json",
+        "05-empty-search.json",
+        "06-winpath-worktrees.json",
+        "07-tests-target.json",
+        "08-storage-target.json",
+        "09-test-queue.json",
+        "13-capacity-confirmed.json",
+        "14-tls-light.json",
+        "15-environment.json",
+        "16-add-project.json",
+        "17-mobile-add.json",
+        "18-mobile-directory.json",
+        "19-short-screen-directory.json",
+        "20-mcp-light.json",
+        "21-verification-summary.json",
+        "SHA256SUMS.txt",
+        "findings.json",
+        "raport.md",
+        "stan-sesji.md"
+      ],
+      "id": "NOTE-20260913-gui-audit",
+      "path": "notes/NOTE-20260913-gui-audit",
+      "status": "active",
+      "tags": [
+        "gui",
+        "audit",
+        "shadcn",
+        "accessibility",
+        "browser-verification"
+      ],
+      "title": "Audyt GUI: naprawy, migracja shadcn i dowody z przeglądarki"
+    },
+    {
+      "author": "agent:codex",
       "created": "2026-09-11",
       "files": [
         "approved-project-worktrees.png",
