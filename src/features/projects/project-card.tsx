@@ -29,7 +29,6 @@ import { ResourceMonitor } from "@/features/runtime/resource-monitor";
 import { RuntimeBadge } from "@/features/runtime/runtime-badge";
 import { TlsSettingsDialog } from "@/features/runtime/tls-settings-dialog";
 import { WorktreeStoragePanel } from "@/features/storage/worktree-storage-panel";
-import { TestPanel } from "@/features/verification/test-panel";
 import { useI18n } from "@/i18n/provider";
 import type { ProjectSnapshot } from "@/shared/contracts";
 import { AlertTriangle, GitBranch, LockKeyhole, Play, RefreshCw, RotateCcw, Server, Square, Trash2, UnlockKeyhole } from "lucide-react";
@@ -50,7 +49,7 @@ export function ProjectCard({
   token: string;
 }) {
   const { locale, t } = useI18n();
-  const { project, runtime, reservation, worktrees, testPresets, testRuns } = snapshot;
+  const { project, runtime, reservation, worktrees } = snapshot;
   const resources = runtime.resources ?? EMPTY_RESOURCES;
   const initial = project.selectedWorktreePath ?? worktrees[0]?.path ?? "";
   const [selected, setSelected] = useState(initial);
@@ -315,19 +314,6 @@ export function ProjectCard({
                 {runtime.logs.length ? runtime.logs.join("\n") : t("project.noLogs")}
               </pre>
             </ScrollArea>
-          </div>}
-          {section === "tests" && <div className="mt-4">
-            <TestPanel
-              key={selected}
-              projectId={project.id}
-              worktreePath={selected}
-              profiles={project.testEnvironmentProfiles}
-              presets={testPresets.find((entry) => entry.worktreePath === selected)?.presets ?? []}
-              discoveryError={testPresets.find((entry) => entry.worktreePath === selected)?.error ?? null}
-              runs={testRuns}
-              mutate={mutate}
-              setError={setError}
-            />
           </div>}
           {section === "resources" && <div className="mt-4 space-y-6">
             <ResourceMonitor resources={resources} />

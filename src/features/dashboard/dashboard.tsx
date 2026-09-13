@@ -10,6 +10,7 @@ import { McpStatusDialog } from "@/features/mcp/mcp-status-dialog";
 import { AddProjectDialog } from "@/features/projects/add-project-dialog";
 import { ProjectCard } from "@/features/projects/project-card";
 import { CapacityDialog } from "@/features/runtime/capacity-dialog";
+import { TestsDashboard } from "@/features/verification/tests-dashboard";
 import { TestQueueDialog } from "@/features/verification/test-queue-dialog";
 import { dashboardSummary } from "@/i18n/messages";
 import { useI18n } from "@/i18n/provider";
@@ -23,7 +24,7 @@ import { useDashboard } from "./use-dashboard";
 
 export function Dashboard() {
   const { locale, setLocale, t } = useI18n();
-  const { data, token, loading, error, notice, dismissNotice, mutate, setError, runningCount } = useDashboard();
+  const { data, observedAt, token, loading, error, notice, dismissNotice, mutate, setError, runningCount } = useDashboard();
   const [section, setSection] = useState<ProjectSection>("worktrees");
   const [dialogOpen, setDialogOpen] = useState(false);
   const { selectedProjectId, selectProject } = useProjectSelection();
@@ -105,7 +106,7 @@ export function Dashboard() {
           <EmptyState onAdd={() => setDialogOpen(true)} />
         ) : (
           <section id="projects" className="grid gap-7" aria-label={t("dashboard.projects")}>
-            {allProjects && section === "worktrees" ? <AllProjectsWorktrees snapshots={data.projects} mutate={mutate} setError={setError} /> : (allProjects ? data.projects : selectedSnapshot ? [selectedSnapshot] : []).map((snapshot) => <ProjectCard key={snapshot.project.id} snapshot={snapshot} section={section} mutate={mutate} setError={setError} token={token} />)}
+            {section === "tests" ? <TestsDashboard now={observedAt} key={allProjects ? ALL_PROJECTS : selectedSnapshot?.project.id} snapshots={allProjects ? data.projects : selectedSnapshot ? [selectedSnapshot] : []} aggregate={allProjects} mutate={mutate} setError={setError} /> : allProjects && section === "worktrees" ? <AllProjectsWorktrees snapshots={data.projects} mutate={mutate} setError={setError} /> : (allProjects ? data.projects : selectedSnapshot ? [selectedSnapshot] : []).map((snapshot) => <ProjectCard key={snapshot.project.id} snapshot={snapshot} section={section} mutate={mutate} setError={setError} token={token} />)}
           </section>
         )}
         </div>

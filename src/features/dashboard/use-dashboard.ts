@@ -35,6 +35,7 @@ export function useDashboard() {
   const [data, setData] = useState<ControllerDashboardResponse>({ projects: [], capacity: EMPTY_CAPACITY, testQueue: EMPTY_TEST_QUEUE, mcp: EMPTY_MCP_STATUS });
   const [token, setToken] = useState("");
   const [loading, setLoading] = useState(true);
+  const [observedAt, setObservedAt] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -113,6 +114,7 @@ export function useDashboard() {
               }),
             }));
           }
+          setObservedAt(Date.now());
           setConnectionError(null);
         } catch (cause) {
           if (generation.current === activeGeneration && !(cause instanceof DOMException && cause.name === "AbortError")) {
@@ -227,6 +229,7 @@ export function useDashboard() {
         });
         const body = await parseResponse<RuntimeMetricsResponse>(response, t("http.error", { status: response.status }));
         if (cancelled) return;
+        setObservedAt(Date.now());
         const metrics = new Map(body.projects.map(({ projectId, resources }) => [projectId, resources]));
         setData((current) => ({
           ...current,
@@ -253,5 +256,5 @@ export function useDashboard() {
     };
   }, [monitoredProjectIds, t, token]);
 
-  return { data, token, loading, error: connectionError ?? error, notice, dismissNotice: () => setNotice(null), mutate, setError, runningCount };
+  return { data, observedAt, token, loading, error: connectionError ?? error, notice, dismissNotice: () => setNotice(null), mutate, setError, runningCount };
 }

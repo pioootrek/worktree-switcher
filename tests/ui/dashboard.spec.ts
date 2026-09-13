@@ -1,6 +1,6 @@
 import { expect, test, type Route } from "@playwright/test";
 import { translate } from "../../src/i18n/messages";
-import { dashboardFixture, mountDashboard } from "./dashboard-fixture";
+import { dashboardFixture, mountDashboard, testRunFixture } from "./dashboard-fixture";
 
 test("overview metrics lead to combined filters and persistent size sorting", async ({ page }) => {
   const data = dashboardFixture();
@@ -75,7 +75,7 @@ for (const width of [390, 1440]) {
   });
 }
 
-test("sidebar follows the project picker and preserves the selected worktree across sections", async ({ page }) => {
+test("sidebar scopes the test dashboard and follows the project picker", async ({ page }) => {
   const data = dashboardFixture();
   const initial = data.projects[0].worktrees[0];
   data.projects[0].worktrees.push({ ...initial, path: "/fixture/alternate", branch: "feature/alternate" });
@@ -88,12 +88,14 @@ test("sidebar follows the project picker and preserves the selected worktree acr
   const nav = page.getByRole("navigation");
   await expect(nav.getByRole("button", { name: "Projects", exact: true })).toHaveCount(0);
   await nav.getByRole("button", { name: "Tests", exact: true }).click();
-  await page.locator("#worktree-web").click();
-  await page.getByRole("option", { name: /feature\/alternate/ }).click();
   await expect(nav.getByRole("button", { name: "Tests", exact: true })).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("table")).toHaveCount(0);
-  await expect(page.locator("#worktree-web")).toContainText("feature/alternate");
-  await expect(page.getByText(translate("en", "tests.history"), { exact: true })).toBeVisible();
+  await expect(page.locator("[data-tests-dashboard]")).toBeVisible();
+  await expect(page.locator("#worktree-web")).toHaveCount(0);
+  await page.getByRole("button", { name: "Run test", exact: true }).click();
+  await page.getByRole("dialog").getByRole("combobox", { name: "Worktree", exact: true }).click();
+  await page.getByRole("option", { name: /feature\/alternate/ }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
   await nav.getByRole("button", { name: "Resources", exact: true }).click();
   await expect(page.getByText(translate("en", "storage.noWorktrees"), { exact: true })).toBeVisible();
   await nav.getByRole("button", { name: "Worktrees", exact: true }).click();
@@ -126,7 +128,7 @@ test("mobile sidebar supports keyboard dismissal, focus return and section selec
   await expect(sheet).toBeHidden();
   await expect(trigger).toBeFocused();
   await expect(page.getByRole("heading", { name: "Tests", exact: true })).toBeVisible();
-  await expect(page.getByRole("table")).toHaveCount(0);
+  await expect(page.locator("[data-tests-dashboard]")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await trigger.click();
   await expect(sheet.getByRole("button", { name: "Tests", exact: true })).toHaveAttribute("aria-current", "page");
@@ -200,13 +202,15 @@ for (const locale of ["en", "pl"] as const) {
 
     await page.getByRole("navigation").getByRole("button", { name: t("dashboard.navTests"), exact: true }).click();
     await page.getByRole("button", { name: t("tests.run"), exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: t("tests.run"), exact: true }).click();
     await expect(page.getByRole("button", { name: t("tests.cancel"), exact: true })).toBeVisible();
     expect(requests.at(-1)).toEqual({ path: "/api/projects/web/tests", method: "POST", body: { worktreePath: "/fixture/web", presetId: "node:test" } });
-    await page.getByText(t("tests.output"), { exact: true }).click();
+    await page.getByRole("button", { name: translate(locale, "testView.detailsFor", { name: "test", branch: "main" }), exact: true }).click();
     await expect(page.getByText("fixture test output", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: t("tests.cancel"), exact: true }).click();
     await expect(page.getByRole("button", { name: t("tests.cancel"), exact: true })).toBeHidden();
     expect(requests.at(-1)).toEqual({ path: "/api/test-runs/run-1/cancel", method: "POST", body: {} });
+    await page.keyboard.press("Escape");
 
     await page.getByRole("button", { name: t("mcp.openStatus") }).click();
     await expect(dialog.getByRole("heading", { name: t("mcp.title") })).toBeVisible();
@@ -544,7 +548,7 @@ for (const { width, count } of [{ width: 390, count: 12 }, { width: 1440, count:
     data.projects[0].project.selectedWorktreePath = data.projects[0].worktrees[0].path;
     await mountDashboard(page, data);
     if (width < 768) await page.getByRole("button", { name: "Toggle navigation", exact: true }).click();
-    await page.getByRole("navigation").getByRole("button", { name: "Tests", exact: true }).click();
+    await page.getByRole("navigation").getByRole("button", { name: "Resources", exact: true }).click();
     const trigger = page.locator("#worktree-web");
     await trigger.click();
     const options = page.getByRole("option");
@@ -615,11 +619,78 @@ for (const width of [390, 1440]) {
     await page.screenshot({ path: test.info().outputPath("all-projects.png"), fullPage: true });
     if (width < 768) await page.getByRole("button", { name: "Toggle navigation", exact: true }).click();
     await page.getByRole("navigation").getByRole("button", { name: "Tests", exact: true }).click();
-    await expect(page.locator("[data-project-id]")).toHaveCount(2);
+    await expect(page.locator("[data-tests-dashboard]")).toBeVisible();
+    await expect(page.locator("[data-tests-dashboard]").getByRole("combobox", { name: "Project", exact: true })).toBeVisible();
     await picker.click();
     await page.getByRole("option", { name: /Fixture API/ }).click();
-    await expect(page.locator("[data-project-id]")).toHaveCount(1);
-    await expect(page.locator('[data-project-id="api"]')).toBeVisible();
+    await expect(page.locator("[data-tests-dashboard]")).toBeVisible();
+    await expect(page.locator("[data-tests-dashboard]").getByRole("combobox", { name: "Project", exact: true })).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 }
+
+for (const width of [390, 1440]) {
+  test(`tests dashboard separates outcomes, filters history and opens details at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const data = dashboardFixture();
+    data.projects[0].testRuns = Array.from({ length: 24 }, (_, i) => testRunFixture({ id: `result-${i}`, presetId: `node:test-${i}`, presetName: `test-${i}`, phase: "failed", queuedAt: new Date(Date.now() - i * 60000).toISOString(), error: "Source verification incomplete" }));
+    const active = testRunFixture({ id: "active", presetId: "node:hold", presetName: "hold", phase: "running", finishedAt: null });
+    data.projects[0].testRuns.push(active);
+    const { requests, errors } = await mountDashboard(page, data);
+    if (width < 768) await page.getByRole("button", { name: "Toggle navigation", exact: true }).click();
+    await page.getByRole("navigation").getByRole("button", { name: "Tests", exact: true }).click();
+    const screen = page.locator("[data-tests-dashboard]");
+    await expect(screen.getByRole("button", { name: /^Failed results/ })).toContainText("0");
+    await expect(screen.getByRole("button", { name: /^Running\s/ })).toContainText("1");
+    await expect(screen.locator('[data-slot="badge"]').filter({ hasText: /^Failed$/ })).toHaveCount(0);
+    await expect(screen.locator("[data-operation-target]")).toHaveCount(0);
+    await expect(screen.getByRole("button", { name: "Start", exact: true })).toHaveCount(0);
+    await screen.getByRole("tab", { name: "History", exact: true }).click();
+    const panel = screen.getByRole("tabpanel");
+    await expect(panel.locator("tbody tr")).toHaveCount(10);
+    const pages = screen.getByRole("navigation", { name: "Test result pages" });
+    await pages.getByRole("button", { name: "Next", exact: true }).click();
+    await expect(pages).toContainText("2 / 3");
+    await screen.getByRole("searchbox", { name: "Search runs", exact: true }).fill("test-11");
+    await expect(panel.locator("tbody tr")).toHaveCount(1);
+    await expect(pages).toContainText("1 / 1");
+    const details = panel.getByRole("button", { name: "Result: test-11 · main", exact: true });
+    await details.click();
+    const drawer = page.getByRole("dialog");
+    await expect(drawer).toContainText("Passed");
+    await expect(drawer).toContainText("Source unverified");
+    await expect(drawer).toContainText("fixture result output");
+    await page.screenshot({ path: test.info().outputPath("test-details.png"), animations: "disabled" });
+    await page.keyboard.press("Escape");
+    await expect(drawer).toBeHidden();
+    await expect(details).toBeFocused();
+    await screen.getByRole("searchbox", { name: "Search runs", exact: true }).fill("");
+    await screen.getByRole("combobox", { name: "Command result", exact: true }).click();
+    await page.getByRole("option", { name: "Failed", exact: true }).click();
+    await expect(panel).toContainText("No runs match these filters.");
+    await screen.getByRole("combobox", { name: "Command result", exact: true }).click();
+    await page.getByRole("option", { name: "All", exact: true }).click();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await page.screenshot({ path: test.info().outputPath("tests-dashboard.png"), fullPage: true, animations: "disabled" });
+    expect(requests).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+}
+
+test("test launch dialog follows the chosen worktree and resets its preset", async ({ page }) => {
+  const data = dashboardFixture();
+  const snapshot = data.projects[0];
+  snapshot.worktrees.push({ ...snapshot.worktrees[0], path: "/fixture/alt", branch: "feature/alt" });
+  snapshot.testPresets.push({ worktreePath: "/fixture/alt", presets: [{ ...snapshot.testPresets[0].presets[0], id: "node:check", name: "check" }], error: null });
+  const { requests, errors } = await mountDashboard(page, data);
+  await page.getByRole("navigation").getByRole("button", { name: "Tests", exact: true }).click();
+  await page.getByRole("button", { name: "Run test", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("combobox", { name: "Worktree", exact: true }).click();
+  await page.getByRole("option", { name: /feature\/alt/ }).click();
+  await expect(dialog.getByRole("combobox", { name: "Test preset", exact: true })).toContainText("check");
+  await dialog.getByRole("button", { name: "Run test", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  expect(requests.at(-1)).toEqual({ path: "/api/projects/web/tests", method: "POST", body: { worktreePath: "/fixture/alt", presetId: "node:check" } });
+  expect(errors).toEqual([]);
+});
