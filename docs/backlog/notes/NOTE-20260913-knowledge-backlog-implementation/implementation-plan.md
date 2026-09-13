@@ -363,25 +363,30 @@ nie oznaczać funkcji jako ukończonej po samym przygotowaniu planu.
 
 ## Gałęzie etapów i pull requesty
 
-Każdy slice to ograniczony zakres implementacji z własnym odbiorem,
-osobną gałęzią i jednym PR-em do `main`. Większy etap K można podzielić
-na kilka takich zmian, ale nie dopisywać kolejnego etapu do trwającego PR-a.
+Gałąź `t3code/implement-llmopshub-worker-delegation` jest gałęzią integracyjną
+tej implementacji. Obowiązuje przepływ: gałąź slice'a → PR do gałęzi
+integracyjnej → końcowy PR gałęzi integracyjnej do `main`. Każdy nowy slice
+to ograniczony zakres z własnym odbiorem, osobną gałęzią i jednym PR-em.
+Większy etap K można podzielić na kilka takich zmian, ale nie dopisywać
+kolejnego etapu do trwającego PR-a.
 
 1. **Przed zleceniem pracy** kontroler podaje workerowi: etap i zakres,
    wyłączenia, kryteria odbioru, nazwę gałęzi, dokładną ścieżkę worktree,
    bazowy commit oraz docelową gałąź PR-a. Sprawdza faktyczną gałąź i stan
    zmian; planowana nazwa nie oznacza, że gałąź już istnieje.
-2. **Nowy slice zaczyna się z aktualnego `origin/main` po merge poprzedniego.**
-   Odświeżyć referencje i utworzyć gałąź przed edycją kodu, np.
-   `t3code/knowledge-k2-service-sqlite` lub
+2. **Nowy slice zaczyna się z aktualnej gałęzi integracyjnej po merge
+   poprzedniego slice'a.** Odświeżyć referencje i wskazać bazowy SHA gałęzi
+   `t3code/implement-llmopshub-worker-delegation`. Utworzyć gałąź przed edycją
+   kodu, np. `t3code/knowledge-k2-service-sqlite` lub
    `t3code/knowledge-k3-mcp-cli`. Pracować w czystym worktree albo utworzyć
    osobny; nie przenosić ani nie usuwać cudzych niezacommitowanych zmian.
    Nie tworzyć zależnych gałęzi z niepołączonego slice'a w tym przebiegu.
-3. **Obecne K0/K1 jest jednym uzgodnionym PR-em:**
-   `t3code/implement-llmopshub-worker-delegation` → `main`.
-   Zachować istniejącą gałąź i artefakty tego zakresu. Nie tworzyć drugiej
-   gałęzi K1 wyłącznie dla nazwy. K2 otrzymuje nową gałąź dopiero po merge
-   K0/K1; do tego czasu domykać wyłącznie zakres K0/K1 i jego poprawki.
+3. **Istniejące K0/K1 jest wyjątkiem organizacyjnym:** jego kod znajduje się
+   już na gałęzi integracyjnej. Zachować istniejącą historię i artefakty;
+   odbiór przypisać do konkretnego zakresu commitów i końcowego SHA.
+   Nie tworzyć PR-a gałęzi do niej samej ani traktować K0/K1 jako końcowego
+   PR-a do `main`. Dalsze poprawki wydzielać na gałęzie z PR-em do integracji.
+   K2 zaczynać po odbiorze K0/K1 i połączeniu wymaganych poprawek.
 4. **Przed oddaniem PR-a do odbioru** zacommitować komplet zmian danego
    slice'a i uruchomić wymagane testy oraz `pnpm check`; dla zmian modułów,
    transportów i UI także `pnpm build` oraz odpowiednie scenariusze
@@ -390,21 +395,33 @@ na kilka takich zmian, ale nie dopisywać kolejnego etapu do trwającego PR-a.
    źródła; `dirty_source`, `uncertain`, przerwanie lub sam kod wyjścia 0
    nie stanowią pozytywnego odbioru kolejki. Po poprawkach sprawdzić nową
    rewizję w zakresie wynikającym ze zmian i wymaganych kontroli.
-5. **PR opisuje finalny zakres**, zmianę zachowania, powiązany etap,
-   wyniki/ID weryfikacji i pozostałe ograniczenia. Kontroler porównuje cały
-   diff do `main` z przydzielonym zakresem i zgłasza uwagi z lokalizacją
+5. **PR slice'a opisuje finalny zakres**, zmianę zachowania, powiązany etap,
+   wyniki/ID weryfikacji i pozostałe ograniczenia. Jego bazą jest
+   `t3code/implement-llmopshub-worker-delegation`. Kontroler porównuje cały
+   diff do tej bazy z przydzielonym zakresem i zgłasza uwagi z lokalizacją
    oraz warunkiem poprawy. Draft można otworzyć wcześniej, ale nie oznacza
    on odbioru ani ukończenia etapu.
-6. **Po review i merge** zapisać numer PR-a, wynik odbioru i commit na `main`.
-   Odświeżyć bazę następnego slice'a; nie kontynuować nowych funkcji na
-   połączonej gałęzi. Samo utworzenie PR-a lub przejście testów nie jest merge.
+6. **Po review i merge slice'a** zapisać numer PR-a, wynik odbioru i commit
+   na gałęzi integracyjnej. Odświeżyć bazę następnego slice'a; nie kontynuować
+   nowych funkcji na połączonej gałęzi slice'a. Samo utworzenie PR-a lub
+   przejście testów nie jest merge. Odbiór slice'a oznacza integrację etapu,
+   nie dostarczenie całej funkcji na `main`.
+7. **Końcowy PR do `main`** wychodzi z gałęzi integracyjnej po odbiorze
+   uzgodnionego zakresu funkcji. Kontroler sprawdza cały diff do `main`,
+   kompletność zakresu i dowody działania połączonych etapów. Wymagane
+   kontrole oraz scenariusze całego przepływu muszą dotyczyć finalnej rewizji.
+   Zapisać końcowy PR i commit po merge do `main`; dopiero wtedy zamykać
+   odpowiadający dostarczonemu zakresowi wpis nadrzędny.
 
 Plan, nowe zadania, decyzje właściciela i trwałe dowody podlegają
 [regułom backloga](../../AGENTS.md): utrzymywać je na `main`, wykonać Hub
 `fmt`/`validate` i synchronizować przed przekazaniem kolejnego zlecenia.
-Worker ma otrzymać aktualny kontrakt; zmiany pozostawione wyłącznie w innym
-worktree nie są przekazanym wymaganiem. Formalne zamknięcie zadania następuje
-po odbiorze i merge, przez jeden commit zastępujący otwarty wpis wpisem `done/`.
+Ta reguła dotyczy kanonicznego backloga; kod slice'ów trafia do gałęzi
+integracyjnej. Worker ma otrzymać aktualny kontrakt; zmiany pozostawione
+wyłącznie w innym worktree nie są przekazanym wymaganiem. Formalne zamknięcie
+zadania slice'a następuje po odbiorze i merge do integracji (dla istniejącego
+K0/K1 po odbiorze wskazanego zakresu commitów), przez jeden commit na `main`
+zastępujący otwarty wpis wpisem `done/`. Nie zamyka to wpisu nadrzędnego.
 
 ## Testy i dowody odbioru
 

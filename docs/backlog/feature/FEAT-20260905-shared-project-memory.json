@@ -64,6 +64,11 @@
       "author": "agent:codex",
       "date": "2026-09-13",
       "text": "Owner requested explicit slice-branch requirements. Added the branch/PR workflow to the implementation plan: one bounded slice per branch and PR to main, start subsequent slices from refreshed origin/main after the previous merge, declare branch/worktree/base SHA in worker handoffs, and require revision-bound checks before acceptance. Existing K0/K1 stays together on t3code/implement-llmopshub-worker-delegation; K2 starts on a new branch after merge. Canonical backlog decisions must be synchronized before handoff."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-13",
+      "text": "Owner clarified that t3code/implement-llmopshub-worker-delegation is the integration branch. This supersedes the preceding slice-to-main workflow: new slice branches start from the current integration branch after the preceding slice merges and target it by PR; the final integration PR targets main after acceptance of the agreed feature scope. Existing K0/K1 is already on integration and requires review of a fixed commit range and final SHA, without rewriting history or a self-PR. Further fixes use slice PRs; K2 starts after K0/K1 acceptance and required fixes merge. Canonical backlog stays on main, and slice acceptance does not close the parent feature."
     }
   ],
   "priority": "next",
