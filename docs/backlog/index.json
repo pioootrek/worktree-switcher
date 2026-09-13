@@ -137,6 +137,7 @@
       "author": "agent:codex",
       "created": "2026-09-13",
       "files": [
+        "database-portability.md",
         "implementation-plan.md"
       ],
       "id": "NOTE-20260913-knowledge-backlog-implementation",

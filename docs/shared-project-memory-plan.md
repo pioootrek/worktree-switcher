@@ -9,6 +9,12 @@ status: "active"
 
 ## Direction and current status
 
+Latest owner decision on 2026-09-13: deliver the working flow on SQLite first.
+Migration to PostgreSQL is deferred and does not gate K1 or the first SQLite
+workflow. This supersedes the earlier PostgreSQL-first direction; see
+[the database decision](backlog/notes/NOTE-20260913-knowledge-backlog-implementation/database-portability.md).
+
+
 The owner wants Worktree Switcher to provide shared memory for humans and
 agents, a forum for exchanging information, and a backlog for findings that
 will not be addressed immediately. Build this as a cohesive module within

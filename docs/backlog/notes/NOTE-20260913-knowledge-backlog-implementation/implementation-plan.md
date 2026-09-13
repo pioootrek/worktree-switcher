@@ -4,6 +4,11 @@ Stan: propozycja wdrożenia z 2026-09-13, bez zmian runtime i bez migracji danyc
 Zadanie nadrzędne: [FEAT-20260905-shared-project-memory](../../feature/FEAT-20260905-shared-project-memory.json).
 Kierunek produktu: [shared-project-memory-plan.md](../../../shared-project-memory-plan.md).
 
+Aktualna decyzja właściciela: [najpierw działające SQLite, PostgreSQL później](database-portability.md).
+K1 i dalszy przepływ realizujemy na SQLite. Migracja do PostgreSQL i wybór ORM
+nie są warunkami obecnego odbioru. Ta decyzja zastępuje wcześniejsze
+zalecenie wdrożenia PostgreSQL przed K1/K2.
+
 ## Cel i granice pierwszego wydania
 
 Użytkownik mówi agentowi „zapisz to na później”. Agent zapisuje wątek lub
@@ -355,6 +360,51 @@ Nie zmieniać automatycznie priorytetów innych otwartych prac.
 Na razie utrzymać jeden wpis nadrzędny i tę notatkę. Przy rozpoczynaniu etapu
 wydzielić jego konkretne zadanie implementacyjne z zależnościami i odbiorem;
 nie oznaczać funkcji jako ukończonej po samym przygotowaniu planu.
+
+## Gałęzie etapów i pull requesty
+
+Każdy slice to ograniczony zakres implementacji z własnym odbiorem,
+osobną gałęzią i jednym PR-em do `main`. Większy etap K można podzielić
+na kilka takich zmian, ale nie dopisywać kolejnego etapu do trwającego PR-a.
+
+1. **Przed zleceniem pracy** kontroler podaje workerowi: etap i zakres,
+   wyłączenia, kryteria odbioru, nazwę gałęzi, dokładną ścieżkę worktree,
+   bazowy commit oraz docelową gałąź PR-a. Sprawdza faktyczną gałąź i stan
+   zmian; planowana nazwa nie oznacza, że gałąź już istnieje.
+2. **Nowy slice zaczyna się z aktualnego `origin/main` po merge poprzedniego.**
+   Odświeżyć referencje i utworzyć gałąź przed edycją kodu, np.
+   `t3code/knowledge-k2-service-sqlite` lub
+   `t3code/knowledge-k3-mcp-cli`. Pracować w czystym worktree albo utworzyć
+   osobny; nie przenosić ani nie usuwać cudzych niezacommitowanych zmian.
+   Nie tworzyć zależnych gałęzi z niepołączonego slice'a w tym przebiegu.
+3. **Obecne K0/K1 jest jednym uzgodnionym PR-em:**
+   `t3code/implement-llmopshub-worker-delegation` → `main`.
+   Zachować istniejącą gałąź i artefakty tego zakresu. Nie tworzyć drugiej
+   gałęzi K1 wyłącznie dla nazwy. K2 otrzymuje nową gałąź dopiero po merge
+   K0/K1; do tego czasu domykać wyłącznie zakres K0/K1 i jego poprawki.
+4. **Przed oddaniem PR-a do odbioru** zacommitować komplet zmian danego
+   slice'a i uruchomić wymagane testy oraz `pnpm check`; dla zmian modułów,
+   transportów i UI także `pnpm build` oraz odpowiednie scenariusze
+   integracyjne/przeglądarkowe z sekcji poniżej. Używać kolejki MCP zgodnie
+   z zasadami repozytorium. Wyniki mają dotyczyć wskazanego SHA i czystego
+   źródła; `dirty_source`, `uncertain`, przerwanie lub sam kod wyjścia 0
+   nie stanowią pozytywnego odbioru kolejki. Po poprawkach sprawdzić nową
+   rewizję w zakresie wynikającym ze zmian i wymaganych kontroli.
+5. **PR opisuje finalny zakres**, zmianę zachowania, powiązany etap,
+   wyniki/ID weryfikacji i pozostałe ograniczenia. Kontroler porównuje cały
+   diff do `main` z przydzielonym zakresem i zgłasza uwagi z lokalizacją
+   oraz warunkiem poprawy. Draft można otworzyć wcześniej, ale nie oznacza
+   on odbioru ani ukończenia etapu.
+6. **Po review i merge** zapisać numer PR-a, wynik odbioru i commit na `main`.
+   Odświeżyć bazę następnego slice'a; nie kontynuować nowych funkcji na
+   połączonej gałęzi. Samo utworzenie PR-a lub przejście testów nie jest merge.
+
+Plan, nowe zadania, decyzje właściciela i trwałe dowody podlegają
+[regułom backloga](../../AGENTS.md): utrzymywać je na `main`, wykonać Hub
+`fmt`/`validate` i synchronizować przed przekazaniem kolejnego zlecenia.
+Worker ma otrzymać aktualny kontrakt; zmiany pozostawione wyłącznie w innym
+worktree nie są przekazanym wymaganiem. Formalne zamknięcie zadania następuje
+po odbiorze i merge, przez jeden commit zastępujący otwarty wpis wpisem `done/`.
 
 ## Testy i dowody odbioru
 

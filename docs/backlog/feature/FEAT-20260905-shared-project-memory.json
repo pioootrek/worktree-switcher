@@ -44,6 +44,26 @@
       "author": "agent:codex",
       "date": "2026-09-13",
       "text": "Owner requested an implementation plan. Recorded K0-K9 in docs/backlog/notes/NOTE-20260913-knowledge-backlog-implementation/implementation-plan.md after inspecting Switcher 72452b5 and Hub 22afb65. Covers durable project identity and caller authorization, shared service/SQLite writes, web/MCP/CLI, memory/search, attachment backup/restore, loss-aware Hub import, per-project cutover and rollback, then playbooks and instruction composition. Includes test matrix, negative cases and acceptance gates. Technical choices are recommendations; planning only, no implementation or data migration. Feature remains open."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-13",
+      "text": "Owner requires SQLite to be easily replaceable by PostgreSQL. Recorded database-portability.md as a mandatory K1/K2 contract addendum: asynchronous persistence ports, engine-independent atomic operations and errors, shared adapter tests and logical data migration. Current synchronous stores do not yet satisfy this requirement; K0 acceptance did not establish PostgreSQL support."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-13",
+      "text": "Owner superseded the portability request: PostgreSQL is now the default and target database for porting LLM Ops Hub functionality into Switcher. Do not require a SQLite-first implementation or parallel new-feature adapters. Adapt K1/K2 and plan controlled migration of existing SQLite state. Drizzle remains a discussed implementation option, not an installed dependency."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-13",
+      "text": "Latest owner decision supersedes PostgreSQL-first: deliver the working Hub functionality on SQLite now and migrate to PostgreSQL later. SQLite and current synchronous persistence ports do not block K1 acceptance. Owner-session recovery and usable agent/token/grant management remain required; PostgreSQL, dual-engine tests and an ORM change are deferred."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-13",
+      "text": "Owner requested explicit slice-branch requirements. Added the branch/PR workflow to the implementation plan: one bounded slice per branch and PR to main, start subsequent slices from refreshed origin/main after the previous merge, declare branch/worktree/base SHA in worker handoffs, and require revision-bound checks before acceptance. Existing K0/K1 stays together on t3code/implement-llmopshub-worker-delegation; K2 starts on a new branch after merge. Canonical backlog decisions must be synchronized before handoff."
     }
   ],
   "priority": "next",
