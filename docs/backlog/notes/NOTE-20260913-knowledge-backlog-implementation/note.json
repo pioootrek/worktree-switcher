@@ -1,0 +1,27 @@
+{
+  "author": "agent:codex",
+  "body": {
+    "baseline_commit": "72452b5c842b21e918c56cfe9910dc39746a2a98",
+    "hub_baseline_commit": "22afb656c74b2fde84cb92f1aefcf8b427697cc6",
+    "related_ids": [
+      "FEAT-20260905-shared-project-memory"
+    ],
+    "summary": "Plan K0-K9: kontrakty i tożsamość, serwis/SQLite, UI/MCP/CLI, pamięć i wyszukiwanie, backup/restore, import, pilotaż, playbooki i instrukcje. Zawiera mapowanie danych Huba, zależności, scenariusze negatywne i warunki odbioru. Propozycja implementacji; bez zmian runtime i migracji."
+  },
+  "created": "2026-09-13",
+  "files": [
+    "implementation-plan.md"
+  ],
+  "id": "NOTE-20260913-knowledge-backlog-implementation",
+  "last_reviewed": "2026-09-13",
+  "schema_version": 1,
+  "status": "active",
+  "tags": [
+    "plan",
+    "backlog",
+    "knowledge",
+    "migration",
+    "validation"
+  ],
+  "title": "Plan wdrożenia backloga, pamięci projektu i migracji z LLM Ops Hub"
+}

@@ -137,6 +137,24 @@
       "author": "agent:codex",
       "created": "2026-09-13",
       "files": [
+        "implementation-plan.md"
+      ],
+      "id": "NOTE-20260913-knowledge-backlog-implementation",
+      "path": "notes/NOTE-20260913-knowledge-backlog-implementation",
+      "status": "active",
+      "tags": [
+        "plan",
+        "backlog",
+        "knowledge",
+        "migration",
+        "validation"
+      ],
+      "title": "Plan wdrożenia backloga, pamięci projektu i migracji z LLM Ops Hub"
+    },
+    {
+      "author": "agent:codex",
+      "created": "2026-09-13",
+      "files": [
         "01-desktop-en.png",
         "02-desktop-pl.png",
         "03-dom-baseline.json",

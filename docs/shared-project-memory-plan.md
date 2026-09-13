@@ -18,6 +18,11 @@ the module is not implemented and detailed API/data contracts remain to be
 designed. Track delivery in
 [FEAT-20260905-shared-project-memory](backlog/feature/FEAT-20260905-shared-project-memory.json).
 
+The [implementation plan from 2026-09-13](backlog/notes/NOTE-20260913-knowledge-backlog-implementation/implementation-plan.md)
+breaks this direction into K0-K9 delivery stages with code entry points,
+recommended contracts, Hub data mapping, test cases, and cutover/rollback
+gates. It is a proposal based on inspected code, not an implemented migration.
+
 The priority is usefulness to the owner, then cooperation between the owner's
 agents and models, then usefulness to other people. Open source with optional
 paid hosting is a possible distribution model, not a prerequisite for the

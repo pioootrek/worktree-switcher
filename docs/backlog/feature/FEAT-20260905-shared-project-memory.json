@@ -10,7 +10,8 @@
       "FEAT-20260905-compact-mcp-status",
       "RWK-20260905-service-ui-boundaries",
       "FEAT-20260905-agent-fleet-coordination",
-      "FEAT-20260905-remote-commit-verification"
+      "FEAT-20260905-remote-commit-verification",
+      "NOTE-20260913-knowledge-backlog-implementation"
     ]
   },
   "notes": [
@@ -38,6 +39,11 @@
       "author": "human:pioootrek",
       "date": "2026-09-05",
       "text": "Owner follow-up prioritizes exact-commit remote verification as an early experiment before autonomous fleet execution. See FEAT-20260905-remote-commit-verification and docs/remote-verification-plan.md. The existing LLM client remains in place; complete memory/forum and SaaS are not prerequisites."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-13",
+      "text": "Owner requested an implementation plan. Recorded K0-K9 in docs/backlog/notes/NOTE-20260913-knowledge-backlog-implementation/implementation-plan.md after inspecting Switcher 72452b5 and Hub 22afb65. Covers durable project identity and caller authorization, shared service/SQLite writes, web/MCP/CLI, memory/search, attachment backup/restore, loss-aware Hub import, per-project cutover and rollback, then playbooks and instruction composition. Includes test matrix, negative cases and acceptance gates. Technical choices are recommendations; planning only, no implementation or data migration. Feature remains open."
     }
   ],
   "priority": "next",
