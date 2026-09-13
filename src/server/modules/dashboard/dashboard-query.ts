@@ -15,6 +15,10 @@ import type { StateStore } from "../../state-store";
 import type { WorktreeStorageManager } from "../../worktree-storage";
 import { redactProject } from "../environments";
 
+// Retention: 50 completed per project; admission: 100 queued and 16 running globally.
+// This bound includes the entire retained set before latest-per-preset grouping.
+const DASHBOARD_TEST_RUN_LIMIT = 200;
+
 const DEFAULT_FRESHNESS_MS = 30_000;
 const DEFAULT_FAILURE_COOLDOWN_MS = 30_000;
 const DEFAULT_MAX_ENTRIES = 128;
@@ -107,10 +111,11 @@ export class DashboardQueryService {
         const paths = this.entries.get(project.repositoryPath)?.value?.worktrees.map(({ path }) => path) ?? [];
         return {
           projectId: project.id,
+          ...(include("runtime") ? { lastLaunchedAt: this.dependencies.store.listWorktreeLaunches(project.id) } : {}),
           ...(include("runtime") ? { runtime: this.dependencies.processes.snapshot(project.id) } : {}),
           ...(include("reservation") ? { reservation: this.dependencies.store.getActiveReservation(project.id) } : {}),
           ...(include("storage") ? { storage: this.dependencies.storage?.snapshots(project.id, paths) ?? [] } : {}),
-          ...(include("tests") ? { testRuns: this.dependencies.store.listTestRuns(project.id, 20) } : {}),
+          ...(include("tests") ? { testRuns: this.dependencies.store.listTestRuns(project.id, DASHBOARD_TEST_RUN_LIMIT), testHistoryComplete: true } : {}),
         };
       });
     return {
@@ -178,9 +183,11 @@ export class DashboardQueryService {
       runtime: this.dependencies.processes.snapshot(project.id),
       reservation: this.dependencies.store.getActiveReservation(project.id),
       worktrees: value.worktrees,
+      lastLaunchedAt: this.dependencies.store.listWorktreeLaunches(project.id),
       storage: this.dependencies.storage?.snapshots(project.id, worktreePaths) ?? [],
       testPresets: value.testPresets,
-      testRuns: this.dependencies.store.listTestRuns(project.id, 20),
+      testRuns: this.dependencies.store.listTestRuns(project.id, DASHBOARD_TEST_RUN_LIMIT),
+      testHistoryComplete: true,
       metadata: this.metadataStatus(entry),
       ...(entry.error ? { discoveryError: entry.error } : {}),
     };
@@ -211,7 +218,7 @@ export class DashboardQueryService {
     entry.invalidatedDuringRefresh = false;
     const operation = (async () => {
       try {
-        const worktrees = await this.dependencies.git.list(project.repositoryPath, { priority });
+        const worktrees = await this.dependencies.git.list(project.repositoryPath, { priority, includeInsights: true });
         const testPresets = worktrees.map((worktree) => this.dependencies.discoverPresets(project, worktree.path));
         const value = { worktrees, testPresets };
         const bytes = Buffer.byteLength(JSON.stringify(value));

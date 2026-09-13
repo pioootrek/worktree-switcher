@@ -130,7 +130,7 @@ export function CertificateFilePicker({
                     className="h-9 w-full justify-start px-2 font-normal"
                     onClick={() => { onChange(file.path); setOpen(false); }}
                   >
-                    <FileKey className="text-emerald-300" aria-hidden />
+                    <FileKey className="text-success-foreground" aria-hidden />
                     <span className="truncate">{file.name}</span>
                   </Button>
                 ))}

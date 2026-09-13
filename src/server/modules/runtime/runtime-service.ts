@@ -83,7 +83,7 @@ export class RuntimeService {
                 tlsCaPath: launch.tls.caPath, executable: launch.executable, args: launch.args,
               });
             }
-            await this.startRuntime(projectId, selected.path, () => this.revalidateClaim(projectId, reservationId, actor));
+            await this.startRuntime(projectId, selected.path, actorRef, () => this.revalidateClaim(projectId, reservationId, actor));
           } finally {
             this.lifecycle.releaseCapacity(projectId);
           }
@@ -137,13 +137,25 @@ export class RuntimeService {
     }
   }
 
-  private async startRuntime(projectId: string, worktreePath: string, beforeSpawn: () => void): Promise<void> {
+  private async startRuntime(projectId: string, worktreePath: string, actorRef: string, beforeSpawn: () => void): Promise<void> {
     try {
       await this.processes.start(this.lifecycle.requireProject(projectId), worktreePath, beforeSpawn);
     } catch (error) {
       if (error instanceof ClaimedRuntimeOperationError) throw error;
       const code = this.processes.snapshot(projectId).failure?.code ?? "launch_failed";
       throw new ClaimedRuntimeOperationError(code, "The managed runtime could not be started.");
+    }
+    this.recordLaunch(projectId, worktreePath, actorRef);
+  }
+
+  private recordLaunch(projectId: string, worktreePath: string, actor: string): void {
+    // Launch history is optional evidence, not part of process success or ownership.
+    const actorRef = actor.startsWith("agent:mcp:") ? `mcp:${createHash("sha256").update(actor).digest("hex").slice(0, 12)}` : actor;
+    try {
+      this.store.recordProjectEvent(projectId, "worktree.launched", actorRef, { worktreePath });
+    } catch {
+      // Do not expose database errors or turn a healthy runtime into a failed receipt.
+      try { this.logs.controller("worktree.launch_history_unavailable", { projectId, worktreePath, actor: actorRef }); } catch { /* diagnostics cannot change runtime outcome */ }
     }
   }
 
@@ -206,6 +218,7 @@ export class RuntimeService {
         });
       }
       await this.processes.start(this.lifecycle.requireProject(projectId), selected.path);
+      this.recordLaunch(projectId, selected.path, actor.owner);
     } finally {
       this.lifecycle.releaseCapacity(projectId);
     }

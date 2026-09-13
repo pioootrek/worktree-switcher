@@ -43,7 +43,7 @@ export function McpStatusDialog({ status }: { status: McpStatus }) {
         </DialogHeader>
 
         <div className="space-y-4">
-          <Alert className={running ? "border-emerald-400/25 bg-emerald-400/7 text-emerald-100" : undefined}>
+          <Alert variant={running ? "success" : "default"}>
             {running ? <ShieldCheck aria-hidden /> : <AlertTriangle aria-hidden />}
             <AlertTitle>{t(`mcp.phase.${status.phase}`)}</AlertTitle>
             <AlertDescription>{description}</AlertDescription>
@@ -58,14 +58,14 @@ export function McpStatusDialog({ status }: { status: McpStatus }) {
 
           <div className="space-y-2">
             <Label>{t("mcp.endpoint")}</Label>
-            <div className="overflow-x-auto rounded-md border bg-black/20 px-3 py-2 font-mono text-xs text-muted-foreground">
+            <div className="overflow-x-auto rounded-md border bg-muted/50 px-3 py-2 font-mono text-xs text-muted-foreground">
               {status.endpoint ?? "—"}
             </div>
           </div>
 
           <div className="space-y-2">
             <Label>{t("mcp.clientConfig")}</Label>
-            <div className="rounded-md border bg-black/20 px-3 py-2 font-mono text-xs text-muted-foreground">
+            <div className="rounded-md border bg-muted/50 px-3 py-2 font-mono text-xs text-muted-foreground">
               worktree-switcher config mcp
             </div>
             <p className="text-xs text-muted-foreground">{t("mcp.securityHint")}</p>

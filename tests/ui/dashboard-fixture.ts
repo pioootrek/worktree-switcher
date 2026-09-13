@@ -178,3 +178,15 @@ export async function mountDashboard(
   await page.goto("http://switcher.test/#token=ui-fixture-token");
   return { requests, errors };
 }
+
+export function testRunFixture(overrides: Partial<TestRun> = {}): TestRun {
+  return {
+    id: "result-1", projectId: "web", worktreePath, worktreeHead: "abcdef123456", worktreeBranch: "main", worktreeDirty: false,
+    presetId: "node:test", presetName: "test", adapter: "node", actor: "local-user", phase: "passed", queuePosition: null,
+    executable: "pnpm", args: ["run", "test"], cwd: worktreePath, queuedAt: now, startedAt: now, finishedAt: "2026-01-01T12:00:10.000Z",
+    exitCode: 0, signal: null, error: null, logs: ["fixture result output"], environmentMode: "clean", environmentProfile: "unit",
+    inheritedServerProfile: null, environmentVariableNames: ["NODE_ENV"],
+    source: { version: 1, scope: "git-observations", enqueue: null, preflight: null, finish: null, queueComparison: "unknown", executionComparison: "unknown", attribution: "uncertain", reasonCodes: ["dirty_source"], processOutcome: "passed" },
+    ...overrides,
+  };
+}

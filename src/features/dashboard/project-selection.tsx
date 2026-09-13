@@ -2,6 +2,8 @@
 
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 
+export const ALL_PROJECTS = "__all_projects__";
+
 const STORAGE_KEY = "worktree-switcher-project-selection";
 const STORAGE_VERSION = 1;
 

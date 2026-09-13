@@ -36,9 +36,9 @@ export function ResourceMonitor({ resources }: { resources: RuntimeResourceMetri
   const sampleAge = resources.sampleAgeSeconds;
 
   return (
-    <section className={`mt-4 rounded-lg border p-3 ${warning ? "border-amber-400/30 bg-amber-400/5" : "border-white/7 bg-black/10"}`} aria-label={t("resources.title")}>
+    <section className={`mt-4 rounded-lg border p-3 ${warning ? "border-warning-foreground/25 bg-warning" : "border-border bg-muted/50"}`} aria-label={t("resources.title")}>
       <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm font-medium"><MemoryStick className="size-4 text-indigo-300" aria-hidden />{t("resources.title")}</div>
+        <div className="flex items-center gap-2 text-sm font-medium"><MemoryStick className="size-4 text-primary" aria-hidden />{t("resources.title")}</div>
         <span className="text-xs text-muted-foreground">
           {resources.status === "available" && sampleAge !== null
             ? t("resources.sampleAge", { seconds: sampleAge })
@@ -52,11 +52,11 @@ export function ResourceMonitor({ resources }: { resources: RuntimeResourceMetri
         <Metric label={t("resources.processes")} value={resources.processCount === null ? "—" : String(resources.processCount)} mono />
       </div>
       {points && (
-        <svg className="mt-3 h-9 w-full text-indigo-300" viewBox="0 0 100 34" preserveAspectRatio="none" role="img" aria-label={t("resources.memoryHistory")}>
+        <svg className="mt-3 h-9 w-full text-primary" viewBox="0 0 100 34" preserveAspectRatio="none" role="img" aria-label={t("resources.memoryHistory")}>
           <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
         </svg>
       )}
-      {warning && <p className="mt-2 text-xs text-amber-300">{t("resources.warning", { threshold: formatBytes(resources.warningThresholdBytes) })}</p>}
+      {warning && <p className="mt-2 text-xs text-warning-foreground">{t("resources.warning", { threshold: formatBytes(resources.warningThresholdBytes) })}</p>}
     </section>
   );
 }

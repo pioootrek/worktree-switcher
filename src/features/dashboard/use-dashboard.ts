@@ -35,6 +35,7 @@ export function useDashboard() {
   const [data, setData] = useState<ControllerDashboardResponse>({ projects: [], capacity: EMPTY_CAPACITY, testQueue: EMPTY_TEST_QUEUE, mcp: EMPTY_MCP_STATUS });
   const [token, setToken] = useState("");
   const [loading, setLoading] = useState(true);
+  const [observedAt, setObservedAt] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -105,13 +106,16 @@ export function useDashboard() {
                     ...update.runtime,
                     resources: newestResources(snapshot.runtime.resources ?? EMPTY_RESOURCES, update.runtime.resources ?? EMPTY_RESOURCES),
                   } : snapshot.runtime,
+                  lastLaunchedAt: update.lastLaunchedAt ?? snapshot.lastLaunchedAt,
                   reservation: update.reservation !== undefined ? update.reservation : snapshot.reservation,
                   storage: update.storage ?? snapshot.storage,
                   testRuns: update.testRuns ?? snapshot.testRuns,
+                  testHistoryComplete: update.testHistoryComplete ?? snapshot.testHistoryComplete,
                 };
               }),
             }));
           }
+          setObservedAt(Date.now());
           setConnectionError(null);
         } catch (cause) {
           if (generation.current === activeGeneration && !(cause instanceof DOMException && cause.name === "AbortError")) {
@@ -188,6 +192,7 @@ export function useDashboard() {
 
   const mutate = useCallback(async (path: string, body: unknown, success: string, method: "POST" | "DELETE" = "POST") => {
     if (!token) throw new Error(t("dashboard.sessionPending"));
+    setNotice(null);
     const response = await fetch(path, {
       method,
       headers: { "Accept-Language": locale, "Content-Type": "application/json", "X-Worktree-Switcher-Token": token },
@@ -225,6 +230,7 @@ export function useDashboard() {
         });
         const body = await parseResponse<RuntimeMetricsResponse>(response, t("http.error", { status: response.status }));
         if (cancelled) return;
+        setObservedAt(Date.now());
         const metrics = new Map(body.projects.map(({ projectId, resources }) => [projectId, resources]));
         setData((current) => ({
           ...current,
@@ -251,5 +257,5 @@ export function useDashboard() {
     };
   }, [monitoredProjectIds, t, token]);
 
-  return { data, token, loading, error: connectionError ?? error, notice, mutate, setError, runningCount };
+  return { data, observedAt, token, loading, error: connectionError ?? error, notice, dismissNotice: () => setNotice(null), mutate, setError, runningCount };
 }

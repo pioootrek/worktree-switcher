@@ -77,7 +77,7 @@ export function CapacityDialog({
             <Label htmlFor="capacity-limit">{t("capacity.limit")}</Label>
             <Input id="capacity-limit" type="number" min="1" max="64" value={limit} onChange={(event) => setLimit(event.target.value)} required />
           </div>
-          <div className="rounded-lg border bg-black/15 p-3 text-sm">
+          <div className="rounded-lg border bg-muted/50 p-3 text-sm">
             <p>{t("capacity.usage", { used: status.used, limit: status.enabled ? status.limit : "∞" })}</p>
             {status.holders.length > 0 ? (
               <ul className="mt-2 space-y-1 text-xs text-muted-foreground">

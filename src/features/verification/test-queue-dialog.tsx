@@ -60,7 +60,7 @@ export function TestQueueDialog({
             <Label htmlFor="test-queue-limit">{t("tests.limit")}</Label>
             <Input id="test-queue-limit" type="number" min="1" max="16" value={limit} onChange={(event) => setLimit(event.target.value)} required />
           </div>
-          <p className="rounded-lg border bg-black/15 p-3 text-sm">{t("tests.queueUsage", { running: status.running, queued: status.queued })}</p>
+          <p className="rounded-lg border bg-muted/50 p-3 text-sm">{t("tests.queueUsage", { running: status.running, queued: status.queued })}</p>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>{t("common.cancel")}</Button>
             <Button type="submit" disabled={pending}>{pending ? <LoaderCircle className="animate-spin" aria-hidden /> : null}{t("common.save")}</Button>

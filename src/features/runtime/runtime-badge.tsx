@@ -10,7 +10,7 @@ export function RuntimeBadge({ phase }: { phase: RuntimePhase }) {
   const active = phase === "running";
   const busy = phase === "starting" || phase === "stopping";
   return (
-    <Badge variant="outline" className={active ? "border-emerald-400/25 text-emerald-300" : phase === "failed" ? "border-red-400/25 text-red-300" : "text-muted-foreground"}>
+    <Badge variant="outline" className={active ? "border-success-foreground/25 bg-success text-success-foreground" : phase === "failed" ? "border-destructive/25 text-destructive" : "text-muted-foreground"}>
       {busy ? <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden /> : <Activity aria-hidden />}
       {t(`phase.${phase}`)}
     </Badge>

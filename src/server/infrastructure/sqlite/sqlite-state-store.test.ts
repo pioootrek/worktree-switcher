@@ -28,6 +28,25 @@ afterEach(() => {
 });
 
 describe("SqliteStateStore", () => {
+  it("retains launch evidence across reopen and isolates projects and failed operations", () => {
+    const store = createStore();
+    const project = store.addProject(projectInput("Launches", "/code/launches", 3301));
+    const other = store.addProject(projectInput("Other", "/code/other", 3302));
+    store.recordProjectEvent(project.id, "worktree.launched", "controller", { worktreePath: "/code/branch" });
+    store.recordProjectEvent(project.id, "agent.runtime_failed", "controller", { worktreePath: "/code/failed" });
+    store.recordProjectEvent(other.id, "worktree.launched", "controller", { worktreePath: "/code/other" });
+    const launches = store.listWorktreeLaunches(project.id);
+    expect(Object.keys(launches)).toEqual(["/code/branch"]);
+    for (let index = 0; index < 2001; index++) {
+      store.recordProjectEvent(other.id, "worktree.launched", "controller", { worktreePath: "/code/other" });
+      store.recordProjectEvent(project.id, "agent.runtime_completed", "controller", {});
+    }
+    expect(store.listWorktreeLaunches(project.id)).toEqual(launches);
+    store.close();
+    const reopened = new SqliteStateStore(join(directories.at(-1)!, "state.sqlite3"));
+    expect(reopened.listWorktreeLaunches(project.id)).toEqual(launches);
+    reopened.close();
+  });
   it("repairs a legacy database whose recorded migration 7 omitted the launch preset column", () => {
     const directory = mkdtempSync(join(tmpdir(), "switcher-preset-repair-"));
     directories.push(directory);

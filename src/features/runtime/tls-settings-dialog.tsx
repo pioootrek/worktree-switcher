@@ -104,7 +104,7 @@ export function TlsSettingsDialog({
             </div>
           )}
 
-          {active && <p className="text-sm text-amber-300">{t("tls.stopBeforeSave")}</p>}
+          {active && <p className="text-sm text-warning-foreground">{t("tls.stopBeforeSave")}</p>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>{t("common.cancel")}</Button>
             <Button type="submit" disabled={active || pending}>{pending && <LoaderCircle className="animate-spin" aria-hidden />}{t("common.save")}</Button>
