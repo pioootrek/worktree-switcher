@@ -157,6 +157,13 @@
         "21-verification-summary.json",
         "SHA256SUMS.txt",
         "findings.json",
+        "phase1-fixture-en-desktop.png",
+        "phase1-fixture-en-mobile.png",
+        "phase1-fixture-pl-desktop.png",
+        "phase1-fixture-pl-mobile.png",
+        "phase1-gui-fixes.patch.txt",
+        "phase1-verification.json",
+        "phase1-wyniki.md",
         "raport.md",
         "stan-sesji.md"
       ],

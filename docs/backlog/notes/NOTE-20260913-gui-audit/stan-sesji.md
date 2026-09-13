@@ -35,3 +35,7 @@ Ostatni zapisany stan istniejącej karty (`tab_8`): Prosty Prawnik, EN, dark, 17
 3. Przed większym wdrożeniem przedstawić zakres użytkownikowi. Proponowana kolejność napraw i pełne kryteria odbioru znajdują się w raporcie.
 
 Plik [SHA256SUMS.txt](SHA256SUMS.txt) zawiera sumy kontrolne raportu, dowodów i tego zapisu sesji. Nie zapisano tokenów sesji ani adresów zawierających token.
+
+## Późniejszy postęp — pierwsza seria poprawek
+
+Po zatwierdzeniu lokalnego HMR i zwiększenia limitu do 2 użytkownik polecił rozpocząć poprawki. Stan początkowy opisany powyżej jest historyczny. Aktualny zapis: [pierwsza seria](phase1-wyniki.md). GUI-01, GUI-02, GUI-12 i GUI-13 poprawiono w roboczym worktree; 21 testów UI, build i lint zakończyły się poprawnym wynikiem poleceń. Kod nie został scalony do main. Duże zmiany nadal wymagają przedstawienia zakresu. Lokalnych nadpisań HMR nie commitować z kodem produktu.

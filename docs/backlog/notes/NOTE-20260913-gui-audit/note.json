@@ -5,14 +5,15 @@
     "browser_constraint": "Używać tylko karty już otwartej przez użytkownika.",
     "findings": 25,
     "handoff": "stan-sesji.md",
-    "implementation_status": "Propozycje; duże poprawki wymagają wcześniejszej zgody użytkownika.",
+    "implementation_report": "phase1-wyniki.md",
+    "implementation_status": "GUI-01, GUI-02, GUI-12 i GUI-13 poprawione roboczo w t3code/poprawki-gui; bez scalenia i wdrożenia do stabilnego GUI. Pozostałe ustalenia otwarte.",
     "priorities": {
       "P1": 5,
       "P2": 16,
       "P3": 4
     },
     "report": "raport.md",
-    "summary": "25 ustaleń, 13 pozycji shadcn i 8 propozycji; raport, 2 zrzuty, 16 plików dowodowych JSON i stan sesji. Bez zmian aplikacji.",
+    "summary": "Audyt 25 ustaleń, 13 pozycji shadcn i 8 propozycji; dowody audytu oraz zapis pierwszej serii czterech poprawek lokalnych.",
     "visual_verification": "Częściowa: dwa zaakceptowane zrzuty; dalsza weryfikacja DOM/CSS i klawiaturą. Nowe screenshoty blokuje timeout narzędzia."
   },
   "created": "2026-09-13",
@@ -37,6 +38,13 @@
     "21-verification-summary.json",
     "SHA256SUMS.txt",
     "findings.json",
+    "phase1-fixture-en-desktop.png",
+    "phase1-fixture-en-mobile.png",
+    "phase1-fixture-pl-desktop.png",
+    "phase1-fixture-pl-mobile.png",
+    "phase1-gui-fixes.patch.txt",
+    "phase1-verification.json",
+    "phase1-wyniki.md",
     "raport.md",
     "stan-sesji.md"
   ],
