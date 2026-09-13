@@ -373,6 +373,14 @@ export class SqliteStateStore implements StateStore, IdentityStore, RemoteVerifi
     return this.identity.getPrincipal(id);
   }
 
+  getOwnerPrincipal(): Principal | null {
+    return this.identity.getOwnerPrincipal();
+  }
+
+  listPrincipals(kind?: Principal["kind"]): Principal[] {
+    return this.identity.listPrincipals(kind);
+  }
+
   savePrincipal(principal: Principal, actor: string): void {
     this.identity.savePrincipal(principal, actor);
   }
@@ -411,6 +419,10 @@ export class SqliteStateStore implements StateStore, IdentityStore, RemoteVerifi
 
   getKnowledgeProjectGrant(principalId: string, projectId: string): KnowledgeProjectGrant | null {
     return this.identity.getKnowledgeProjectGrant(principalId, projectId);
+  }
+
+  listKnowledgeProjectGrants(principalId: string): KnowledgeProjectGrant[] {
+    return this.identity.listKnowledgeProjectGrants(principalId);
   }
 
   saveKnowledgeProjectGrant(grant: KnowledgeProjectGrant, actor: string): void {

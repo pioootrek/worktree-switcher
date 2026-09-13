@@ -85,6 +85,58 @@ afterEach(async () => {
 });
 
 describe("MCP loopback server", () => {
+  it("limits scoped credentials to identity and reauthenticates existing sessions", async () => {
+    let active = true;
+    const actor = {
+      principalId: "agent-1",
+      principalKind: "agent" as const,
+      credentialId: "credential-1",
+      authenticationMethod: "agent_token" as const,
+    };
+    const identity = {
+      authenticateBearer: vi.fn((token: string) => {
+        if (!active || token !== "scoped-token") throw new Error("invalid credential");
+        return actor;
+      }),
+      describeIdentity: vi.fn(() => ({
+        principal: { id: "agent-1", kind: "agent" as const, status: "active" as const },
+        credential: {
+          id: "credential-1", principalId: "agent-1", kind: "agent_token" as const,
+          label: "Codex", tokenPrefix: "wts_credential", status: "active" as const,
+          expiresAt: null, createdAt: "2026-09-13T12:00:00.000Z", revokedAt: null, lastUsedAt: null,
+        },
+        knowledgeGrants: [{ projectId: "knowledge-a", permissions: ["knowledge:read" as const] }],
+      })),
+    };
+    const controller = createMcpControllerServer({
+      service: {} as ControlService,
+      port: 0,
+      accessToken: "legacy-runtime-token",
+      identity,
+    });
+    controllers.push(controller);
+    await new Promise<void>((resolve, reject) => {
+      controller.server.once("error", reject);
+      controller.server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = controller.server.address() as AddressInfo;
+    const endpoint = new URL(`http://127.0.0.1:${address.port}/mcp`);
+    const transport = new StreamableHTTPClientTransport(endpoint, {
+      requestInit: { headers: { Authorization: "Bearer scoped-token" } },
+    });
+    const client = new Client({ name: "scoped-test", version: "1.0.0" });
+    await client.connect(transport);
+
+    expect((await client.listTools()).tools.map(({ name }) => name)).toEqual(["get_identity"]);
+    const result = await client.callTool({ name: "get_identity", arguments: {} });
+    expect(JSON.stringify(result)).toContain("knowledge:read");
+    expect(JSON.stringify(result)).not.toContain("verifierHash");
+
+    active = false;
+    await expect(client.listTools()).rejects.toThrow();
+    await client.close().catch(() => undefined);
+  });
+
   it("authenticates clients, exposes project tools, and keeps lease tokens out of tool results", async () => {
     const reservation: Reservation = {
       id: reservationId,

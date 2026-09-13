@@ -82,9 +82,17 @@ describe("identity and knowledge access SQLite persistence", () => {
     }, "owner-1");
 
     expect(store.getRemotePrincipal("agent-1")).toEqual(store.getPrincipal("agent-1"));
+    expect(store.getOwnerPrincipal()).toEqual({ id: "owner-1", kind: "owner", status: "active" });
+    expect(store.listPrincipals("agent")).toEqual([{ id: "agent-1", kind: "agent", status: "active" }]);
     expect(store.listPrincipalCredentials("owner-1")).toEqual([expect.not.objectContaining({ verifierHash: expect.anything() })]);
     expect(store.getKnowledgeProjectGrant("agent-1", "knowledge-a")?.permissions)
       .toEqual(["knowledge:read", "knowledge:write"]);
+    expect(store.listKnowledgeProjectGrants("agent-1")).toEqual([{
+      principalId: "agent-1",
+      projectId: "knowledge-a",
+      permissions: ["knowledge:read", "knowledge:write"],
+      revokedAt: null,
+    }]);
     store.close();
 
     const database = new Database(path, { readonly: true });

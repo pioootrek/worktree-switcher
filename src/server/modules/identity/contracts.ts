@@ -34,6 +34,10 @@ export interface AuthenticatedPrincipal {
   authenticationMethod: CredentialKind;
 }
 
+export type ControllerAuthentication =
+  | { kind: "legacy" }
+  | { kind: "principal"; actor: AuthenticatedPrincipal };
+
 export type KnowledgePermission =
   | "knowledge:read"
   | "knowledge:write"
@@ -59,6 +63,12 @@ export interface KnowledgeProjectGrant {
   revokedAt: string | null;
 }
 
+export interface AuthenticatedIdentity {
+  principal: Principal;
+  credential: PrincipalCredential;
+  knowledgeGrants: Array<Pick<KnowledgeProjectGrant, "projectId" | "permissions">>;
+}
+
 export interface KnowledgeProjectRuntimeLink {
   projectId: string;
   runtimeProjectId: string | null;
@@ -68,6 +78,8 @@ export interface KnowledgeProjectRuntimeLink {
 
 export interface IdentityStore {
   getPrincipal(id: string): Principal | null;
+  getOwnerPrincipal(): Principal | null;
+  listPrincipals(kind?: PrincipalKind): Principal[];
   savePrincipal(principal: Principal, actor: string): void;
   getCredentialForAuthentication(id: string): CredentialAuthenticationRecord | null;
   saveCredential(credential: CredentialAuthenticationRecord, actor: string): void;
@@ -78,6 +90,7 @@ export interface IdentityStore {
   getKnowledgeProject(id: string): KnowledgeProject | null;
   saveKnowledgeProject(project: KnowledgeProject, actor: string): void;
   getKnowledgeProjectGrant(principalId: string, projectId: string): KnowledgeProjectGrant | null;
+  listKnowledgeProjectGrants(principalId: string): KnowledgeProjectGrant[];
   saveKnowledgeProjectGrant(grant: KnowledgeProjectGrant, actor: string): void;
   getKnowledgeProjectRuntimeLink(projectId: string): KnowledgeProjectRuntimeLink | null;
   saveKnowledgeProjectRuntimeLink(link: KnowledgeProjectRuntimeLink, actor: string): void;

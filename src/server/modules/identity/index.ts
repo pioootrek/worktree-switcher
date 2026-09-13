@@ -3,12 +3,16 @@ export {
   IdentityService,
   type BootstrapOwnerInput,
   type BootstrappedOwner,
+  type CreateKnowledgeProjectInput,
   type IdentityErrorCode,
   type IssueAgentTokenInput,
   type IssuedAgentToken,
+  type SetKnowledgeGrantInput,
 } from "./identity-service";
 export type {
   AuthenticatedPrincipal,
+  AuthenticatedIdentity,
+  ControllerAuthentication,
   CredentialAuthenticationRecord,
   CredentialKind,
   IdentityStatus,

@@ -2,11 +2,12 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import type { ControlService } from "./control-service";
+import type { ControllerAuthentication, IdentityService } from "./modules/identity";
 
 const BODY_LIMIT = 1024 * 1024;
 
 interface McpRuntimeLike {
-  handle(request: IncomingMessage, response: ServerResponse, body?: unknown): Promise<void>;
+  handle(request: IncomingMessage, response: ServerResponse, authentication: ControllerAuthentication, body?: unknown): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -15,12 +16,22 @@ export interface McpControllerServer {
   close(): Promise<void>;
 }
 
-function authorized(request: IncomingMessage, expected: string): boolean {
+function authenticate(
+  request: IncomingMessage,
+  expected: string,
+  identity?: Pick<IdentityService, "authenticateBearer">,
+): ControllerAuthentication | null {
   const header = request.headers.authorization;
-  if (!header?.startsWith("Bearer ")) return false;
-  const supplied = Buffer.from(header.slice("Bearer ".length));
+  if (!header?.startsWith("Bearer ")) return null;
+  const token = header.slice("Bearer ".length);
+  const supplied = Buffer.from(token);
   const expectedBuffer = Buffer.from(expected);
-  return supplied.length === expectedBuffer.length && timingSafeEqual(supplied, expectedBuffer);
+  if (supplied.length === expectedBuffer.length && timingSafeEqual(supplied, expectedBuffer)) return { kind: "legacy" };
+  try {
+    return identity ? { kind: "principal", actor: identity.authenticateBearer(token) } : null;
+  } catch {
+    return null;
+  }
 }
 
 function validOrigin(request: IncomingMessage, port: number): boolean {
@@ -62,6 +73,7 @@ export function createMcpControllerServer(options: {
   service: ControlService;
   port: number;
   accessToken: string;
+  identity?: Pick<IdentityService, "authenticateBearer" | "describeIdentity">;
   onDiagnostic?: (message: string, details?: Record<string, unknown>) => void;
 }): McpControllerServer {
   let runtimePromise: Promise<McpRuntimeLike> | null = null;
@@ -69,6 +81,7 @@ export function createMcpControllerServer(options: {
     runtimePromise ??= import("./mcp-runtime").then(({ McpRuntime }) => new McpRuntime(
       options.service,
       options.onDiagnostic,
+      options.identity,
     ));
     return runtimePromise;
   };
@@ -76,7 +89,8 @@ export function createMcpControllerServer(options: {
   const server = createServer((request, response) => {
     void (async () => {
       if (request.url !== "/mcp") return jsonError(response, 404, "MCP endpoint not found.");
-      if (!authorized(request, options.accessToken)) return jsonError(response, 401, "A valid MCP bearer token is required.");
+      const authentication = authenticate(request, options.accessToken, options.identity);
+      if (!authentication) return jsonError(response, 401, "A valid MCP bearer token is required.");
       if (!validOrigin(request, options.port)) return jsonError(response, 403, "The request origin was rejected.");
       if (request.method !== "POST" && request.method !== "GET" && request.method !== "DELETE") {
         response.setHeader("Allow", "POST, GET, DELETE");
@@ -84,7 +98,7 @@ export function createMcpControllerServer(options: {
       }
       try {
         const body = request.method === "POST" ? await readJson(request) : undefined;
-        await (await runtime()).handle(request, response, body);
+        await (await runtime()).handle(request, response, authentication, body);
       } catch (error) {
         options.onDiagnostic?.("mcp.request_failed", {
           error: error instanceof Error ? error.message : String(error),

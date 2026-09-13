@@ -47,6 +47,8 @@ function fixture() {
   const links = new Map<string, KnowledgeProjectRuntimeLink>();
   const store: IdentityStore = {
     getPrincipal: (id) => principals.get(id) ?? null,
+    getOwnerPrincipal: () => [...principals.values()].find(({ kind }) => kind === "owner") ?? null,
+    listPrincipals: (kind) => [...principals.values()].filter((principal) => !kind || principal.kind === kind),
     savePrincipal: (principal) => { principals.set(principal.id, principal); },
     getCredentialForAuthentication: (id) => credentials.get(id) ?? null,
     saveCredential: (credential) => { credentials.set(credential.id, credential); },
@@ -82,6 +84,7 @@ function fixture() {
     getKnowledgeProject: (id) => projects.get(id) ?? null,
     saveKnowledgeProject: (project) => { projects.set(project.id, project); },
     getKnowledgeProjectGrant: (principalId, projectId) => grants.get(`${principalId}:${projectId}`) ?? null,
+    listKnowledgeProjectGrants: (principalId) => [...grants.values()].filter((grant) => grant.principalId === principalId),
     saveKnowledgeProjectGrant: (grant) => { grants.set(`${grant.principalId}:${grant.projectId}`, grant); },
     getKnowledgeProjectRuntimeLink: (projectId) => links.get(projectId) ?? null,
     saveKnowledgeProjectRuntimeLink: (link) => { links.set(link.projectId, link); },
@@ -108,6 +111,21 @@ describe("IdentityService", () => {
     expect(result.token).toMatch(/^wts_[0-9a-f-]{36}_[0-9a-f]{64}$/);
     expect(credentials.get(result.credential.id)?.verifierHash).toBe(hash(result.token));
     expectCode(() => service.bootstrapOwnerSession(), "owner_already_initialized");
+  });
+
+  it("recovers a new owner session after the previous credential expires", () => {
+    const { service, credentials } = fixture();
+    credentials.set(OWNER_CREDENTIAL_ID, { ...credentials.get(OWNER_CREDENTIAL_ID)!, expiresAt: NOW });
+    expectCode(() => service.authenticateBearer(OWNER_TOKEN), "invalid_credential");
+
+    const recovered = service.recoverOwnerSession({ label: "Recovery", sessionLifetimeSeconds: 300 });
+    expect(recovered).toMatchObject({
+      principalId: "owner-1",
+      credential: { kind: "owner_session", label: "Recovery", expiresAt: "2026-09-13T12:05:00.000Z" },
+    });
+    expect(service.authenticateBearer(recovered.token)).toMatchObject({
+      principalId: "owner-1", authenticationMethod: "owner_session",
+    });
   });
 
   it("authenticates a bearer and gives malformed or unknown values one error", () => {
@@ -156,6 +174,25 @@ describe("IdentityService", () => {
     expectCode(() => service.authorizeKnowledge(agent, "project-a", "knowledge:read"), "invalid_credential");
   });
 
+  it("describes only the current credential and active grants of its principal", () => {
+    const { service, grants } = fixture();
+    grants.set("owner-1:project-a", {
+      principalId: "owner-1", projectId: "project-a", permissions: ["knowledge:read"], revokedAt: null,
+    });
+    grants.set("owner-1:project-b", {
+      principalId: "owner-1", projectId: "project-b", permissions: ["knowledge:write"], revokedAt: NOW,
+    });
+    grants.set("agent-1:project-a", {
+      principalId: "agent-1", projectId: "project-a", permissions: ["knowledge:write"], revokedAt: null,
+    });
+
+    expect(service.describeIdentity(service.authenticateBearer(OWNER_TOKEN))).toEqual({
+      principal: { id: "owner-1", kind: "owner", status: "active" },
+      credential: expect.objectContaining({ id: OWNER_CREDENTIAL_ID, kind: "owner_session" }),
+      knowledgeGrants: [{ projectId: "project-a", permissions: ["knowledge:read"] }],
+    });
+  });
+
   it("does not treat a human-looking agent label as owner approval", () => {
     const { service, grants } = fixture();
     const owner = service.authenticateBearer(OWNER_TOKEN);
@@ -165,5 +202,36 @@ describe("IdentityService", () => {
     });
     const agent = service.authenticateBearer(issued.token);
     expectCode(() => service.authorizeKnowledge(agent, "project-a", "knowledge:approve"), "knowledge_forbidden");
+  });
+
+  it("lets only an owner session manage agents, credentials and knowledge grants", () => {
+    const { service, grants } = fixture();
+    const owner = service.authenticateBearer(OWNER_TOKEN);
+    const agent = service.createAgent(owner);
+    const project = service.createKnowledgeProject({ name: "Shared knowledge" }, owner);
+    const grant = service.setKnowledgeGrant({
+      principalId: agent.id,
+      projectId: project.id,
+      permissions: ["knowledge:write", "knowledge:read", "knowledge:read"],
+    }, owner);
+    expect(grant.permissions).toEqual(["knowledge:read", "knowledge:write"]);
+    expect(service.listKnowledgeGrants(agent.id, owner)).toEqual([grant]);
+
+    const issued = service.issueAgentToken({ principalId: agent.id, label: "Codex" }, owner);
+    expect(service.listAgentCredentials(agent.id, owner)).toEqual([issued.credential]);
+    const agentActor = service.authenticateBearer(issued.token);
+    expectCode(() => service.createAgent(agentActor), "owner_authentication_required");
+    expectCode(() => service.setKnowledgeGrant({
+      principalId: agent.id, projectId: project.id, permissions: ["knowledge:approve"],
+    }, owner), "invalid_request");
+    expectCode(() => service.setKnowledgeGrant({
+      principalId: agent.id, projectId: project.id, permissions: ["runtime:start" as never],
+    }, owner), "invalid_request");
+    service.revokeCredential(issued.credential.id, owner);
+    expectCode(() => service.authenticateBearer(issued.token), "invalid_credential");
+    expect(service.revokeKnowledgeGrant(agent.id, project.id, owner).revokedAt).toBe(NOW);
+    expect(grants.get(`${agent.id}:${project.id}`)?.revokedAt).toBe(NOW);
+    expect(service.revokeAgent(agent.id, owner).status).toBe("revoked");
+    expect(service.listAgents(owner)).toContainEqual(expect.objectContaining({ id: agent.id, status: "revoked" }));
   });
 });

@@ -83,6 +83,18 @@ export class IdentityQueries implements IdentityStore {
       .get(id) as Principal | undefined) ?? null;
   }
 
+  getOwnerPrincipal(): Principal | null {
+    return (this.database.prepare("SELECT id, kind, status FROM remote_principals WHERE kind = 'owner' LIMIT 1")
+      .get() as Principal | undefined) ?? null;
+  }
+
+  listPrincipals(kind?: Principal["kind"]): Principal[] {
+    const rows = kind
+      ? this.database.prepare("SELECT id, kind, status FROM remote_principals WHERE kind = ? ORDER BY id").all(kind)
+      : this.database.prepare("SELECT id, kind, status FROM remote_principals ORDER BY kind, id").all();
+    return rows as Principal[];
+  }
+
   savePrincipal(principal: Principal, actor: string): void {
     const existing = this.getPrincipal(principal.id);
     if (existing && existing.kind !== principal.kind) {
@@ -207,6 +219,18 @@ export class IdentityQueries implements IdentityStore {
       permissions: JSON.parse(row.permissions_json) as KnowledgeProjectGrant["permissions"],
       revokedAt: row.revoked_at,
     } : null;
+  }
+
+  listKnowledgeProjectGrants(principalId: string): KnowledgeProjectGrant[] {
+    return (this.database.prepare(`
+      SELECT principal_id, project_id, permissions_json, revoked_at
+      FROM knowledge_project_grants WHERE principal_id = ? ORDER BY project_id
+    `).all(principalId) as KnowledgeGrantRow[]).map((row) => ({
+      principalId: row.principal_id,
+      projectId: row.project_id,
+      permissions: JSON.parse(row.permissions_json) as KnowledgeProjectGrant["permissions"],
+      revokedAt: row.revoked_at,
+    }));
   }
 
   saveKnowledgeProjectGrant(grant: KnowledgeProjectGrant, actor: string): void {

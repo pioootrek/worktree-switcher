@@ -10,6 +10,7 @@ import packageJson from "../../package.json";
 import type { ClaimedRuntimeAction, ClaimedRuntimeReceipt, ProjectSnapshot } from "@/shared/contracts";
 import { localizeServerMessage } from "../i18n/server-errors";
 import type { ControlService } from "./control-service";
+import type { ControllerAuthentication, IdentityService } from "./modules/identity";
 
 interface ClaimSecret {
   projectId: string;
@@ -20,6 +21,8 @@ interface ClaimSecret {
 }
 
 interface McpSession {
+  authentication: ControllerAuthentication;
+  authenticationKey: string;
   owner: string;
   server: McpServer;
   transport: StreamableHTTPServerTransport;
@@ -87,14 +90,20 @@ export class McpRuntime {
   constructor(
     private readonly service: ControlService,
     private readonly diagnostic: (message: string, details?: Record<string, unknown>) => void = () => undefined,
+    private readonly identity?: Pick<IdentityService, "describeIdentity">,
   ) {}
 
-  async handle(request: IncomingMessage, response: ServerResponse, body?: unknown): Promise<void> {
+  async handle(
+    request: IncomingMessage,
+    response: ServerResponse,
+    authentication: ControllerAuthentication,
+    body?: unknown,
+  ): Promise<void> {
     const sessionId = header(request, "mcp-session-id");
     let session = sessionId ? this.sessions.get(sessionId) : undefined;
 
     if (!session && request.method === "POST" && !sessionId && isInitializeRequest(body)) {
-      session = this.createSession();
+      session = this.createSession(authentication);
       await session.server.connect(session.transport);
       await session.transport.handleRequest(request, response, body);
       return;
@@ -112,6 +121,15 @@ export class McpRuntime {
       }));
       return;
     }
+    if (session.authenticationKey !== this.authenticationKey(authentication)) {
+      response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "MCP session authentication changed." },
+        id: null,
+      }));
+      return;
+    }
     await session.transport.handleRequest(request, response, body);
   }
 
@@ -125,8 +143,14 @@ export class McpRuntime {
     await Promise.allSettled(sessions.map((session) => session.server.close()));
   }
 
-  private createSession(): McpSession {
+  private authenticationKey(authentication: ControllerAuthentication): string {
+    return authentication.kind === "legacy" ? "legacy" : `credential:${authentication.actor.credentialId}`;
+  }
+
+  private createSession(authentication: ControllerAuthentication): McpSession {
     const session: McpSession = {
+      authentication,
+      authenticationKey: this.authenticationKey(authentication),
       owner: "",
       server: null as unknown as McpServer,
       transport: null as unknown as StreamableHTTPServerTransport,
@@ -161,6 +185,17 @@ export class McpRuntime {
 
   private createProtocolServer(session: McpSession): McpServer {
     const server = new McpServer({ name: "worktree-switcher", version: packageJson.version });
+    if (session.authentication.kind === "principal") {
+      const actor = session.authentication.actor;
+      server.registerTool("get_identity", {
+        description: "Read the authenticated principal, credential metadata, and active knowledge grants.",
+        annotations: { readOnlyHint: true, idempotentHint: true },
+      }, async () => {
+        if (!this.identity) throw new Error("Scoped identity authentication is unavailable.");
+        return jsonContent(this.identity.describeIdentity(actor));
+      });
+      return server;
+    }
     const owner = () => {
       if (!session.owner) throw new Error("MCP session is not initialized.");
       return session.owner;

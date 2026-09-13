@@ -9,11 +9,15 @@ import { ControlService } from "./control-service";
 import { DirectoryBrowser } from "./directory-browser";
 import { EventStream } from "./events";
 import { createControllerServer, type ControllerServer } from "./http-server";
+import type { IdentityService } from "./modules/identity";
 
 const controllers: ControllerServer[] = [];
 const directories: string[] = [];
 
-async function fixture(options: { publicOrigin?: string } = {}) {
+async function fixture(options: {
+  publicOrigin?: string;
+  identity?: IdentityService;
+} = {}) {
   const directory = mkdtempSync(join(tmpdir(), "worktree-switcher-http-"));
   directories.push(directory);
   mkdirSync(directory, { recursive: true });
@@ -74,6 +78,7 @@ async function fixture(options: { publicOrigin?: string } = {}) {
     port: 0,
     accessToken: "test-access-token",
     publicOrigin: options.publicOrigin,
+    identity: options.identity,
   });
   controllers.push(controller);
   await new Promise<void>((resolve, reject) => {
@@ -119,6 +124,77 @@ describe("controller access boundary", () => {
       },
     });
     expect(dashboard).toHaveBeenCalledOnce();
+  });
+
+  it("exposes scoped identity without granting access to runtime APIs", async () => {
+    let active = true;
+    const actor = {
+      principalId: "agent-1",
+      principalKind: "agent" as const,
+      credentialId: "credential-1",
+      authenticationMethod: "agent_token" as const,
+    };
+    const identity = {
+      authenticateBearer: vi.fn((token: string) => {
+        if (!active || token !== "scoped-token") throw new Error("invalid credential");
+        return actor;
+      }),
+      describeIdentity: vi.fn(() => ({
+        principal: { id: "agent-1", kind: "agent" as const, status: "active" as const },
+        credential: {
+          id: "credential-1", principalId: "agent-1", kind: "agent_token" as const,
+          label: "Codex", tokenPrefix: "wts_credential", status: "active" as const,
+          expiresAt: null, createdAt: "2026-09-13T12:00:00.000Z", revokedAt: null, lastUsedAt: null,
+        },
+        knowledgeGrants: [{ projectId: "knowledge-a", permissions: ["knowledge:read" as const] }],
+      })),
+    };
+    const { base, dashboard } = await fixture({ identity: identity as unknown as IdentityService });
+
+    const response = await fetch(`${base}/api/identity`, {
+      headers: { Authorization: "Bearer scoped-token" },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      principal: { id: "agent-1", kind: "agent" },
+      knowledgeGrants: [{ projectId: "knowledge-a", permissions: ["knowledge:read"] }],
+    });
+    expect((await fetch(`${base}/api/dashboard`, {
+      headers: { Authorization: "Bearer scoped-token" },
+    })).status).toBe(401);
+    expect((await fetch(`${base}/api/identity`, {
+      headers: { "X-Worktree-Switcher-Token": "test-access-token" },
+    })).status).toBe(401);
+    active = false;
+    expect((await fetch(`${base}/api/identity`, {
+      headers: { Authorization: "Bearer scoped-token" },
+    })).status).toBe(401);
+    expect(dashboard).not.toHaveBeenCalled();
+  });
+
+  it("executes owner-authorized identity revocation through the running controller", async () => {
+    const actor = {
+      principalId: "owner-1", principalKind: "owner" as const,
+      credentialId: "owner-session", authenticationMethod: "owner_session" as const,
+    };
+    const revokeCredential = vi.fn();
+    const identity = {
+      authenticateBearer: vi.fn((token: string) => {
+        if (token !== "owner-token") throw new Error("invalid credential");
+        return actor;
+      }),
+      revokeCredential,
+    } as unknown as IdentityService;
+    const { base } = await fixture({ identity });
+
+    const response = await fetch(`${base}/api/identity/admin`, {
+      method: "POST",
+      headers: { Authorization: "Bearer owner-token", "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "revoke-token", credentialId: "agent-token" }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ revoked: true });
+    expect(revokeCredential).toHaveBeenCalledWith("agent-token", actor);
   });
 
   it("requires the event token in a header and rejects cross-origin event reads", async () => {
