@@ -2,6 +2,17 @@
 
 import { Metric } from "@/components/metric";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +33,7 @@ import { WorktreeStoragePanel } from "@/features/storage/worktree-storage-panel"
 import { TestPanel } from "@/features/verification/test-panel";
 import { useI18n } from "@/i18n/provider";
 import type { ProjectSnapshot } from "@/shared/contracts";
-import { AlertTriangle, Check, Circle, GitBranch, HardDrive, LockKeyhole, Play, RefreshCw, RotateCcw, Server, Square, TestTube2, UnlockKeyhole } from "lucide-react";
+import { AlertTriangle, Check, Circle, GitBranch, HardDrive, LockKeyhole, Play, RefreshCw, RotateCcw, Server, Square, TestTube2, Trash2, UnlockKeyhole } from "lucide-react";
 import { useState } from "react";
 
 export function ProjectCard({
@@ -95,6 +106,22 @@ export function ProjectCard({
     }
   };
 
+  const removeProject = async () => {
+    setPending("remove");
+    try {
+      await mutate(
+        `/api/projects/${project.id}`,
+        {},
+        t("project.removed", { name: project.name }),
+        "DELETE",
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPending(null);
+    }
+  };
+
   return (
     <Card data-project-id={project.id} className="min-w-0 overflow-hidden rounded-lg border-border bg-card/70 py-0 shadow-none backdrop-blur-sm">
       <CardHeader className="border-b border-border px-5 py-5 sm:px-6">
@@ -124,6 +151,25 @@ export function ProjectCard({
                 setError={setError}
               />
             )}
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="ghost" size="icon" disabled={isBusy} aria-label={t("project.remove")}>
+                  <Trash2 aria-hidden />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{t("project.removeTitle", { name: project.name })}</AlertDialogTitle>
+                  <AlertDialogDescription>{t("project.removeDescription")}</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+                  <AlertDialogAction variant="destructive" onClick={() => void removeProject()}>
+                    {t("project.confirmRemove")}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
       </CardHeader>
