@@ -192,7 +192,14 @@
         "sidebar-gui.patch.txt",
         "sidebar-verification.json",
         "sidebar-wyniki.md",
-        "stan-sesji.md"
+        "stan-sesji.md",
+        "tests-dashboard-fixture-desktop.png",
+        "tests-dashboard-fixture-mobile.png",
+        "tests-dashboard-verification.json",
+        "tests-dashboard-wyniki.md",
+        "tests-dashboard.patch.txt",
+        "tests-details-fixture-desktop.png",
+        "tests-details-fixture-mobile.png"
       ],
       "id": "NOTE-20260913-gui-audit",
       "path": "notes/NOTE-20260913-gui-audit",

@@ -2,7 +2,7 @@
   "author": "agent:codex",
   "body": {
     "all_projects_report": "all-projects-wyniki.md",
-    "all_projects_status": "Agregacja metryk i jednej tabeli Worktrees, pozostałe sekcje wszystkich projektów. HMR; 31 testów UI, build/check kod 0. Źródła robocze, bez restartu kontrolera.",
+    "all_projects_status": "Checkpoint cc081ec obejmuje agregację Worktrees i akcje w wierszach; Tests ma teraz osobny wspólny dashboard. Pozostałe sekcje pozostają w kontekście pickera.",
     "audited_commit": "a94ee75f63302d4702eead1d2e301e7b144b1d83",
     "browser_constraint": "Używać tylko karty już otwartej przez użytkownika.",
     "findings": 25,
@@ -24,6 +24,8 @@
     "sidebar_report": "sidebar-wyniki.md",
     "sidebar_scope": "Menu działa w kontekście projektu wybranego w pickerze; decyzja właściciela 2026-09-13.",
     "summary": "Audyt 25 ustaleń, 13 pozycji shadcn i 8 propozycji; dowody audytu oraz zapis pierwszej serii czterech poprawek lokalnych.",
+    "tests_dashboard_report": "tests-dashboard-wyniki.md",
+    "tests_dashboard_status": "Checkpoint cc081ec; nowy ekran Tests w HMR: metryki, aktywne zadania, ostatnie wyniki, historia, filtry i paginacja, Sheet logów, Dialog uruchamiania. 34 UI, 310+7 check, build kod 0. Źródła robocze; brak restartu kontrolera. API do 20 uruchomień/projekt.",
     "visual_verification": "Częściowa: dwa zaakceptowane zrzuty; dalsza weryfikacja DOM/CSS i klawiaturą. Nowe screenshoty blokuje timeout narzędzia."
   },
   "created": "2026-09-13",
@@ -83,7 +85,14 @@
     "sidebar-gui.patch.txt",
     "sidebar-verification.json",
     "sidebar-wyniki.md",
-    "stan-sesji.md"
+    "stan-sesji.md",
+    "tests-dashboard-fixture-desktop.png",
+    "tests-dashboard-fixture-mobile.png",
+    "tests-dashboard-verification.json",
+    "tests-dashboard-wyniki.md",
+    "tests-dashboard.patch.txt",
+    "tests-details-fixture-desktop.png",
+    "tests-details-fixture-mobile.png"
   ],
   "id": "NOTE-20260913-gui-audit",
   "last_reviewed": "2026-09-13",
