@@ -1,4 +1,12 @@
-export { IdentityError, IdentityService, type IdentityErrorCode, type IssueAgentTokenInput, type IssuedAgentToken } from "./identity-service";
+export {
+  IdentityError,
+  IdentityService,
+  type BootstrapOwnerInput,
+  type BootstrappedOwner,
+  type IdentityErrorCode,
+  type IssueAgentTokenInput,
+  type IssuedAgentToken,
+} from "./identity-service";
 export type {
   AuthenticatedPrincipal,
   CredentialAuthenticationRecord,

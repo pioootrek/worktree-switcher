@@ -385,6 +385,10 @@ export class SqliteStateStore implements StateStore, IdentityStore, RemoteVerifi
     this.identity.saveCredential(credential, actor);
   }
 
+  createFirstOwner(principal: Principal, credential: CredentialAuthenticationRecord, actor: string): boolean {
+    return this.identity.createFirstOwner(principal, credential, actor);
+  }
+
   listPrincipalCredentials(principalId: string): PrincipalCredential[] {
     return this.identity.listPrincipalCredentials(principalId);
   }

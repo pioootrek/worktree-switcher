@@ -50,6 +50,12 @@ function fixture() {
     savePrincipal: (principal) => { principals.set(principal.id, principal); },
     getCredentialForAuthentication: (id) => credentials.get(id) ?? null,
     saveCredential: (credential) => { credentials.set(credential.id, credential); },
+    createFirstOwner: (principal, credential) => {
+      if ([...principals.values()].some(({ kind }) => kind === "owner")) return false;
+      principals.set(principal.id, principal);
+      credentials.set(credential.id, credential);
+      return true;
+    },
     listPrincipalCredentials: (principalId) => [...credentials.values()]
       .filter((credential) => credential.principalId === principalId)
       .map((credential) => ({
@@ -81,7 +87,7 @@ function fixture() {
     saveKnowledgeProjectRuntimeLink: (link) => { links.set(link.projectId, link); },
   };
   const service = new IdentityService(store, () => NOW, () => AGENT_CREDENTIAL_ID, () => "b".repeat(64));
-  return { service, credentials, grants };
+  return { service, principals, credentials, grants };
 }
 
 function expectCode(operation: () => unknown, code: IdentityError["code"]): void {
@@ -89,6 +95,21 @@ function expectCode(operation: () => unknown, code: IdentityError["code"]): void
 }
 
 describe("IdentityService", () => {
+  it("bootstraps exactly one short-lived owner session", () => {
+    const { service, principals, credentials } = fixture();
+    principals.delete("owner-1");
+    credentials.delete(OWNER_CREDENTIAL_ID);
+
+    const result = service.bootstrapOwnerSession({ label: "First owner", sessionLifetimeSeconds: 300 });
+    expect(result).toMatchObject({
+      principalId: AGENT_CREDENTIAL_ID,
+      credential: { kind: "owner_session", label: "First owner", expiresAt: "2026-09-13T12:05:00.000Z" },
+    });
+    expect(result.token).toMatch(/^wts_[0-9a-f-]{36}_[0-9a-f]{64}$/);
+    expect(credentials.get(result.credential.id)?.verifierHash).toBe(hash(result.token));
+    expectCode(() => service.bootstrapOwnerSession(), "owner_already_initialized");
+  });
+
   it("authenticates a bearer and gives malformed or unknown values one error", () => {
     const { service, credentials } = fixture();
     expect(service.authenticateBearer(OWNER_TOKEN)).toEqual({

@@ -11,6 +11,7 @@ import type {
 export type IdentityErrorCode =
   | "invalid_credential"
   | "owner_authentication_required"
+  | "owner_already_initialized"
   | "principal_forbidden"
   | "knowledge_forbidden"
   | "invalid_request";
@@ -29,6 +30,17 @@ export interface IssueAgentTokenInput {
 }
 
 export interface IssuedAgentToken {
+  credential: PrincipalCredential;
+  token: string;
+}
+
+export interface BootstrapOwnerInput {
+  label?: string;
+  sessionLifetimeSeconds?: number;
+}
+
+export interface BootstrappedOwner {
+  principalId: string;
   credential: PrincipalCredential;
   token: string;
 }
@@ -76,6 +88,25 @@ export class IdentityService {
     private readonly id: () => string = randomUUID,
     private readonly secret: () => string = () => randomBytes(32).toString("hex"),
   ) {}
+
+  bootstrapOwnerSession(input: BootstrapOwnerInput = {}): BootstrappedOwner {
+    const lifetime = input.sessionLifetimeSeconds ?? 900;
+    if (!Number.isInteger(lifetime) || lifetime < 60 || lifetime > 3600) {
+      throw new IdentityError("invalid_request", "Sesja bootstrap musi trwać od 60 do 3600 sekund.");
+    }
+    const label = (input.label ?? "Local owner bootstrap").trim();
+    if (!label || label.length > 120) {
+      throw new IdentityError("invalid_request", "Etykieta sesji musi mieć od 1 do 120 znaków.");
+    }
+    const now = this.clock();
+    const expiresAt = new Date(Date.parse(now) + lifetime * 1000).toISOString();
+    const principal = { id: this.id(), kind: "owner" as const, status: "active" as const };
+    const issued = this.createTokenRecord(principal.id, "owner_session", label, now, expiresAt);
+    if (!this.store.createFirstOwner(principal, issued.record, "local-bootstrap")) {
+      throw new IdentityError("owner_already_initialized", "Właściciel został już zainicjalizowany.");
+    }
+    return { principalId: principal.id, credential: publicCredential(issued.record), token: issued.token };
+  }
 
   authenticateBearer(token: string): AuthenticatedPrincipal {
     const parsed = parseToken(token);
@@ -129,25 +160,9 @@ export class IdentityService {
       throw new IdentityError("invalid_request", "Data wygaśnięcia musi być w przyszłości.");
     }
 
-    const credentialId = this.id();
-    const secret = this.secret();
-    if (!/^[0-9a-f]{64}$/.test(secret)) throw new Error("Generator tokenu nie zwrócił 256-bitowego sekretu.");
-    const token = `${TOKEN_PREFIX}_${credentialId}_${secret}`;
-    const record: CredentialAuthenticationRecord = {
-      id: credentialId,
-      principalId: principal.id,
-      kind: "agent_token",
-      label,
-      tokenPrefix: `${TOKEN_PREFIX}_${credentialId}_${secret.slice(0, 8)}`,
-      verifierHash: hashToken(token).toString("hex"),
-      status: "active",
-      expiresAt: input.expiresAt ?? null,
-      createdAt: now,
-      revokedAt: null,
-      lastUsedAt: null,
-    };
-    this.store.saveCredential(record, actor.principalId);
-    return { credential: publicCredential(record), token };
+    const issued = this.createTokenRecord(principal.id, "agent_token", label, now, input.expiresAt ?? null);
+    this.store.saveCredential(issued.record, actor.principalId);
+    return { credential: publicCredential(issued.record), token: issued.token };
   }
 
   revokeCredential(credentialId: string, actor: AuthenticatedPrincipal): void {
@@ -203,5 +218,34 @@ export class IdentityService {
     ) {
       throw new IdentityError("invalid_credential", "Nieprawidłowe lub nieaktywne poświadczenie.");
     }
+  }
+
+  private createTokenRecord(
+    principalId: string,
+    kind: CredentialAuthenticationRecord["kind"],
+    label: string,
+    createdAt: string,
+    expiresAt: string | null,
+  ): { record: CredentialAuthenticationRecord; token: string } {
+    const credentialId = this.id();
+    const secret = this.secret();
+    if (!/^[0-9a-f]{64}$/.test(secret)) throw new Error("Generator tokenu nie zwrócił 256-bitowego sekretu.");
+    const token = `${TOKEN_PREFIX}_${credentialId}_${secret}`;
+    return {
+      token,
+      record: {
+        id: credentialId,
+        principalId,
+        kind,
+        label,
+        tokenPrefix: `${TOKEN_PREFIX}_${credentialId}_${secret.slice(0, 8)}`,
+        verifierHash: hashToken(token).toString("hex"),
+        status: "active",
+        expiresAt,
+        createdAt,
+        revokedAt: null,
+        lastUsedAt: null,
+      },
+    };
   }
 }

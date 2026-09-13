@@ -125,6 +125,32 @@ export class IdentityQueries implements IdentityStore {
     })();
   }
 
+  createFirstOwner(principal: Principal, credential: CredentialAuthenticationRecord, actor: string): boolean {
+    return this.database.transaction(() => {
+      const existing = this.database.prepare("SELECT 1 FROM remote_principals WHERE kind = 'owner' LIMIT 1").get();
+      if (existing) return false;
+      this.database.prepare("INSERT INTO remote_principals(id, kind, status) VALUES (?, 'owner', 'active')")
+        .run(principal.id);
+      this.database.prepare(`
+        INSERT INTO principal_credentials(
+          id, principal_id, kind, label, token_prefix, verifier_hash, status,
+          expires_at, created_at, revoked_at, last_used_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        credential.id, credential.principalId, credential.kind, credential.label,
+        credential.tokenPrefix, credential.verifierHash, credential.status,
+        credential.expiresAt, credential.createdAt, credential.revokedAt, credential.lastUsedAt,
+      );
+      this.audit("identity.owner_bootstrapped", actor, {
+        principalId: principal.id,
+        credentialId: credential.id,
+        tokenPrefix: credential.tokenPrefix,
+        expiresAt: credential.expiresAt,
+      });
+      return true;
+    }).immediate();
+  }
+
   listPrincipalCredentials(principalId: string): PrincipalCredential[] {
     return (this.database.prepare(`
       SELECT * FROM principal_credentials WHERE principal_id = ? ORDER BY created_at, id

@@ -17,6 +17,7 @@ import {
   validatePublicControllerBackend,
 } from "./controller-addresses";
 import { writeCliLine } from "./output";
+import { runIdentityCommand } from "./identity-management";
 import { pairingUrl } from "./pairing-url";
 import { openProjectGateway, runDoctorCommand, runProjectCommand } from "./project-management";
 import { localDashboardEndpoint, publicDashboardEndpoint, readServiceAccess, removeServiceAccess, writeServiceAccess } from "./service-access";
@@ -60,6 +61,10 @@ async function main(): Promise<void> {
   }
   if (command === "config" && process.argv[3] === "path") {
     writeCliLine(paths.databasePath);
+    return;
+  }
+  if (command === "identity") {
+    runIdentityCommand(process.argv.slice(3), paths, { write: writeCliLine });
     return;
   }
   if (command === "project" || command === "doctor") {

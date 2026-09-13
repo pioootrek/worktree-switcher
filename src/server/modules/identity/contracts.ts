@@ -71,6 +71,7 @@ export interface IdentityStore {
   savePrincipal(principal: Principal, actor: string): void;
   getCredentialForAuthentication(id: string): CredentialAuthenticationRecord | null;
   saveCredential(credential: CredentialAuthenticationRecord, actor: string): void;
+  createFirstOwner(principal: Principal, credential: CredentialAuthenticationRecord, actor: string): boolean;
   listPrincipalCredentials(principalId: string): PrincipalCredential[];
   revokeCredential(id: string, revokedAt: string, actor: string): boolean;
   recordCredentialUsed(id: string, usedAt: string): void;
