@@ -30,6 +30,7 @@ import { EventStream } from "../server/events";
 import { FileLogWriter } from "../server/log-writer";
 import { ProjectLifecycle } from "../server/modules/lifecycle";
 import { IdentityService } from "../server/modules/identity";
+import { KnowledgeService } from "../server/modules/knowledge";
 import { createMcpControllerServer } from "../server/mcp-http-server";
 import { SystemGitWorktreeReader } from "../server/git-worktrees";
 import { createControllerServer } from "../server/http-server";
@@ -126,8 +127,9 @@ async function main(): Promise<void> {
     kinds: ["tests", "controller"],
     ...(projectId ? { projectIds: [projectId] } : {}),
   }));
-  const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs, undefined, storage, undefined, undefined, tests, lifecycle);
   const identity = new IdentityService(store);
+  const knowledge = new KnowledgeService(store, identity);
+  const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs, undefined, storage, undefined, undefined, tests, lifecycle, knowledge);
   const accessToken = randomBytes(32).toString("base64url");
   const sessionId = randomBytes(8).toString("hex");
   const mcpSessions = new Set<string>();

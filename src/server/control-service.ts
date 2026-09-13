@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { DashboardQueryService } from "./modules/dashboard";
 import { EnvironmentService, redactProject } from "./modules/environments";
+import type { AuthenticatedPrincipal } from "./modules/identity";
+import { KnowledgeService, type KnowledgeHistoryEntry, type KnowledgeRecordKind, type KnowledgeTaskPriority, type KnowledgeTaskStatus, type KnowledgeWriteOptions } from "./modules/knowledge";
 import { leaseTokenHash, type OperationActor, ProjectLifecycle } from "./modules/lifecycle";
 import { RuntimeService } from "./modules/runtime";
 import { StatusService, type CompactProjectStatus, type CompactTestStatus, type CompactEnvelope } from "./modules/status";
@@ -74,6 +76,7 @@ export class ControlService {
     testCommands: ProjectTestCommandResolver = new ProjectTestCommandResolver(),
     private readonly tests?: TestJobManager,
     lifecycle?: ProjectLifecycle,
+    private readonly knowledge?: KnowledgeService,
   ) {
     this.lifecycle = lifecycle ?? new ProjectLifecycle(store, processes);
     this.storage?.assertLifecycle(this.lifecycle);
@@ -91,6 +94,63 @@ export class ControlService {
     });
     this.statusQueries = new StatusService(store, processes,
       () => this.lifecycle.capacityStatusCompact(), () => this.testQueueStatus());
+  }
+
+  knowledgeThreads(projectId: string, actor: AuthenticatedPrincipal, limit?: number) {
+    return this.requireKnowledge().listThreads(projectId, actor, limit);
+  }
+
+  knowledgeThread(projectId: string, threadId: string, actor: AuthenticatedPrincipal) {
+    return this.requireKnowledge().thread(projectId, threadId, actor);
+  }
+
+  knowledgeReplies(projectId: string, threadId: string, actor: AuthenticatedPrincipal, limit?: number) {
+    return this.requireKnowledge().listReplies(projectId, threadId, actor, limit);
+  }
+
+  knowledgeTasks(projectId: string, actor: AuthenticatedPrincipal, limit?: number) {
+    return this.requireKnowledge().listTasks(projectId, actor, limit);
+  }
+
+  knowledgeTask(projectId: string, taskId: string, actor: AuthenticatedPrincipal) {
+    return this.requireKnowledge().task(projectId, taskId, actor);
+  }
+
+  knowledgeRelations(projectId: string, recordKind: KnowledgeRecordKind, recordId: string, actor: AuthenticatedPrincipal) {
+    return this.requireKnowledge().relations(projectId, recordKind, recordId, actor);
+  }
+
+  knowledgeHistory(projectId: string, recordKind: KnowledgeHistoryEntry["recordKind"], recordId: string, actor: AuthenticatedPrincipal) {
+    return this.requireKnowledge().history(projectId, recordKind, recordId, actor);
+  }
+
+  createKnowledgeThread(projectId: string, input: { title: string; body: string }, options: KnowledgeWriteOptions, actor: AuthenticatedPrincipal) {
+    return this.requireKnowledge().createThread(projectId, input, options, actor);
+  }
+
+  createKnowledgeReply(projectId: string, threadId: string, input: { body: string }, options: KnowledgeWriteOptions, actor: AuthenticatedPrincipal) {
+    return this.requireKnowledge().createReply(projectId, threadId, input, options, actor);
+  }
+
+  createKnowledgeTaskFromThread(projectId: string, threadId: string, input: { title: string; description: string; priority?: KnowledgeTaskPriority }, options: KnowledgeWriteOptions, actor: AuthenticatedPrincipal) {
+    return this.requireKnowledge().createTaskFromThread(projectId, threadId, input, options, actor);
+  }
+
+  updateKnowledgeTask(projectId: string, taskId: string, input: { title: string; description: string; status: KnowledgeTaskStatus; priority: KnowledgeTaskPriority; expectedRevision: number }, options: KnowledgeWriteOptions, actor: AuthenticatedPrincipal) {
+    return this.requireKnowledge().updateTask(projectId, taskId, input, options, actor);
+  }
+
+  archiveKnowledgeProject(projectId: string, expectedRevision: number, options: KnowledgeWriteOptions, actor: AuthenticatedPrincipal) {
+    return this.requireKnowledge().archiveProject(projectId, expectedRevision, options, actor);
+  }
+
+  setKnowledgeProjectRuntimeLink(projectId: string, runtimeProjectId: string | null, options: KnowledgeWriteOptions, actor: AuthenticatedPrincipal) {
+    return this.requireKnowledge().setRuntimeLink(projectId, runtimeProjectId, options, actor);
+  }
+
+  private requireKnowledge(): KnowledgeService {
+    if (!this.knowledge) throw new Error("Serwis wiedzy nie jest dostępny.");
+    return this.knowledge;
   }
 
   async dashboard(): Promise<DashboardResponse> {

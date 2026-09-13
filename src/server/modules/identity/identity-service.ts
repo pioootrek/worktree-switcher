@@ -310,7 +310,6 @@ export class IdentityService {
     const grant = this.store.getKnowledgeProjectGrant(actor.principalId, projectId);
     if (
       !project
-      || project.status !== "active"
       || !grant
       || grant.revokedAt !== null
       || !grant.permissions.includes(permission)
