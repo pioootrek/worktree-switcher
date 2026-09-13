@@ -41,14 +41,14 @@ describe("knowledge service SQLite flow", () => {
     service.createReply("project-1", thread.id, { body: "Confirmed" }, { idempotencyKey: "reply-key" }, actor);
     const created = service.createTaskFromThread("project-1", thread.id, { title: "Act", description: "Do it", priority: "now" }, { idempotencyKey: "task-key" }, actor);
     expect(created.replayed).toBe(false);
-    expect(service.relations("project-1", "thread", thread.id, actor)).toEqual([created.value.relation]);
-    expect(store.listHistory("project-1", "task", created.value.task.id)).toHaveLength(1);
+    expect(service.relations("project-1", "thread", thread.id, actor).items).toEqual([created.value.relation]);
+    expect(store.listHistory("project-1", "task", created.value.task.id, 25, 0).items).toHaveLength(1);
     store.close();
 
     const reopened = new SqliteStateStore(path);
-    expect(reopened.listThreads("project-1", 25)).toEqual([thread]);
-    expect(reopened.listReplies("project-1", thread.id, 25)).toHaveLength(1);
-    expect(reopened.listTasks("project-1", 25)[0]).toMatchObject({ id: "task-1", revision: 1 });
+    expect(reopened.listThreads("project-1", 25, 0).items).toEqual([thread]);
+    expect(reopened.listReplies("project-1", thread.id, 25, 0).items).toHaveLength(1);
+    expect(reopened.listTasks("project-1", 25, 0).items[0]).toMatchObject({ id: "task-1", revision: 1 });
     reopened.close();
   });
 
@@ -57,7 +57,7 @@ describe("knowledge service SQLite flow", () => {
     const first = service.createThread("project-1", { title: "Finding", body: "Evidence" }, { idempotencyKey: "same" }, actor);
     const replay = service.createThread("project-1", { title: "Finding", body: "Evidence" }, { idempotencyKey: "same" }, actor);
     expect(replay).toEqual({ value: first.value, replayed: true });
-    expect(store.listThreads("project-1", 25)).toHaveLength(1);
+    expect(store.listThreads("project-1", 25, 0).items).toHaveLength(1);
     expect(() => service.createThread("project-1", { title: "Changed", body: "Evidence" }, { idempotencyKey: "same" }, actor))
       .toThrowError(expect.objectContaining({ code: "idempotency_conflict" }));
     store.close();
@@ -71,16 +71,21 @@ describe("knowledge service SQLite flow", () => {
     expect(() => service.updateTask("project-1", task.id, { title: "Act", description: "Stale", priority: "later", status: "blocked", expectedRevision: 1 }, { idempotencyKey: "update-2" }, actor))
       .toThrowError(expect.objectContaining<Partial<KnowledgeError>>({ code: "revision_conflict", currentRevision: 2 }));
     expect(store.getTask("project-1", task.id)).toMatchObject({ description: "Second", revision: 2 });
-    expect(store.listHistory("project-1", "task", task.id)).toHaveLength(2);
+    expect(store.listHistory("project-1", "task", task.id, 25, 0).items).toHaveLength(2);
     store.close();
   });
 
   it("rolls back task creation when its relation cannot be inserted", () => {
-    const { store, service, actor } = setup(["thread-1", "task-1", "relation-1", "task-1", "relation-2"]);
+    const { store, service, actor } = setup(["thread-1", "task-1", "relation-1", "task-2", "relation-1"]);
     service.createThread("project-1", { title: "Finding", body: "Evidence" }, { idempotencyKey: "thread" }, actor);
     service.createTaskFromThread("project-1", "thread-1", { title: "First", description: "First" }, { idempotencyKey: "task-1" }, actor);
     expect(() => service.createTaskFromThread("project-1", "thread-1", { title: "Second", description: "Second" }, { idempotencyKey: "task-2" }, actor)).toThrow();
-    expect(store.listTasks("project-1", 25)).toHaveLength(1);
+    expect(store.listTasks("project-1", 25, 0).items).toHaveLength(1);
+    expect(store.getTask("project-1", "task-2")).toBeNull();
+    expect(store.listHistory("project-1", "task", "task-2", 25, 0).items).toEqual([]);
+    const retry = service.createTaskFromThread("project-1", "thread-1", { title: "Second", description: "Second" }, { idempotencyKey: "task-2" }, actor);
+    expect(retry.replayed).toBe(false);
+    expect(store.listTasks("project-1", 25, 0).items).toHaveLength(2);
     store.close();
   });
 
@@ -93,7 +98,7 @@ describe("knowledge service SQLite flow", () => {
     store.removeProject(runtime.id, "test");
 
     expect(store.getKnowledgeProjectRuntimeLink("project-1")).toMatchObject({ runtimeProjectId: null, unlinkedAt: expect.any(String) });
-    expect(store.listThreads("project-1", 25)).toHaveLength(1);
+    expect(store.listThreads("project-1", 25, 0).items).toHaveLength(1);
     store.close();
   });
 
@@ -101,15 +106,71 @@ describe("knowledge service SQLite flow", () => {
     const { store, service, actor } = setup();
     const first = store.addProject({ name: "First", repositoryPath: "/tmp/knowledge-runtime-first", port: 4322, executable: "pnpm", args: ["run", "dev"] });
     const second = store.addProject({ name: "Second", repositoryPath: "/tmp/knowledge-runtime-second", port: 4323, executable: "pnpm", args: ["run", "dev"] });
-    service.setRuntimeLink("project-1", first.id, { idempotencyKey: "link-first" }, actor);
-    expect(service.setRuntimeLink("project-1", second.id, { idempotencyKey: "link-second" }, actor).value.runtimeProjectId).toBe(second.id);
+    service.setRuntimeLink("project-1", first.id, 1, { idempotencyKey: "link-first" }, actor);
+    expect(() => service.setRuntimeLink("project-1", second.id, 1, { idempotencyKey: "stale-link" }, actor))
+      .toThrowError(expect.objectContaining({ code: "revision_conflict", currentRevision: 2 }));
+    expect(service.setRuntimeLink("project-1", second.id, 2, { idempotencyKey: "link-second" }, actor).value.link.runtimeProjectId).toBe(second.id);
 
-    const archived = service.archiveProject("project-1", 1, { idempotencyKey: "archive" }, actor);
-    expect(archived.value).toMatchObject({ status: "archived", revision: 2 });
-    expect(service.archiveProject("project-1", 1, { idempotencyKey: "archive" }, actor)).toEqual({ ...archived, replayed: true });
-    expect(service.listThreads("project-1", actor)).toEqual([]);
+    const archived = service.archiveProject("project-1", 3, { idempotencyKey: "archive" }, actor);
+    expect(archived.value).toMatchObject({ status: "archived", revision: 4 });
+    expect(service.archiveProject("project-1", 3, { idempotencyKey: "archive" }, actor)).toEqual({ ...archived, replayed: true });
+    expect(service.listThreads("project-1", actor).items).toEqual([]);
     expect(() => service.createThread("project-1", { title: "No", body: "No" }, { idempotencyKey: "blocked" }, actor))
       .toThrowError(expect.objectContaining({ code: "invalid_request" }));
+    const restored = service.restoreProject("project-1", 4, { idempotencyKey: "restore" }, actor);
+    expect(restored.value).toMatchObject({ status: "active", revision: 5 });
+    expect(service.createThread("project-1", { title: "Again", body: "Allowed" }, { idempotencyKey: "after-restore" }, actor).value.title).toBe("Again");
+    store.close();
+  });
+
+  it("replays semantically identical updates regardless of input property order", () => {
+    const { store, service, actor } = setup(["thread-1", "task-1", "relation-1"]);
+    service.createThread("project-1", { title: "Finding", body: "Evidence" }, { idempotencyKey: "thread" }, actor);
+    service.createTaskFromThread("project-1", "thread-1", { title: "Task", description: "Before" }, { idempotencyKey: "task" }, actor);
+    const first = service.updateTask("project-1", "task-1", { title: "Task", description: "After", status: "done", priority: "now", expectedRevision: 1 }, { idempotencyKey: "update" }, actor);
+    const reordered = { expectedRevision: 1, priority: "now" as const, status: "done" as const, description: "After", title: "Task" };
+    expect(service.updateTask("project-1", "task-1", reordered, { idempotencyKey: "update" }, actor)).toEqual({ ...first, replayed: true });
+    store.close();
+  });
+
+  it("paginates more than 100 replies without gaps or duplicates", () => {
+    const ids = ["thread-1", ...Array.from({ length: 101 }, (_, index) => `reply-${index + 1}`)];
+    const { store, service, actor } = setup(ids);
+    service.createThread("project-1", { title: "Thread", body: "Body" }, { idempotencyKey: "thread" }, actor);
+    for (let index = 0; index < 101; index += 1) {
+      service.createReply("project-1", "thread-1", { body: `Reply ${index + 1}` }, { idempotencyKey: `reply-${index + 1}` }, actor);
+    }
+    const first = service.listReplies("project-1", "thread-1", actor, { limit: 100 });
+    const second = service.listReplies("project-1", "thread-1", actor, { limit: 100, offset: first.nextOffset! });
+    expect(first.items).toHaveLength(100);
+    expect(second.items).toHaveLength(1);
+    expect(new Set([...first.items, ...second.items].map(({ id }) => id)).size).toBe(101);
+    expect(second.nextOffset).toBeNull();
+    store.close();
+  });
+
+  it("paginates relation and history reads", () => {
+    const { store, service, actor } = setup(["thread-1", "task-1", "relation-1"]);
+    service.createThread("project-1", { title: "Thread", body: "Body" }, { idempotencyKey: "thread" }, actor);
+    service.createTaskFromThread("project-1", "thread-1", { title: "Task", description: "First" }, { idempotencyKey: "task" }, actor);
+    service.updateTask("project-1", "task-1", { title: "Task", description: "Second", status: "in_progress", priority: "next", expectedRevision: 1 }, { idempotencyKey: "update" }, actor);
+
+    expect(service.relations("project-1", "thread", "thread-1", actor, { limit: 1 })).toMatchObject({ items: [{ id: "relation-1" }], nextOffset: null });
+    const first = service.history("project-1", "task", "task-1", actor, { limit: 1 });
+    const second = service.history("project-1", "task", "task-1", actor, { limit: 1, offset: first.nextOffset! });
+    expect(first.items).toHaveLength(1);
+    expect(first.nextOffset).toBe(1);
+    expect(second.items).toHaveLength(1);
+    expect(second.nextOffset).toBeNull();
+    expect(first.items[0]?.id).not.toBe(second.items[0]?.id);
+    store.close();
+  });
+
+  it("replays a successful write after the project is archived", () => {
+    const { store, service, actor } = setup(["thread-1", "unused"]);
+    const first = service.createThread("project-1", { title: "Saved", body: "Body" }, { idempotencyKey: "thread" }, actor);
+    service.archiveProject("project-1", 1, { idempotencyKey: "archive" }, actor);
+    expect(service.createThread("project-1", { title: "Saved", body: "Body" }, { idempotencyKey: "thread" }, actor)).toEqual({ ...first, replayed: true });
     store.close();
   });
 });

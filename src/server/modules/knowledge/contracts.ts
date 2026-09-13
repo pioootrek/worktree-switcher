@@ -78,19 +78,35 @@ export interface KnowledgeMutationResult<T> {
   replayed: boolean;
 }
 
+export interface KnowledgePage<T> {
+  items: T[];
+  nextOffset: number | null;
+}
+
+export interface KnowledgePageOptions {
+  limit?: number;
+  offset?: number;
+}
+
+export interface KnowledgeRuntimeLinkResult {
+  link: KnowledgeProjectRuntimeLink;
+  project: KnowledgeProject;
+}
+
 export interface KnowledgeStore {
   getKnowledgeProject(id: string): KnowledgeProject | null;
-  listThreads(projectId: string, limit: number): KnowledgeThread[];
+  findIdempotentResult<T>(operation: string, context: KnowledgeMutationContext): KnowledgeMutationResult<T> | null;
+  listThreads(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeThread>;
   getThread(projectId: string, id: string): KnowledgeThread | null;
-  listReplies(projectId: string, threadId: string, limit: number): KnowledgeReply[];
-  listRelations(projectId: string, recordKind: KnowledgeRecordKind, recordId: string): KnowledgeRelation[];
+  listReplies(projectId: string, threadId: string, limit: number, offset: number): KnowledgePage<KnowledgeReply>;
+  listRelations(projectId: string, recordKind: KnowledgeRecordKind, recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeRelation>;
   getTask(projectId: string, id: string): KnowledgeTask | null;
-  listTasks(projectId: string, limit: number): KnowledgeTask[];
-  listHistory(projectId: string, recordKind: KnowledgeHistoryEntry["recordKind"], recordId: string): KnowledgeHistoryEntry[];
+  listTasks(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeTask>;
+  listHistory(projectId: string, recordKind: KnowledgeHistoryEntry["recordKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeHistoryEntry>;
   createThread(thread: KnowledgeThread, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeThread>;
   createReply(reply: KnowledgeReply, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeReply>;
   createTaskFromThread(task: KnowledgeTask, relation: KnowledgeRelation, context: KnowledgeMutationContext): KnowledgeMutationResult<{ task: KnowledgeTask; relation: KnowledgeRelation }>;
   updateTask(task: KnowledgeTask, expectedRevision: number, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeTask>;
   updateKnowledgeProject(project: KnowledgeProject, expectedRevision: number, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeProject>;
-  setKnowledgeProjectRuntimeLink(link: KnowledgeProjectRuntimeLink, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeProjectRuntimeLink>;
+  setKnowledgeProjectRuntimeLink(link: KnowledgeProjectRuntimeLink, expectedRevision: number, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeRuntimeLinkResult>;
 }

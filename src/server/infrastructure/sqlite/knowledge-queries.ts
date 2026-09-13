@@ -5,8 +5,10 @@ import {
   type KnowledgeHistoryEntry,
   type KnowledgeMutationContext,
   type KnowledgeMutationResult,
+  type KnowledgePage,
   type KnowledgeRelation,
   type KnowledgeReply,
+  type KnowledgeRuntimeLinkResult,
   type KnowledgeStore,
   type KnowledgeTask,
   type KnowledgeThread,
@@ -33,28 +35,37 @@ export class KnowledgeQueries implements KnowledgeStore {
     return row ? { id: row.id, name: row.name, status: row.status, revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at } : null;
   }
 
-  listThreads(projectId: string, limit: number): KnowledgeThread[] {
-    return (this.database.prepare("SELECT * FROM knowledge_threads WHERE project_id = ? ORDER BY updated_at DESC, id LIMIT ?").all(projectId, limit) as ThreadRow[]).map(mapThread);
+  listThreads(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeThread> {
+    return this.page((this.database.prepare("SELECT * FROM knowledge_threads WHERE project_id = ? ORDER BY updated_at DESC, id LIMIT ? OFFSET ?").all(projectId, limit + 1, offset) as ThreadRow[]).map(mapThread), limit, offset);
   }
   getThread(projectId: string, id: string): KnowledgeThread | null {
     const row = this.database.prepare("SELECT * FROM knowledge_threads WHERE project_id = ? AND id = ?").get(projectId, id) as ThreadRow | undefined;
     return row ? mapThread(row) : null;
   }
-  listReplies(projectId: string, threadId: string, limit: number): KnowledgeReply[] {
-    return (this.database.prepare("SELECT * FROM knowledge_replies WHERE project_id = ? AND thread_id = ? ORDER BY created_at, id LIMIT ?").all(projectId, threadId, limit) as ReplyRow[]).map(mapReply);
+  listReplies(projectId: string, threadId: string, limit: number, offset: number): KnowledgePage<KnowledgeReply> {
+    return this.page((this.database.prepare("SELECT * FROM knowledge_replies WHERE project_id = ? AND thread_id = ? ORDER BY created_at, id LIMIT ? OFFSET ?").all(projectId, threadId, limit + 1, offset) as ReplyRow[]).map(mapReply), limit, offset);
   }
-  listRelations(projectId: string, recordKind: KnowledgeRelation["sourceKind"], recordId: string): KnowledgeRelation[] {
-    return (this.database.prepare(`SELECT * FROM knowledge_relations WHERE project_id = ? AND ((source_kind = ? AND source_id = ?) OR (target_kind = ? AND target_id = ?)) ORDER BY created_at, id`).all(projectId, recordKind, recordId, recordKind, recordId) as RelationRow[]).map((row) => ({ id: row.id, projectId: row.project_id, type: row.type, sourceKind: row.source_kind, sourceId: row.source_id, targetKind: row.target_kind, targetId: row.target_id, revision: row.revision, createdBy: row.created_by, createdAt: row.created_at }));
+  listRelations(projectId: string, recordKind: KnowledgeRelation["sourceKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeRelation> {
+    const rows = (this.database.prepare(`SELECT * FROM knowledge_relations WHERE project_id = ? AND ((source_kind = ? AND source_id = ?) OR (target_kind = ? AND target_id = ?)) ORDER BY created_at, id LIMIT ? OFFSET ?`).all(projectId, recordKind, recordId, recordKind, recordId, limit + 1, offset) as RelationRow[]).map((row) => ({ id: row.id, projectId: row.project_id, type: row.type, sourceKind: row.source_kind, sourceId: row.source_id, targetKind: row.target_kind, targetId: row.target_id, revision: row.revision, createdBy: row.created_by, createdAt: row.created_at }));
+    return this.page(rows, limit, offset);
   }
   getTask(projectId: string, id: string): KnowledgeTask | null {
     const row = this.database.prepare("SELECT * FROM knowledge_tasks WHERE project_id = ? AND id = ?").get(projectId, id) as TaskRow | undefined;
     return row ? mapTask(row) : null;
   }
-  listTasks(projectId: string, limit: number): KnowledgeTask[] {
-    return (this.database.prepare("SELECT * FROM knowledge_tasks WHERE project_id = ? ORDER BY updated_at DESC, id LIMIT ?").all(projectId, limit) as TaskRow[]).map(mapTask);
+  listTasks(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeTask> {
+    return this.page((this.database.prepare("SELECT * FROM knowledge_tasks WHERE project_id = ? ORDER BY updated_at DESC, id LIMIT ? OFFSET ?").all(projectId, limit + 1, offset) as TaskRow[]).map(mapTask), limit, offset);
   }
-  listHistory(projectId: string, recordKind: KnowledgeHistoryEntry["recordKind"], recordId: string): KnowledgeHistoryEntry[] {
-    return (this.database.prepare("SELECT * FROM knowledge_history WHERE project_id = ? AND record_kind = ? AND record_id = ? ORDER BY id").all(projectId, recordKind, recordId) as HistoryRow[]).map((row) => ({ id: row.id, projectId: row.project_id, recordKind: row.record_kind, recordId: row.record_id, operation: row.operation, previousJson: row.previous_json, principalId: row.principal_id, authenticationMethod: row.authentication_method, revision: row.revision, createdAt: row.created_at }));
+  listHistory(projectId: string, recordKind: KnowledgeHistoryEntry["recordKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeHistoryEntry> {
+    const rows = (this.database.prepare("SELECT * FROM knowledge_history WHERE project_id = ? AND record_kind = ? AND record_id = ? ORDER BY id LIMIT ? OFFSET ?").all(projectId, recordKind, recordId, limit + 1, offset) as HistoryRow[]).map((row) => ({ id: row.id, projectId: row.project_id, recordKind: row.record_kind, recordId: row.record_id, operation: row.operation, previousJson: row.previous_json, principalId: row.principal_id, authenticationMethod: row.authentication_method, revision: row.revision, createdAt: row.created_at }));
+    return this.page(rows, limit, offset);
+  }
+
+  findIdempotentResult<T>(operation: string, context: KnowledgeMutationContext): KnowledgeMutationResult<T> | null {
+    const previous = this.database.prepare(`SELECT request_hash, result_json FROM knowledge_idempotency WHERE principal_id = ? AND project_id = ? AND operation = ? AND idempotency_key = ?`).get(context.actor.principalId, context.projectId, operation, context.idempotencyKey) as IdempotencyRow | undefined;
+    if (!previous) return null;
+    if (previous.request_hash !== context.requestHash) throw new KnowledgeError("idempotency_conflict", "Klucz idempotencji został użyty z inną treścią.");
+    return { value: JSON.parse(previous.result_json) as T, replayed: true };
   }
 
   createThread(thread: KnowledgeThread, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeThread> {
@@ -99,23 +110,30 @@ export class KnowledgeQueries implements KnowledgeStore {
   }
 
   updateKnowledgeProject(project: KnowledgeProject, expectedRevision: number, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeProject> {
-    return this.mutate("project.archive", context, () => {
+    const operation = project.status === "active" ? "project.restore" : "project.archive";
+    return this.mutate(operation, context, () => {
       const previous = this.getKnowledgeProject(project.id);
       const result = this.database.prepare("UPDATE knowledge_projects SET name = ?, status = ?, revision = ?, updated_at = ? WHERE id = ? AND revision = ?")
         .run(project.name, project.status, project.revision, project.updatedAt, project.id, expectedRevision);
       if (result.changes === 0) throw new KnowledgeError("revision_conflict", "Rewizja projektu wiedzy uległa zmianie.", this.getKnowledgeProject(project.id)?.revision);
-      this.history(project.id, "project", project.id, "archived", JSON.stringify(previous), project.revision, context, project.updatedAt);
+      this.history(project.id, "project", project.id, project.status === "archived" ? "archived" : "updated", JSON.stringify(previous), project.revision, context, project.updatedAt);
       return project;
     });
   }
 
-  setKnowledgeProjectRuntimeLink(link: KnowledgeProjectRuntimeLink, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeProjectRuntimeLink> {
+  setKnowledgeProjectRuntimeLink(link: KnowledgeProjectRuntimeLink, expectedRevision: number, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeRuntimeLinkResult> {
     return this.mutate("project.runtime_link", context, () => {
+      const project = this.getKnowledgeProject(link.projectId);
+      if (!project) throw new KnowledgeError("not_found", "Nie znaleziono projektu wiedzy.");
       const previous = this.database.prepare("SELECT runtime_project_id FROM knowledge_project_runtime_links WHERE knowledge_project_id = ?").get(link.projectId) as { runtime_project_id: string | null } | undefined;
+      const revision = expectedRevision + 1;
+      const updated = this.database.prepare("UPDATE knowledge_projects SET revision = ?, updated_at = ? WHERE id = ? AND revision = ?")
+        .run(revision, link.linkedAt, link.projectId, expectedRevision);
+      if (updated.changes === 0) throw new KnowledgeError("revision_conflict", "Rewizja projektu wiedzy uległa zmianie.", this.getKnowledgeProject(link.projectId)?.revision);
       this.database.prepare(`INSERT INTO knowledge_project_runtime_links(knowledge_project_id, runtime_project_id, linked_at, unlinked_at) VALUES (?, ?, ?, ?) ON CONFLICT(knowledge_project_id) DO UPDATE SET runtime_project_id = excluded.runtime_project_id, linked_at = excluded.linked_at, unlinked_at = excluded.unlinked_at`)
         .run(link.projectId, link.runtimeProjectId, link.linkedAt, link.unlinkedAt);
-      this.history(link.projectId, "project", link.projectId, link.runtimeProjectId === null ? "unlinked" : "linked", previous ? JSON.stringify(previous) : null, this.getKnowledgeProject(link.projectId)?.revision ?? 1, context, link.linkedAt);
-      return link;
+      this.history(link.projectId, "project", link.projectId, link.runtimeProjectId === null ? "unlinked" : "linked", previous ? JSON.stringify(previous) : null, revision, context, link.linkedAt);
+      return { link, project: { ...project, revision, updatedAt: link.linkedAt } };
     });
   }
 
@@ -125,16 +143,17 @@ export class KnowledgeQueries implements KnowledgeStore {
 
   private mutate<T>(operation: string, context: KnowledgeMutationContext, work: () => T): KnowledgeMutationResult<T> {
     return this.database.transaction(() => {
-      const previous = this.database.prepare(`SELECT request_hash, result_json FROM knowledge_idempotency WHERE principal_id = ? AND project_id = ? AND operation = ? AND idempotency_key = ?`).get(context.actor.principalId, context.projectId, operation, context.idempotencyKey) as IdempotencyRow | undefined;
-      if (previous) {
-        if (previous.request_hash !== context.requestHash) throw new KnowledgeError("idempotency_conflict", "Klucz idempotencji został użyty z inną treścią.");
-        return { value: JSON.parse(previous.result_json) as T, replayed: true };
-      }
+      const previous = this.findIdempotentResult<T>(operation, context);
+      if (previous) return previous;
       const value = work();
       this.database.prepare(`INSERT INTO knowledge_idempotency(principal_id, project_id, operation, idempotency_key, request_hash, result_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
         .run(context.actor.principalId, context.projectId, operation, context.idempotencyKey, context.requestHash, JSON.stringify(value), new Date().toISOString());
       return { value, replayed: false };
     }).immediate();
+  }
+
+  private page<T>(rows: T[], limit: number, offset: number): KnowledgePage<T> {
+    return { items: rows.slice(0, limit), nextOffset: rows.length > limit ? offset + limit : null };
   }
 
   private history(projectId: string, recordKind: KnowledgeHistoryEntry["recordKind"], recordId: string, operation: KnowledgeHistoryEntry["operation"], previousJson: string | null, revision: number, context: KnowledgeMutationContext, createdAt: string): void {

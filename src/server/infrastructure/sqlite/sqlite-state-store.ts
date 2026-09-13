@@ -22,7 +22,7 @@ import type {
   Principal,
   PrincipalCredential,
 } from "@/server/modules/identity";
-import type { KnowledgeHistoryEntry, KnowledgeMutationContext, KnowledgeMutationResult, KnowledgeRelation, KnowledgeReply, KnowledgeStore, KnowledgeTask, KnowledgeThread } from "@/server/modules/knowledge";
+import type { KnowledgeHistoryEntry, KnowledgeMutationContext, KnowledgeMutationResult, KnowledgePage, KnowledgeRelation, KnowledgeReply, KnowledgeRuntimeLinkResult, KnowledgeStore, KnowledgeTask, KnowledgeThread } from "@/server/modules/knowledge";
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -441,32 +441,36 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
     this.identity.saveKnowledgeProjectRuntimeLink(link, actor);
   }
 
-  listThreads(projectId: string, limit: number): KnowledgeThread[] {
-    return this.knowledge.listThreads(projectId, limit);
+  findIdempotentResult<T>(operation: string, context: KnowledgeMutationContext): KnowledgeMutationResult<T> | null {
+    return this.knowledge.findIdempotentResult<T>(operation, context);
+  }
+
+  listThreads(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeThread> {
+    return this.knowledge.listThreads(projectId, limit, offset);
   }
 
   getThread(projectId: string, id: string): KnowledgeThread | null {
     return this.knowledge.getThread(projectId, id);
   }
 
-  listReplies(projectId: string, threadId: string, limit: number): KnowledgeReply[] {
-    return this.knowledge.listReplies(projectId, threadId, limit);
+  listReplies(projectId: string, threadId: string, limit: number, offset: number): KnowledgePage<KnowledgeReply> {
+    return this.knowledge.listReplies(projectId, threadId, limit, offset);
   }
 
-  listRelations(projectId: string, recordKind: KnowledgeRelation["sourceKind"], recordId: string): KnowledgeRelation[] {
-    return this.knowledge.listRelations(projectId, recordKind, recordId);
+  listRelations(projectId: string, recordKind: KnowledgeRelation["sourceKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeRelation> {
+    return this.knowledge.listRelations(projectId, recordKind, recordId, limit, offset);
   }
 
   getTask(projectId: string, id: string): KnowledgeTask | null {
     return this.knowledge.getTask(projectId, id);
   }
 
-  listTasks(projectId: string, limit: number): KnowledgeTask[] {
-    return this.knowledge.listTasks(projectId, limit);
+  listTasks(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeTask> {
+    return this.knowledge.listTasks(projectId, limit, offset);
   }
 
-  listHistory(projectId: string, recordKind: KnowledgeHistoryEntry["recordKind"], recordId: string): KnowledgeHistoryEntry[] {
-    return this.knowledge.listHistory(projectId, recordKind, recordId);
+  listHistory(projectId: string, recordKind: KnowledgeHistoryEntry["recordKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeHistoryEntry> {
+    return this.knowledge.listHistory(projectId, recordKind, recordId, limit, offset);
   }
 
   createThread(thread: KnowledgeThread, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeThread> {
@@ -489,8 +493,8 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
     return this.knowledge.updateKnowledgeProject(project, expectedRevision, context);
   }
 
-  setKnowledgeProjectRuntimeLink(link: KnowledgeProjectRuntimeLink, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeProjectRuntimeLink> {
-    return this.knowledge.setKnowledgeProjectRuntimeLink(link, context);
+  setKnowledgeProjectRuntimeLink(link: KnowledgeProjectRuntimeLink, expectedRevision: number, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeRuntimeLinkResult> {
+    return this.knowledge.setKnowledgeProjectRuntimeLink(link, expectedRevision, context);
   }
 
   getRemoteProjectIdentity(id: string): RemoteProjectIdentity | null {
