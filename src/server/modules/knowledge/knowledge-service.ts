@@ -96,7 +96,7 @@ export class KnowledgeService {
   }
 
   createThread(projectId: string, input: { title: string; body: string }, options: KnowledgeWriteOptions, actor: AuthenticatedPrincipal): KnowledgeMutationResult<KnowledgeThread> {
-    this.identity.authorizeKnowledge(actor, projectId, "knowledge:write");
+    this.identity.authorizeKnowledge(actor, projectId, "knowledge:write", { allowArchived: true });
     const title = this.text(input.title, "Tytuł", 200);
     const body = this.text(input.body, "Treść", 65_536);
     const context = this.context("thread.create", projectId, { title, body }, options, actor);
@@ -109,7 +109,7 @@ export class KnowledgeService {
   }
 
   createReply(projectId: string, threadId: string, input: { body: string }, options: KnowledgeWriteOptions, actor: AuthenticatedPrincipal): KnowledgeMutationResult<KnowledgeReply> {
-    this.identity.authorizeKnowledge(actor, projectId, "knowledge:write");
+    this.identity.authorizeKnowledge(actor, projectId, "knowledge:write", { allowArchived: true });
     const body = this.text(input.body, "Treść", 65_536);
     const context = this.context("reply.create", projectId, { threadId, body }, options, actor);
     const replay = this.store.findIdempotentResult<KnowledgeReply>("reply.create", context);
@@ -122,7 +122,7 @@ export class KnowledgeService {
   }
 
   createTaskFromThread(projectId: string, threadId: string, input: { title: string; description: string; priority?: KnowledgeTaskPriority }, options: KnowledgeWriteOptions, actor: AuthenticatedPrincipal): KnowledgeMutationResult<{ task: KnowledgeTask; relation: KnowledgeRelation }> {
-    this.identity.authorizeKnowledge(actor, projectId, "knowledge:write");
+    this.identity.authorizeKnowledge(actor, projectId, "knowledge:write", { allowArchived: true });
     const title = this.text(input.title, "Tytuł", 200);
     const description = this.text(input.description, "Opis", 65_536);
     const priority = input.priority ?? "later";
@@ -139,7 +139,7 @@ export class KnowledgeService {
   }
 
   updateTask(projectId: string, taskId: string, input: { title: string; description: string; status: KnowledgeTaskStatus; priority: KnowledgeTaskPriority; expectedRevision: number }, options: KnowledgeWriteOptions, actor: AuthenticatedPrincipal): KnowledgeMutationResult<KnowledgeTask> {
-    this.identity.authorizeKnowledge(actor, projectId, "knowledge:write");
+    this.identity.authorizeKnowledge(actor, projectId, "knowledge:write", { allowArchived: true });
     if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) throw new KnowledgeError("invalid_request", "Oczekiwana rewizja musi być dodatnia.");
     const title = this.text(input.title, "Tytuł", 200);
     const description = this.text(input.description, "Opis", 65_536);
@@ -165,7 +165,7 @@ export class KnowledgeService {
   }
 
   private setProjectStatus(projectId: string, status: KnowledgeProject["status"], expectedRevision: number, options: KnowledgeWriteOptions, actor: AuthenticatedPrincipal): KnowledgeMutationResult<KnowledgeProject> {
-    this.identity.authorizeKnowledge(actor, projectId, "knowledge:write");
+    this.identity.authorizeKnowledge(actor, projectId, "knowledge:write", { allowArchived: true });
     this.revision(expectedRevision);
     const operation = status === "active" ? "project.restore" : "project.archive";
     const context = this.context(operation, projectId, { expectedRevision }, options, actor);
@@ -173,16 +173,23 @@ export class KnowledgeService {
     if (replay) return replay;
     const current = this.store.getKnowledgeProject(projectId);
     if (!current) throw new KnowledgeError("not_found", "Nie znaleziono projektu wiedzy.");
+    if (status === "archived" && current.status !== "active") throw new KnowledgeError("invalid_request", "Projekt wiedzy jest już zarchiwizowany.");
     const project = { ...current, status, revision: expectedRevision + 1, updatedAt: this.clock() };
     return this.store.updateKnowledgeProject(project, expectedRevision, context);
   }
 
   setRuntimeLink(projectId: string, runtimeProjectId: string | null, expectedRevision: number, options: KnowledgeWriteOptions, actor: AuthenticatedPrincipal): KnowledgeMutationResult<KnowledgeRuntimeLinkResult> {
-    this.identity.authorizeKnowledge(actor, projectId, "knowledge:write");
+    this.identity.authorizeKnowledge(actor, projectId, "knowledge:write", { allowArchived: true });
     this.revision(expectedRevision);
     const context = this.context("project.runtime_link", projectId, { runtimeProjectId, expectedRevision }, options, actor);
     const replay = this.store.findIdempotentResult<KnowledgeRuntimeLinkResult>("project.runtime_link", context);
     if (replay) return replay;
+    this.requireActiveProject(projectId);
+    if (runtimeProjectId !== null) {
+      if (!this.store.hasRuntimeProject(runtimeProjectId)) throw new KnowledgeError("not_found", "Nie znaleziono projektu runtime.");
+      const owner = this.store.getRuntimeLinkOwner(runtimeProjectId);
+      if (owner !== null && owner !== projectId) throw new KnowledgeError("invalid_request", "Projekt runtime jest już powiązany z innym projektem wiedzy.");
+    }
     const now = this.clock();
     const link = { projectId, runtimeProjectId, linkedAt: now, unlinkedAt: runtimeProjectId === null ? now : null };
     return this.store.setKnowledgeProjectRuntimeLink(link, expectedRevision, context);

@@ -90,7 +90,7 @@ function fixture() {
     saveKnowledgeProjectRuntimeLink: (link) => { links.set(link.projectId, link); },
   };
   const service = new IdentityService(store, () => NOW, () => AGENT_CREDENTIAL_ID, () => "b".repeat(64));
-  return { service, principals, credentials, grants };
+  return { service, principals, credentials, projects, grants };
 }
 
 function expectCode(operation: () => unknown, code: IdentityError["code"]): void {
@@ -208,6 +208,19 @@ describe("IdentityService", () => {
     grants.set(`agent-1:project-a`, { ...grants.get(`agent-1:project-a`)!, revokedAt: null });
     credentials.set(AGENT_CREDENTIAL_ID, { ...credentials.get(AGENT_CREDENTIAL_ID)!, status: "revoked", revokedAt: NOW });
     expectCode(() => service.authorizeKnowledge(agent, "project-a", "knowledge:read"), "invalid_credential");
+  });
+
+  it("allows archived reads but denies writes unless the caller explicitly handles archived state", () => {
+    const { service, projects, grants } = fixture();
+    const owner = service.authenticateBearer(OWNER_TOKEN);
+    grants.set("owner-1:project-a", {
+      principalId: "owner-1", projectId: "project-a", permissions: ["knowledge:read", "knowledge:write"], revokedAt: null,
+    });
+    projects.set("project-a", { ...projects.get("project-a")!, status: "archived" });
+
+    expect(() => service.authorizeKnowledge(owner, "project-a", "knowledge:read")).not.toThrow();
+    expectCode(() => service.authorizeKnowledge(owner, "project-a", "knowledge:write"), "knowledge_forbidden");
+    expect(() => service.authorizeKnowledge(owner, "project-a", "knowledge:write", { allowArchived: true })).not.toThrow();
   });
 
   it("describes only the current credential and active grants of its principal", () => {

@@ -123,6 +123,28 @@ describe("knowledge service SQLite flow", () => {
     store.close();
   });
 
+  it("maps invalid runtime links to knowledge errors", () => {
+    const { store, service, actor } = setup();
+    expect(() => service.setRuntimeLink("project-1", "missing", 1, { idempotencyKey: "missing" }, actor))
+      .toThrowError(expect.objectContaining<Partial<KnowledgeError>>({ code: "not_found" }));
+
+    const runtime = store.addProject({ name: "Runtime", repositoryPath: "/tmp/knowledge-runtime-shared", port: 4324, executable: "pnpm", args: ["run", "dev"] });
+    service.setRuntimeLink("project-1", runtime.id, 1, { idempotencyKey: "first-link" }, actor);
+    store.saveKnowledgeProject({ id: "project-2", name: "Second", status: "active", revision: 1, createdAt: NOW, updatedAt: NOW }, "test");
+    store.saveKnowledgeProjectGrant({ principalId: "agent-1", projectId: "project-2", permissions: ["knowledge:read", "knowledge:write"], revokedAt: null }, "test");
+    expect(() => service.setRuntimeLink("project-2", runtime.id, 1, { idempotencyKey: "duplicate-link" }, actor))
+      .toThrowError(expect.objectContaining<Partial<KnowledgeError>>({ code: "invalid_request" }));
+    store.close();
+  });
+
+  it("rejects non-integer project revisions without corrupting state", () => {
+    const { store, service, actor } = setup();
+    expect(() => service.archiveProject("project-1", "1" as never, { idempotencyKey: "archive" }, actor))
+      .toThrowError(expect.objectContaining<Partial<KnowledgeError>>({ code: "invalid_request" }));
+    expect(store.getKnowledgeProject("project-1")).toMatchObject({ status: "active", revision: 1 });
+    store.close();
+  });
+
   it("replays semantically identical updates regardless of input property order", () => {
     const { store, service, actor } = setup(["thread-1", "task-1", "relation-1"]);
     service.createThread("project-1", { title: "Finding", body: "Evidence" }, { idempotencyKey: "thread" }, actor);

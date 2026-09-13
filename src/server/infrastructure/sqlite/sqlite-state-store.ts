@@ -445,6 +445,14 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
     return this.knowledge.findIdempotentResult<T>(operation, context);
   }
 
+  hasRuntimeProject(id: string): boolean {
+    return this.knowledge.hasRuntimeProject(id);
+  }
+
+  getRuntimeLinkOwner(runtimeProjectId: string): string | null {
+    return this.knowledge.getRuntimeLinkOwner(runtimeProjectId);
+  }
+
   listThreads(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeThread> {
     return this.knowledge.listThreads(projectId, limit, offset);
   }

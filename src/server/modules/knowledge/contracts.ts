@@ -95,6 +95,8 @@ export interface KnowledgeRuntimeLinkResult {
 
 export interface KnowledgeStore {
   getKnowledgeProject(id: string): KnowledgeProject | null;
+  hasRuntimeProject(id: string): boolean;
+  getRuntimeLinkOwner(runtimeProjectId: string): string | null;
   findIdempotentResult<T>(operation: string, context: KnowledgeMutationContext): KnowledgeMutationResult<T> | null;
   listThreads(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeThread>;
   getThread(projectId: string, id: string): KnowledgeThread | null;

@@ -35,6 +35,15 @@ export class KnowledgeQueries implements KnowledgeStore {
     return row ? { id: row.id, name: row.name, status: row.status, revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at } : null;
   }
 
+  hasRuntimeProject(id: string): boolean {
+    return Boolean(this.database.prepare("SELECT 1 FROM projects WHERE id = ?").get(id));
+  }
+
+  getRuntimeLinkOwner(runtimeProjectId: string): string | null {
+    const row = this.database.prepare("SELECT knowledge_project_id FROM knowledge_project_runtime_links WHERE runtime_project_id = ?").get(runtimeProjectId) as { knowledge_project_id: string } | undefined;
+    return row?.knowledge_project_id ?? null;
+  }
+
   listThreads(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeThread> {
     return this.page((this.database.prepare("SELECT * FROM knowledge_threads WHERE project_id = ? ORDER BY updated_at DESC, id LIMIT ? OFFSET ?").all(projectId, limit + 1, offset) as ThreadRow[]).map(mapThread), limit, offset);
   }
