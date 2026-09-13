@@ -20,6 +20,11 @@
       "author": "agent:codex",
       "date": "2026-09-13",
       "text": "Recorded the first K0 evidence: the isolated synthetic Hub fixture validates, the clean-source unit baseline passed 303 tests in 47 files, and the clean-source resource-contract preset passed 7 tests. Technical contract review remains before closing K0."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-13",
+      "text": "Review follow-up corrected the baseline-diff description and added a canonical three-run controller resource measurement. All resource budgets passed with graceful cleanup; the post-cycle RSS growth was 26.50, 27.00, and 27.25 MiB."
     }
   ],
   "priority": "now",

@@ -6,9 +6,11 @@ to kontrakt dostępnego już API ani zgoda na zapis prawdziwych danych.
 ## Punkt odniesienia
 
 Switcher sprawdzono w `7a17fb42b23cb4115f4955bdbc9fa6ebae054c5e`, a Hub
-w `22afb656c74b2fde84cb92f1aefcf8b427697cc6`. Od bazowej rewizji planu
-Switchera doszło usuwanie projektu i fundament zdalnej weryfikacji:
-`RemotePrincipal`, `RemoteProjectIdentity`, granty i idempotencja. Szczegółowe,
+w `22afb656c74b2fde84cb92f1aefcf8b427697cc6`. Operacja usuwania projektu oraz
+fundament zdalnej weryfikacji istniały już w bazowej rewizji Switchera
+`72452b5c842b21e918c56cfe9910dc39746a2a98`. Diff do punktu odniesienia K0
+obejmuje plan wiedzy oraz późniejsze zmiany UI i testów usuwania projektu;
+nie jest dowodem powstania tych kontraktów po bazowej rewizji. Szczegółowe,
 pozbawione treści prywatnej pomiary są w `k0-hub-inventory.json`.
 
 Odczyt `listProjects()` jest zapytaniem SQLite. Dopiero jawne odświeżenie
