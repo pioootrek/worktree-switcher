@@ -905,8 +905,8 @@
 +  return <div data-worktree-overview className="space-y-5">
 +    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
 +      {metrics.map(({ label, value, icon: Icon, hint, action }) => <Card key={label} className="min-w-0 gap-0 py-0 shadow-none">
-+        <CardContent className="p-0">
-+          <Button variant="ghost" className="h-auto w-full flex-col items-start gap-2 whitespace-normal rounded-lg p-4 text-left" onClick={action}>
++        <CardContent className="flex flex-1 p-0">
++          <Button variant="ghost" className="h-auto w-full flex-1 flex-col items-start justify-start gap-2 whitespace-normal rounded-[inherit] p-4 text-left" onClick={action}>
 +            <span className="flex items-center gap-2 text-xs text-muted-foreground"><Icon className="size-4" aria-hidden />{label}</span>
 +            <span className="w-full truncate text-xl font-semibold" title={value}>{value}</span>
 +            {label === t("overview.server") ? <RuntimeBadge phase={snapshot.runtime.phase} /> : null}
