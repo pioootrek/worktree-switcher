@@ -165,6 +165,12 @@
         "phase1-verification.json",
         "phase1-wyniki.md",
         "raport.md",
+        "sidebar-fixture-desktop-pl.png",
+        "sidebar-fixture-desktop.png",
+        "sidebar-fixture-mobile.png",
+        "sidebar-gui.patch.txt",
+        "sidebar-verification.json",
+        "sidebar-wyniki.md",
         "stan-sesji.md"
       ],
       "id": "NOTE-20260913-gui-audit",
