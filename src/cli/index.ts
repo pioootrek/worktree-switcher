@@ -17,6 +17,7 @@ import {
   validatePublicControllerBackend,
 } from "./controller-addresses";
 import { writeCliLine } from "./output";
+import { runIdentityCommand } from "./identity-management";
 import { pairingUrl } from "./pairing-url";
 import { openProjectGateway, runDoctorCommand, runProjectCommand } from "./project-management";
 import { localDashboardEndpoint, publicDashboardEndpoint, readServiceAccess, removeServiceAccess, writeServiceAccess } from "./service-access";
@@ -28,6 +29,7 @@ import { DirectoryBrowser } from "../server/directory-browser";
 import { EventStream } from "../server/events";
 import { FileLogWriter } from "../server/log-writer";
 import { ProjectLifecycle } from "../server/modules/lifecycle";
+import { IdentityService } from "../server/modules/identity";
 import { createMcpControllerServer } from "../server/mcp-http-server";
 import { SystemGitWorktreeReader } from "../server/git-worktrees";
 import { createControllerServer } from "../server/http-server";
@@ -60,6 +62,10 @@ async function main(): Promise<void> {
   }
   if (command === "config" && process.argv[3] === "path") {
     writeCliLine(paths.databasePath);
+    return;
+  }
+  if (command === "identity") {
+    await runIdentityCommand(process.argv.slice(3), paths, { write: writeCliLine });
     return;
   }
   if (command === "project" || command === "doctor") {
@@ -121,6 +127,7 @@ async function main(): Promise<void> {
     ...(projectId ? { projectIds: [projectId] } : {}),
   }));
   const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs, undefined, storage, undefined, undefined, tests, lifecycle);
+  const identity = new IdentityService(store);
   const accessToken = randomBytes(32).toString("base64url");
   const sessionId = randomBytes(8).toString("hex");
   const mcpSessions = new Set<string>();
@@ -129,6 +136,7 @@ async function main(): Promise<void> {
     service,
     port: mcpPort,
     accessToken: loadOrCreateSecret(paths.mcpTokenPath),
+    identity,
     onDiagnostic: (message, details) => {
       const mcpSessionId = typeof details?.sessionId === "string" ? details.sessionId : null;
       if (message === "mcp.session_started" && mcpSessionId) {
@@ -157,6 +165,7 @@ async function main(): Promise<void> {
     host,
     port,
     accessToken,
+    identity,
     publicOrigin,
   });
   try {

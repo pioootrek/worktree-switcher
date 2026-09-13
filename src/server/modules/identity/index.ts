@@ -1,0 +1,27 @@
+export {
+  IdentityError,
+  IdentityService,
+  type BootstrapOwnerInput,
+  type BootstrappedOwner,
+  type CreateKnowledgeProjectInput,
+  type IdentityErrorCode,
+  type IssueAgentTokenInput,
+  type IssuedAgentToken,
+  type SetKnowledgeGrantInput,
+} from "./identity-service";
+export type {
+  AuthenticatedPrincipal,
+  AuthenticatedIdentity,
+  ControllerAuthentication,
+  CredentialAuthenticationRecord,
+  CredentialKind,
+  IdentityStatus,
+  IdentityStore,
+  KnowledgePermission,
+  KnowledgeProject,
+  KnowledgeProjectGrant,
+  KnowledgeProjectRuntimeLink,
+  Principal,
+  PrincipalCredential,
+  PrincipalKind,
+} from "./contracts";

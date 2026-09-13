@@ -44,6 +44,11 @@
       "author": "agent:codex",
       "date": "2026-09-13",
       "text": "Owner requested an implementation plan. Recorded K0-K9 in docs/backlog/notes/NOTE-20260913-knowledge-backlog-implementation/implementation-plan.md after inspecting Switcher 72452b5 and Hub 22afb65. Covers durable project identity and caller authorization, shared service/SQLite writes, web/MCP/CLI, memory/search, attachment backup/restore, loss-aware Hub import, per-project cutover and rollback, then playbooks and instruction composition. Includes test matrix, negative cases and acceptance gates. Technical choices are recommendations; planning only, no implementation or data migration. Feature remains open."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-13",
+      "text": "Owner started K0. Concrete in-progress work is tracked in FEAT-20260913-knowledge-k0-contracts; the parent remains open and no true project data may be written before the K0/K1 gates pass."
     }
   ],
   "priority": "next",

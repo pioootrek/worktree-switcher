@@ -1,11 +1,8 @@
-export type RemotePrincipalKind = "owner" | "agent" | "worker";
-export type RemoteIdentityStatus = "active" | "revoked";
+import type { IdentityStatus, Principal, PrincipalKind } from "@/server/modules/identity";
 
-export interface RemotePrincipal {
-  id: string;
-  kind: RemotePrincipalKind;
-  status: RemoteIdentityStatus;
-}
+export type RemotePrincipalKind = PrincipalKind;
+export type RemoteIdentityStatus = IdentityStatus;
+export type RemotePrincipal = Principal;
 
 export interface RemoteProjectIdentity {
   id: string;

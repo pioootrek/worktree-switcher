@@ -1,0 +1,31 @@
+{
+  "author": "human:synthetic-owner",
+  "body": {
+    "custom": {
+      "decision": false,
+      "nested": [
+        "alpha",
+        {
+          "preserve": 7
+        }
+      ]
+    },
+    "summary": "Synthetic body with application-unknown structure."
+  },
+  "created": "2026-09-13",
+  "files": [
+    "evidence/declared.txt"
+  ],
+  "fixture_extension": {
+    "unknown_to_default_schema": true
+  },
+  "id": "NOTE-20260913-synthetic-memory",
+  "last_reviewed": "2026-09-13",
+  "schema_version": 1,
+  "status": "active",
+  "tags": [
+    "fixture",
+    "knowledge"
+  ],
+  "title": "Synthetic memory with custom body"
+}

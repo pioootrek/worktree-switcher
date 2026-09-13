@@ -88,6 +88,49 @@ const REMOTE_VERIFICATION_ATTEMPT_SCHEMA = `
     ON remote_verification_attempts(request_id, sequence DESC);
 `;
 
+const IDENTITY_AND_KNOWLEDGE_ACCESS_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS principal_credentials (
+    id TEXT PRIMARY KEY,
+    principal_id TEXT NOT NULL REFERENCES remote_principals(id),
+    kind TEXT NOT NULL CHECK(kind IN ('owner_session', 'agent_token', 'worker_token')),
+    label TEXT NOT NULL,
+    token_prefix TEXT NOT NULL,
+    verifier_hash TEXT NOT NULL UNIQUE CHECK(length(verifier_hash) = 64),
+    status TEXT NOT NULL CHECK(status IN ('active', 'revoked')),
+    expires_at TEXT,
+    created_at TEXT NOT NULL,
+    revoked_at TEXT,
+    last_used_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS principal_credentials_principal
+    ON principal_credentials(principal_id, created_at, id);
+
+  CREATE TABLE IF NOT EXISTS knowledge_projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('active', 'archived')),
+    revision INTEGER NOT NULL CHECK(revision > 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS knowledge_project_grants (
+    principal_id TEXT NOT NULL REFERENCES remote_principals(id),
+    project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+    permissions_json TEXT NOT NULL,
+    revoked_at TEXT,
+    PRIMARY KEY(principal_id, project_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS knowledge_project_runtime_links (
+    knowledge_project_id TEXT PRIMARY KEY REFERENCES knowledge_projects(id),
+    runtime_project_id TEXT UNIQUE REFERENCES projects(id) ON DELETE SET NULL,
+    linked_at TEXT NOT NULL,
+    unlinked_at TEXT
+  );
+`;
+
 const schema = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
@@ -203,6 +246,7 @@ const schema = `
 
   ${REMOTE_VERIFICATION_SCHEMA}
   ${REMOTE_VERIFICATION_ATTEMPT_SCHEMA}
+  ${IDENTITY_AND_KNOWLEDGE_ACCESS_SCHEMA}
 
   INSERT OR IGNORE INTO schema_migrations(version, applied_at)
     VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -409,6 +453,18 @@ function applyMigrations(database: Database.Database): void {
     database.transaction(() => {
       database.exec("CREATE INDEX IF NOT EXISTS worktree_launch_history ON audit_events(project_id, id DESC) WHERE event_type = 'worktree.launched'");
       recordMigration(database, 16);
+    })();
+  }
+  if (!hasMigration(database, 17)) {
+    database.transaction(() => {
+      database.exec(IDENTITY_AND_KNOWLEDGE_ACCESS_SCHEMA);
+      recordMigration(database, 17);
+    })();
+  }
+  if (!hasMigration(database, 18)) {
+    database.transaction(() => {
+      database.prepare("UPDATE principal_credentials SET token_prefix = 'wts_' || id").run();
+      recordMigration(database, 18);
     })();
   }
 }

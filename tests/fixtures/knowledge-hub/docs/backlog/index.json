@@ -1,0 +1,34 @@
+{
+  "generated_by": "hub.py fmt",
+  "items": [
+    {
+      "area": "core",
+      "id": "FEAT-20260913-synthetic-open",
+      "path": "feature/FEAT-20260913-synthetic-open.json",
+      "priority": "now",
+      "risk_level": "medium",
+      "status": "open",
+      "title": "Import a synthetic open item",
+      "type": "feature"
+    }
+  ],
+  "notes": [
+    {
+      "author": "human:synthetic-owner",
+      "created": "2026-09-13",
+      "files": [
+        "evidence/declared.txt",
+        "evidence/nested/discovered-only.txt"
+      ],
+      "id": "NOTE-20260913-synthetic-memory",
+      "path": "notes/NOTE-20260913-synthetic-memory",
+      "status": "active",
+      "tags": [
+        "fixture",
+        "knowledge"
+      ],
+      "title": "Synthetic memory with custom body"
+    }
+  ],
+  "schema_version": 1
+}

@@ -10,7 +10,10 @@
   },
   "created": "2026-09-13",
   "files": [
-    "implementation-plan.md"
+    "implementation-plan.md",
+    "k0-baseline.json",
+    "k0-contract.md",
+    "k0-hub-inventory.json"
   ],
   "id": "NOTE-20260913-knowledge-backlog-implementation",
   "last_reviewed": "2026-09-13",

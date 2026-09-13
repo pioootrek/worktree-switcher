@@ -13,22 +13,33 @@ import type {
   RemoteWorkerProjectGrant,
   RemoteWorkerRegistration,
 } from "@/server/modules/remote-verification";
+import type {
+  CredentialAuthenticationRecord,
+  IdentityStore,
+  KnowledgeProject,
+  KnowledgeProjectGrant,
+  KnowledgeProjectRuntimeLink,
+  Principal,
+  PrincipalCredential,
+} from "@/server/modules/identity";
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { initializeSchema } from "./migrations";
+import { IdentityQueries } from "./identity-queries";
 import { mapProject, type ProjectRow } from "./project-mapping";
 import { equalHash, mapReservation, type ReservationRow } from "./reservation-mapping";
 import { RemoteVerificationQueries } from "./remote-verification-queries";
 import { StorageQueries } from "./storage-queries";
 import { TestRunQueries } from "./test-run-queries";
 
-export class SqliteStateStore implements StateStore, RemoteVerificationStore, RemoteVerificationAttemptStore, RemoteVerificationProvisioningStore {
+export class SqliteStateStore implements StateStore, IdentityStore, RemoteVerificationStore, RemoteVerificationAttemptStore, RemoteVerificationProvisioningStore {
   private readonly database: Database.Database;
   private readonly testRuns: TestRunQueries;
   private readonly storage: StorageQueries;
   private readonly remoteVerification: RemoteVerificationQueries;
+  private readonly identity: IdentityQueries;
 
   constructor(databasePath: string) {
     mkdirSync(dirname(databasePath), { recursive: true });
@@ -40,6 +51,7 @@ export class SqliteStateStore implements StateStore, RemoteVerificationStore, Re
     this.testRuns = new TestRunQueries(this.database);
     this.storage = new StorageQueries(this.database);
     this.remoteVerification = new RemoteVerificationQueries(this.database);
+    this.identity = new IdentityQueries(this.database);
   }
 
   listProjects(): Project[] {
@@ -110,6 +122,11 @@ export class SqliteStateStore implements StateStore, RemoteVerificationStore, Re
         cancelledRemoteRequests,
         cancellationRequestedAttempts,
       }), now);
+      this.database.prepare(`
+        UPDATE knowledge_project_runtime_links
+        SET runtime_project_id = NULL, unlinked_at = ?
+        WHERE runtime_project_id = ?
+      `).run(now, projectId);
       const result = this.database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
       if (result.changes === 0) throw new Error("Nie znaleziono projektu.");
     })();
@@ -345,11 +362,79 @@ export class SqliteStateStore implements StateStore, RemoteVerificationStore, Re
   }
 
   getRemotePrincipal(id: string): RemotePrincipal | null {
-    return this.remoteVerification.getRemotePrincipal(id);
+    return this.identity.getPrincipal(id);
   }
 
   saveRemotePrincipal(principal: RemotePrincipal, actor: string): void {
-    this.remoteVerification.saveRemotePrincipal(principal, actor);
+    this.identity.savePrincipal(principal, actor);
+  }
+
+  getPrincipal(id: string): Principal | null {
+    return this.identity.getPrincipal(id);
+  }
+
+  getOwnerPrincipal(): Principal | null {
+    return this.identity.getOwnerPrincipal();
+  }
+
+  listPrincipals(kind?: Principal["kind"]): Principal[] {
+    return this.identity.listPrincipals(kind);
+  }
+
+  savePrincipal(principal: Principal, actor: string): void {
+    this.identity.savePrincipal(principal, actor);
+  }
+
+  getCredentialForAuthentication(id: string): CredentialAuthenticationRecord | null {
+    return this.identity.getCredentialForAuthentication(id);
+  }
+
+  saveCredential(credential: CredentialAuthenticationRecord, actor: string): void {
+    this.identity.saveCredential(credential, actor);
+  }
+
+  createFirstOwner(principal: Principal, credential: CredentialAuthenticationRecord, actor: string): boolean {
+    return this.identity.createFirstOwner(principal, credential, actor);
+  }
+
+  listPrincipalCredentials(principalId: string): PrincipalCredential[] {
+    return this.identity.listPrincipalCredentials(principalId);
+  }
+
+  revokeCredential(id: string, revokedAt: string, actor: string): boolean {
+    return this.identity.revokeCredential(id, revokedAt, actor);
+  }
+
+  recordCredentialUsed(id: string, usedAt: string): void {
+    this.identity.recordCredentialUsed(id, usedAt);
+  }
+
+  getKnowledgeProject(id: string): KnowledgeProject | null {
+    return this.identity.getKnowledgeProject(id);
+  }
+
+  saveKnowledgeProject(project: KnowledgeProject, actor: string): void {
+    this.identity.saveKnowledgeProject(project, actor);
+  }
+
+  getKnowledgeProjectGrant(principalId: string, projectId: string): KnowledgeProjectGrant | null {
+    return this.identity.getKnowledgeProjectGrant(principalId, projectId);
+  }
+
+  listKnowledgeProjectGrants(principalId: string): KnowledgeProjectGrant[] {
+    return this.identity.listKnowledgeProjectGrants(principalId);
+  }
+
+  saveKnowledgeProjectGrant(grant: KnowledgeProjectGrant, actor: string): void {
+    this.identity.saveKnowledgeProjectGrant(grant, actor);
+  }
+
+  getKnowledgeProjectRuntimeLink(projectId: string): KnowledgeProjectRuntimeLink | null {
+    return this.identity.getKnowledgeProjectRuntimeLink(projectId);
+  }
+
+  saveKnowledgeProjectRuntimeLink(link: KnowledgeProjectRuntimeLink, actor: string): void {
+    this.identity.saveKnowledgeProjectRuntimeLink(link, actor);
   }
 
   getRemoteProjectIdentity(id: string): RemoteProjectIdentity | null {

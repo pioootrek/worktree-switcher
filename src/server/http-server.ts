@@ -9,6 +9,7 @@ import { localeFrom } from "../i18n/messages";
 import { localizeServerMessage } from "../i18n/server-errors";
 import { DirectoryBrowser } from "./directory-browser";
 import { EventStream } from "./events";
+import { IdentityError, type AuthenticatedPrincipal, type IdentityService, type KnowledgePermission } from "./modules/identity";
 
 const JSON_LIMIT = 64 * 1024;
 const MIME_TYPES: Record<string, string> = {
@@ -299,6 +300,67 @@ function hasValidToken(request: IncomingMessage, expected: string): boolean {
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
+function bearerToken(request: IncomingMessage): string | null {
+  const header = request.headers.authorization;
+  return header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : null;
+}
+
+function identityAdministration(
+  service: IdentityService,
+  actor: AuthenticatedPrincipal,
+  value: unknown,
+): unknown {
+  const record = strictRecord(value, ["action", "principalId", "credentialId", "projectId", "label", "expiresAt", "name", "permissions", "sessionLifetimeSeconds"]);
+  const action = requiredString(record, "action", 80);
+  switch (action) {
+    case "renew-owner": {
+      const lifetime = record.sessionLifetimeSeconds;
+      if (lifetime !== undefined && typeof lifetime !== "number") throw new Error("Nieprawidłowe pole sessionLifetimeSeconds.");
+      return service.renewOwnerSession({
+        label: optionalString(record, "label", 120),
+        sessionLifetimeSeconds: lifetime,
+      }, actor);
+    }
+    case "create-agent":
+      return { principal: service.createAgent(actor) };
+    case "list-agents":
+      return { principals: service.listAgents(actor) };
+    case "revoke-agent":
+      return { principal: service.revokeAgent(requiredString(record, "principalId", 160), actor) };
+    case "issue-agent-token":
+      return service.issueAgentToken({
+        principalId: requiredString(record, "principalId", 160),
+        label: requiredString(record, "label", 120),
+        expiresAt: optionalString(record, "expiresAt", 40),
+      }, actor);
+    case "list-agent-tokens":
+      return { credentials: service.listAgentCredentials(requiredString(record, "principalId", 160), actor) };
+    case "revoke-token":
+      service.revokeCredential(requiredString(record, "credentialId", 160), actor);
+      return { revoked: true };
+    case "create-knowledge-project":
+      return { project: service.createKnowledgeProject({ name: requiredString(record, "name", 120) }, actor) };
+    case "grant-knowledge": {
+      if (!Array.isArray(record.permissions) || record.permissions.some((permission) => typeof permission !== "string")) {
+        throw new Error("Nieprawidłowe pole permissions.");
+      }
+      return { grant: service.setKnowledgeGrant({
+        principalId: requiredString(record, "principalId", 160),
+        projectId: requiredString(record, "projectId", 160),
+        permissions: record.permissions as KnowledgePermission[],
+      }, actor) };
+    }
+    case "list-knowledge-grants":
+      return { grants: service.listKnowledgeGrants(requiredString(record, "principalId", 160), actor) };
+    case "revoke-knowledge-grant":
+      return { grant: service.revokeKnowledgeGrant(
+        requiredString(record, "principalId", 160), requiredString(record, "projectId", 160), actor,
+      ) };
+    default:
+      throw new Error("Nieobsługiwana operacja zarządzania tożsamością.");
+  }
+}
+
 function hasValidOrigin(request: IncomingMessage, publicOrigin?: string): boolean {
   const origin = request.headers.origin;
   if (!origin) return true;
@@ -320,6 +382,7 @@ export function createControllerServer(options: {
   host: string;
   port: number;
   accessToken: string;
+  identity?: IdentityService;
   publicOrigin?: string;
 }): ControllerServer {
   const fallbackOrigin = `http://${options.host}:${options.port}`;
@@ -329,6 +392,83 @@ export function createControllerServer(options: {
     try {
       if (url.pathname.startsWith("/api/")) {
         response.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+        if (url.pathname === "/api/identity/bootstrap") {
+          if (request.headers.origin && !hasValidOrigin(request, options.publicOrigin)) {
+            json(response, 403, { error: localizeServerMessage("Odrzucono żądanie z obcego originu.", locale) });
+            return;
+          }
+          if (!hasValidToken(request, options.accessToken)) {
+            json(response, 401, { error: localizeServerMessage("Brak prawidłowego klucza dostępu.", locale) });
+            return;
+          }
+          if (request.method !== "POST") {
+            response.setHeader("Allow", "POST");
+            json(response, 405, { error: "Method not allowed." });
+            return;
+          }
+          if (!options.identity) {
+            json(response, 503, { error: "Identity service is unavailable." });
+            return;
+          }
+          const value = strictRecord(await readJson(request), ["label", "sessionLifetimeSeconds"]);
+          const lifetime = value.sessionLifetimeSeconds;
+          if (lifetime !== undefined && typeof lifetime !== "number") throw new Error("Nieprawidłowe pole sessionLifetimeSeconds.");
+          json(response, 200, options.identity.bootstrapOwnerSession({
+            label: optionalString(value, "label", 120),
+            sessionLifetimeSeconds: lifetime,
+          }));
+          return;
+        }
+        if (url.pathname === "/api/identity/admin") {
+          if (request.headers.origin && !hasValidOrigin(request, options.publicOrigin)) {
+            json(response, 403, { error: localizeServerMessage("Odrzucono żądanie z obcego originu.", locale) });
+            return;
+          }
+          const token = bearerToken(request);
+          let actor: AuthenticatedPrincipal;
+          try {
+            if (!token || !options.identity) throw new Error("invalid credential");
+            actor = options.identity.authenticateBearer(token);
+          } catch {
+            json(response, 401, { error: localizeServerMessage("Brak prawidłowego klucza dostępu.", locale) });
+            return;
+          }
+          if (request.method !== "POST") {
+            response.setHeader("Allow", "POST");
+            json(response, 405, { error: "Method not allowed." });
+            return;
+          }
+          try {
+            json(response, 200, identityAdministration(options.identity, actor, await readJson(request)));
+          } catch (error) {
+            if (error instanceof IdentityError && error.code === "owner_authentication_required") {
+              json(response, 403, { error: localizeServerMessage(error.message, locale) });
+              return;
+            }
+            throw error;
+          }
+          return;
+        }
+        if (url.pathname === "/api/identity") {
+          if (request.headers.origin && !hasValidOrigin(request, options.publicOrigin)) {
+            json(response, 403, { error: localizeServerMessage("Odrzucono żądanie z obcego originu.", locale) });
+            return;
+          }
+          const token = bearerToken(request);
+          try {
+            if (!token || !options.identity) throw new Error("invalid credential");
+            const actor = options.identity.authenticateBearer(token);
+            if (request.method !== "GET") {
+              response.setHeader("Allow", "GET");
+              json(response, 405, { error: "Method not allowed." });
+              return;
+            }
+            json(response, 200, options.identity.describeIdentity(actor));
+          } catch {
+            json(response, 401, { error: localizeServerMessage("Brak prawidłowego klucza dostępu.", locale) });
+          }
+          return;
+        }
         if (!hasValidToken(request, options.accessToken)) {
           json(response, 401, { error: localizeServerMessage("Brak prawidłowego klucza dostępu.", locale) });
           return;
