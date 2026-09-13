@@ -18,6 +18,14 @@ for (const locale of ["en", "pl"] as const) {
 
     await page.getByRole("button", { name: t("metadata.refresh"), exact: true }).click();
     expect(requests.at(-1)).toEqual({ path: "/api/projects/web/metadata/refresh", method: "POST", body: {} });
+    const notice = page.getByRole("status");
+    await expect(notice).toContainText(translate(locale, "metadata.refreshed", { name: "Fixture Web" }));
+    await expect(notice).toBeInViewport();
+    await notice.getByRole("button", { name: t("common.close"), exact: true }).click();
+    await expect(notice).toBeEmpty();
+    await page.getByRole("button", { name: t("metadata.refresh"), exact: true }).click();
+    await expect(notice).toContainText(translate(locale, "metadata.refreshed", { name: "Fixture Web" }));
+    await expect(page.getByRole("button", { name: t("project.restart"), exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: t("capacity.openSettings") }).click();
     let dialog = page.getByRole("dialog");

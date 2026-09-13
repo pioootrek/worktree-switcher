@@ -82,7 +82,7 @@ export function TestPanel({
         </Button>
       </div>
       {selectedPreset ? (
-        <div className="space-y-2 rounded-md border bg-black/15 p-3">
+        <div className="space-y-2 rounded-md border bg-muted/50 p-3">
           <Label htmlFor={`test-profile-${projectId}`}>{t("testProfile.label")}</Label>
           <Select value={selectedPreset.profile} onValueChange={(value) => void assignProfile(value)} disabled={profiles.length === 0}>
             <SelectTrigger id={`test-profile-${projectId}`} className="w-full sm:w-72"><SelectValue /></SelectTrigger>
@@ -108,7 +108,7 @@ export function TestPanel({
             {runs.map((testRun) => {
               const active = testRun.phase === "queued" || testRun.phase === "running";
               return (
-                <div key={testRun.id} className="rounded-md border bg-black/15 p-3 text-sm">
+                <div key={testRun.id} className="rounded-md border bg-muted/50 p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-medium">{testRun.presetName}</p>
@@ -117,13 +117,13 @@ export function TestPanel({
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Badge variant="outline" className={testRun.phase === "passed" ? "border-emerald-400/25 text-emerald-300" : testRun.phase === "failed" || testRun.phase === "timed_out" ? "border-red-400/25 text-red-300" : "text-muted-foreground"}>
+                      <Badge variant="outline" className={testRun.phase === "passed" ? "border-success-foreground/25 bg-success text-success-foreground" : testRun.phase === "failed" || testRun.phase === "timed_out" ? "border-destructive/25 text-destructive" : "text-muted-foreground"}>
                         {testRun.phase === "running" ? <LoaderCircle className="animate-spin" aria-hidden /> : <Activity aria-hidden />}{t(`testPhase.${testRun.phase}`)}
                       </Badge>
                       {active ? <Button size="sm" variant="ghost" onClick={() => void cancel(testRun.id)}><Square aria-hidden />{t("tests.cancel")}</Button> : null}
                     </div>
                   </div>
-                  <p className={`mt-2 text-xs ${testRun.source.attribution === "observed_match" ? "text-emerald-300" : "text-amber-300"}`}>
+                  <p className={`mt-2 text-xs ${testRun.source.attribution === "observed_match" ? "text-success-foreground" : "text-warning-foreground"}`}>
                     {t(`testSource.${testRun.source.attribution}`)}
                     {testRun.source.preflight?.head ? ` · ${t("tests.observedSource")} ${testRun.source.preflight.head.slice(0, 8)}` : ""}
                     {testRun.source.processOutcome === "passed" && testRun.phase !== "passed" ? ` · ${t("tests.commandPassedSourceUnverified")}` : ""}
@@ -139,8 +139,8 @@ export function TestPanel({
                   {testRun.logs.length > 0 ? (
                     <details className="mt-2">
                       <summary className="cursor-pointer text-xs text-muted-foreground">{t("tests.output")}</summary>
-                      <ScrollArea className="mt-2 h-32 rounded-md border bg-black/35 p-2">
-                        <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-zinc-300">{testRun.logs.join("\n")}</pre>
+                      <ScrollArea className="mt-2 h-32 rounded-md border bg-muted p-2">
+                        <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-foreground">{testRun.logs.join("\n")}</pre>
                       </ScrollArea>
                     </details>
                   ) : null}

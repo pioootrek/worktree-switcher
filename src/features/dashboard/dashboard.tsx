@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/features/dashboard/empty-state";
@@ -12,7 +12,7 @@ import { CapacityDialog } from "@/features/runtime/capacity-dialog";
 import { TestQueueDialog } from "@/features/verification/test-queue-dialog";
 import { dashboardSummary } from "@/i18n/messages";
 import { useI18n } from "@/i18n/provider";
-import { AlertTriangle, FlaskConical, FolderGit2, GitBranch, HardDrive, Languages, LoaderCircle, Settings2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FlaskConical, FolderGit2, GitBranch, HardDrive, Languages, LoaderCircle, Settings2, X } from "lucide-react";
 import { useState } from "react";
 import { ProjectSwitcher } from "./project-switcher";
 import { useProjectSelection } from "./project-selection";
@@ -20,7 +20,7 @@ import { useDashboard } from "./use-dashboard";
 
 export function Dashboard() {
   const { locale, setLocale, t } = useI18n();
-  const { data, token, loading, error, notice, mutate, setError, runningCount } = useDashboard();
+  const { data, token, loading, error, notice, dismissNotice, mutate, setError, runningCount } = useDashboard();
   const [dialogOpen, setDialogOpen] = useState(false);
   const { selectedProjectId, selectProject } = useProjectSelection();
   const selectedSnapshot = data.projects.find(({ project }) => project.id === selectedProjectId) ?? data.projects[0];
@@ -91,7 +91,19 @@ export function Dashboard() {
             <p className="max-w-md text-sm leading-6 text-muted-foreground">{t("dashboard.projectLead")}</p>
           </div>
 
-        <div className="sr-only" aria-live="polite">{error ?? notice}</div>
+        <div role="status" aria-live="polite" aria-atomic="true" className="fixed right-4 bottom-4 z-40 w-[calc(100%-2rem)] max-w-sm">
+          {!error && notice && (
+            <Alert variant="success" role="presentation" className="shadow-lg">
+              <CheckCircle2 aria-hidden />
+              <AlertDescription className="break-words">{notice}</AlertDescription>
+              <AlertAction>
+                <Button type="button" variant="ghost" size="icon-sm" onClick={dismissNotice} aria-label={t("common.close")}>
+                  <X aria-hidden />
+                </Button>
+              </AlertAction>
+            </Alert>
+          )}
+        </div>
         {error && (
           <Alert variant="destructive" className="mb-5">
             <AlertTriangle aria-hidden />

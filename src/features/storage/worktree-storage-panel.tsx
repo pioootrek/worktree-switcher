@@ -147,7 +147,7 @@ export function WorktreeStoragePanel({
         </p>
       )}
 
-      <div className="space-y-1 rounded-lg border border-white/7 bg-black/10 p-3">
+      <div className="space-y-1 rounded-lg border border-border bg-muted/50 p-3">
         {storage.map((entry) => (
           <Button
             key={entry.worktreePath}
@@ -176,7 +176,7 @@ export function WorktreeStoragePanel({
         <>
           {scanning && selected.measuredAt && <p className="text-xs text-muted-foreground">{t("storage.refreshingPrevious")}</p>}
           {selected.status === "unavailable" && selected.measuredAt && (
-            <p className="rounded-md border border-amber-400/25 bg-amber-400/5 p-2 text-xs text-amber-200">{t("storage.showingPrevious")}</p>
+            <p className="rounded-md border border-warning-foreground/25 bg-warning p-2 text-xs text-warning-foreground">{t("storage.showingPrevious")}</p>
           )}
           <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
             <StorageMetric label={t("storage.total")} value={formatBytes(selected.totalBytes)} />
@@ -187,7 +187,7 @@ export function WorktreeStoragePanel({
           </dl>
 
           {selected.history.length > 0 && (
-            <div className="rounded-lg border border-white/7 bg-black/10 p-3">
+            <div className="rounded-lg border border-border bg-muted/50 p-3">
               <div className="mb-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                 <span className="flex items-center gap-2"><HardDrive className="size-3.5" aria-hidden />{t("storage.history")}</span>
                 <span>{selected.measuredAt ? new Date(selected.measuredAt).toLocaleString(locale === "pl" ? "pl-PL" : "en-US") : "—"}</span>

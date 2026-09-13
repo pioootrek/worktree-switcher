@@ -179,7 +179,7 @@ export function ProjectCard({
             {t("metadata.lastSuccess", { time: new Date(metadata.lastSuccessfulAt).toLocaleString(locale === "pl" ? "pl-PL" : "en-US") })}
           </p>
         ) : metadata && metadata.status !== "fresh" && (
-          <Alert className="mx-5 mt-5 border-amber-400/20 bg-amber-400/5 text-amber-100 sm:mx-6">
+          <Alert variant="warning" className="mx-5 mt-5 sm:mx-6">
             <AlertTriangle aria-hidden />
             <AlertTitle>{t(`metadata.${metadata.status}`)}</AlertTitle>
             <AlertDescription>
@@ -209,7 +209,7 @@ export function ProjectCard({
 
         <div className="px-5 sm:px-6">
         {reservation && (
-          <Alert className="mb-4 border-amber-400/25 bg-amber-400/7 text-amber-100">
+          <Alert variant="warning" className="mb-4">
             <LockKeyhole aria-hidden />
             <AlertTitle>{t("project.lockedBy", { owner: reservation.owner })}</AlertTitle>
             <AlertDescription className="space-y-1">
@@ -225,7 +225,7 @@ export function ProjectCard({
           </Alert>
         )}
         {selectedWorktree?.dirty && (
-          <Alert className="mb-4 border-amber-400/20 bg-amber-400/5 text-amber-100">
+          <Alert variant="warning" className="mb-4">
             <AlertTriangle aria-hidden />
             <AlertDescription>{t("project.dirtyWarning")}</AlertDescription>
           </Alert>
@@ -289,12 +289,12 @@ export function ProjectCard({
                       <td className="max-w-[320px] px-3 py-3.5">
                         <div className="flex items-center gap-2">
                           <span className="truncate font-mono font-medium" title={worktree.branch ?? "detached HEAD"}>{worktree.branch ?? "detached HEAD"}</span>
-                          {running && <Badge variant="outline" className="border-primary/25 text-primary">{t("project.active")}</Badge>}
+                          {running && <Badge variant="outline" className="border-success-foreground/25 bg-success text-success-foreground">{t("project.active")}</Badge>}
                         </div>
                         <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground" title={worktree.path}>{worktree.path}</p>
                       </td>
                       <td className="px-3 py-3.5">
-                        <span className={worktree.dirty ? "flex items-center gap-2 text-amber-400" : "flex items-center gap-2 text-muted-foreground"}>
+                        <span className={worktree.dirty ? "flex items-center gap-2 text-warning-foreground" : "flex items-center gap-2 text-muted-foreground"}>
                           <span className={worktree.dirty ? "size-2 rounded-full bg-amber-400" : "size-2 rounded-full bg-emerald-400"} />
                           {worktree.dirty ? t("project.dirty") : t("project.clean")}
                         </span>
@@ -322,7 +322,7 @@ export function ProjectCard({
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="truncate" title={worktree.branch ?? "detached HEAD"}>{worktree.branch ?? "detached HEAD"}</span>
                       <span className="shrink-0 font-mono text-xs text-muted-foreground">{worktree.shortHead}</span>
-                      {worktree.dirty && <span className="shrink-0 text-amber-400">● dirty</span>}
+                      {worktree.dirty && <span className="shrink-0 text-warning-foreground">● dirty</span>}
                     </span>
                   </SelectItem>
                 ))}
@@ -337,7 +337,7 @@ export function ProjectCard({
             )}
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="outline" size="icon" onClick={() => void act("restart")} disabled={isBusy || !selected}>
+                <Button variant="outline" size="icon" aria-label={t("project.restart")} onClick={() => void act("restart")} disabled={isBusy || !selected}>
                   <RotateCcw aria-hidden />
                 </Button>
               </TooltipTrigger>
@@ -401,8 +401,8 @@ export function ProjectCard({
             ) : null}
           </TabsContent>
           <TabsContent value="logs" className="mt-4">
-            <ScrollArea className="h-40 rounded-md border bg-black/35 p-3">
-              <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-zinc-300">
+            <ScrollArea className="h-40 rounded-md border bg-muted p-3">
+              <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-foreground">
                 {runtime.logs.length ? runtime.logs.join("\n") : t("project.noLogs")}
               </pre>
             </ScrollArea>

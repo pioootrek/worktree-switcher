@@ -36,7 +36,7 @@ export function ResourceMonitor({ resources }: { resources: RuntimeResourceMetri
   const sampleAge = resources.sampleAgeSeconds;
 
   return (
-    <section className={`mt-4 rounded-lg border p-3 ${warning ? "border-amber-400/30 bg-amber-400/5" : "border-white/7 bg-black/10"}`} aria-label={t("resources.title")}>
+    <section className={`mt-4 rounded-lg border p-3 ${warning ? "border-warning-foreground/25 bg-warning" : "border-border bg-muted/50"}`} aria-label={t("resources.title")}>
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-sm font-medium"><MemoryStick className="size-4 text-indigo-300" aria-hidden />{t("resources.title")}</div>
         <span className="text-xs text-muted-foreground">
@@ -56,7 +56,7 @@ export function ResourceMonitor({ resources }: { resources: RuntimeResourceMetri
           <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
         </svg>
       )}
-      {warning && <p className="mt-2 text-xs text-amber-300">{t("resources.warning", { threshold: formatBytes(resources.warningThresholdBytes) })}</p>}
+      {warning && <p className="mt-2 text-xs text-warning-foreground">{t("resources.warning", { threshold: formatBytes(resources.warningThresholdBytes) })}</p>}
     </section>
   );
 }

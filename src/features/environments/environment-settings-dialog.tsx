@@ -146,7 +146,7 @@ export function EnvironmentSettingsDialog({
             />
             <p className="text-xs text-muted-foreground">{t("environment.hint")}</p>
           </div>
-          {active && profileName === project.selectedEnvironmentProfile && <p className="text-sm text-amber-300">{t("environment.restartHint")}</p>}
+          {active && profileName === project.selectedEnvironmentProfile && <p className="text-sm text-warning-foreground">{t("environment.restartHint")}</p>}
           <div className="flex flex-wrap justify-end gap-2">
             {profileName !== "default" && profileName !== project.selectedEnvironmentProfile && project.environmentProfiles.some(({ name }) => name === profileName) && (
               <Button type="button" variant="destructive" onClick={() => void remove()} disabled={pending}>{t("environment.delete")}</Button>

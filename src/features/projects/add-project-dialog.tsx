@@ -49,12 +49,13 @@ export function AddProjectDialog({ open, onOpenChange, mutate, token }: {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild><Button><Plus aria-hidden />{t("add.trigger")}</Button></DialogTrigger>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{t("add.title")}</DialogTitle>
           <DialogDescription>{t("add.description")}</DialogDescription>
         </DialogHeader>
-        <form className="space-y-4" onSubmit={(event) => void submit(event)}>
+        <form className="flex min-h-0 flex-col gap-4" onSubmit={(event) => void submit(event)}>
+          <div className="min-h-0 space-y-4 overflow-y-auto overscroll-contain p-1">
           <div className="space-y-2"><Label htmlFor="name">{t("add.name")}</Label><Input id="name" name="name" placeholder="Frontend" required maxLength={80} /></div>
           <div className="space-y-2">
             <Label htmlFor="repositoryPath">{t("add.repositoryPath")}</Label>
@@ -74,7 +75,8 @@ export function AddProjectDialog({ open, onOpenChange, mutate, token }: {
           </div>
           <p className="text-xs text-muted-foreground">{t("add.commandHint")}</p>
           {formError && <p className="text-sm text-destructive" role="alert">{formError}</p>}
-          <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button><Button type="submit" disabled={pending}>{pending && <LoaderCircle className="animate-spin" aria-hidden />}{t("add.submit")}</Button></div>
+          </div>
+          <div className="flex shrink-0 justify-end gap-2"><Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button><Button type="submit" disabled={pending}>{pending && <LoaderCircle className="animate-spin" aria-hidden />}{t("add.submit")}</Button></div>
         </form>
       </DialogContent>
     </Dialog>

@@ -188,6 +188,7 @@ export function useDashboard() {
 
   const mutate = useCallback(async (path: string, body: unknown, success: string, method: "POST" | "DELETE" = "POST") => {
     if (!token) throw new Error(t("dashboard.sessionPending"));
+    setNotice(null);
     const response = await fetch(path, {
       method,
       headers: { "Accept-Language": locale, "Content-Type": "application/json", "X-Worktree-Switcher-Token": token },
@@ -251,5 +252,5 @@ export function useDashboard() {
     };
   }, [monitoredProjectIds, t, token]);
 
-  return { data, token, loading, error: connectionError ?? error, notice, mutate, setError, runningCount };
+  return { data, token, loading, error: connectionError ?? error, notice, dismissNotice: () => setNotice(null), mutate, setError, runningCount };
 }
