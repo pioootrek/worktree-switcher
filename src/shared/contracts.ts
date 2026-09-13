@@ -151,6 +151,10 @@ export interface Worktree {
   prunable: boolean;
   dirty: boolean;
   statusError?: string;
+  lastCommitAt?: string | null;
+  mergedInto?: string | null;
+  merged?: boolean | null;
+  isDefaultBranch?: boolean;
 }
 
 export interface WorktreeMetadataStatus {
@@ -236,6 +240,7 @@ export interface RuntimeFailure {
 }
 
 export interface ProjectSnapshot {
+  lastLaunchedAt?: Record<string, string>;
   project: ProjectView;
   runtime: RuntimeSnapshot;
   reservation: Reservation | null;
@@ -260,6 +265,7 @@ export interface DashboardChangeEvent {
 }
 
 export interface ProjectLiveSnapshot {
+  lastLaunchedAt?: Record<string, string>;
   projectId: string;
   runtime?: RuntimeSnapshot;
   reservation?: Reservation | null;

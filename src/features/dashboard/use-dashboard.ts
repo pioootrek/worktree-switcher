@@ -105,6 +105,7 @@ export function useDashboard() {
                     ...update.runtime,
                     resources: newestResources(snapshot.runtime.resources ?? EMPTY_RESOURCES, update.runtime.resources ?? EMPTY_RESOURCES),
                   } : snapshot.runtime,
+                  lastLaunchedAt: update.lastLaunchedAt ?? snapshot.lastLaunchedAt,
                   reservation: update.reservation !== undefined ? update.reservation : snapshot.reservation,
                   storage: update.storage ?? snapshot.storage,
                   testRuns: update.testRuns ?? snapshot.testRuns,

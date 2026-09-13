@@ -140,6 +140,7 @@ export class RuntimeService {
   private async startRuntime(projectId: string, worktreePath: string, beforeSpawn: () => void): Promise<void> {
     try {
       await this.processes.start(this.lifecycle.requireProject(projectId), worktreePath, beforeSpawn);
+      this.store.recordProjectEvent(projectId, "worktree.launched", "controller", { worktreePath });
     } catch (error) {
       if (error instanceof ClaimedRuntimeOperationError) throw error;
       const code = this.processes.snapshot(projectId).failure?.code ?? "launch_failed";
@@ -206,6 +207,7 @@ export class RuntimeService {
         });
       }
       await this.processes.start(this.lifecycle.requireProject(projectId), selected.path);
+      this.store.recordProjectEvent(projectId, "worktree.launched", actor.owner, { worktreePath: selected.path });
     } finally {
       this.lifecycle.releaseCapacity(projectId);
     }

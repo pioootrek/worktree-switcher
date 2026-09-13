@@ -107,6 +107,7 @@ export class DashboardQueryService {
         const paths = this.entries.get(project.repositoryPath)?.value?.worktrees.map(({ path }) => path) ?? [];
         return {
           projectId: project.id,
+          ...(include("runtime") ? { lastLaunchedAt: this.dependencies.store.listWorktreeLaunches(project.id) } : {}),
           ...(include("runtime") ? { runtime: this.dependencies.processes.snapshot(project.id) } : {}),
           ...(include("reservation") ? { reservation: this.dependencies.store.getActiveReservation(project.id) } : {}),
           ...(include("storage") ? { storage: this.dependencies.storage?.snapshots(project.id, paths) ?? [] } : {}),
@@ -178,6 +179,7 @@ export class DashboardQueryService {
       runtime: this.dependencies.processes.snapshot(project.id),
       reservation: this.dependencies.store.getActiveReservation(project.id),
       worktrees: value.worktrees,
+      lastLaunchedAt: this.dependencies.store.listWorktreeLaunches(project.id),
       storage: this.dependencies.storage?.snapshots(project.id, worktreePaths) ?? [],
       testPresets: value.testPresets,
       testRuns: this.dependencies.store.listTestRuns(project.id, 20),
@@ -211,7 +213,7 @@ export class DashboardQueryService {
     entry.invalidatedDuringRefresh = false;
     const operation = (async () => {
       try {
-        const worktrees = await this.dependencies.git.list(project.repositoryPath, { priority });
+        const worktrees = await this.dependencies.git.list(project.repositoryPath, { priority, includeInsights: true });
         const testPresets = worktrees.map((worktree) => this.dependencies.discoverPresets(project, worktree.path));
         const value = { worktrees, testPresets };
         const bytes = Buffer.byteLength(JSON.stringify(value));
