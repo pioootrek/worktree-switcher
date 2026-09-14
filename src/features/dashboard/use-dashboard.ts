@@ -34,6 +34,15 @@ export function useDashboard() {
   const { locale, t } = useI18n();
   const [data, setData] = useState<ControllerDashboardResponse>({ projects: [], capacity: EMPTY_CAPACITY, testQueue: EMPTY_TEST_QUEUE, mcp: EMPTY_MCP_STATUS });
   const [token, setToken] = useState("");
+  const [knowledgeToken, setKnowledgeToken] = useState("");
+  const [knowledgeSessionVersion, setKnowledgeSessionVersion] = useState(0);
+  const [knowledgeChange, setKnowledgeChange] = useState({ version: 0, projectIds: [] as string[] });
+  const changeKnowledgeToken = useCallback((value: string) => {
+    if (value) window.sessionStorage.setItem("worktree-switcher-knowledge-token", value);
+    else window.sessionStorage.removeItem("worktree-switcher-knowledge-token");
+    setKnowledgeToken(value);
+    setKnowledgeSessionVersion(current => current + 1);
+  }, []);
   const [loading, setLoading] = useState(true);
   const [observedAt, setObservedAt] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -135,8 +144,6 @@ export function useDashboard() {
 
   useEffect(() => {
     generation.current += 1;
-    let events: { close(): void } | null = null;
-    let readyCount = 0;
     let focusHandler: (() => void) | null = null;
     const initialRefresh = window.setTimeout(() => {
       const fragment = new URLSearchParams(window.location.hash.slice(1));
@@ -148,33 +155,9 @@ export function useDashboard() {
       }
       window.sessionStorage.setItem("worktree-switcher-token", accessToken);
       if (window.location.hash) window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+      setKnowledgeToken(window.sessionStorage.getItem("worktree-switcher-knowledge-token") ?? "");
       setToken(accessToken);
       void reconcile(accessToken, { bootstrap: true });
-      events = connectDashboardEvents({
-        token: accessToken,
-        onEvent(type, payload) {
-          if (type === "ready") {
-            readyCount += 1;
-            if (readyCount > 1) void reconcile(accessToken, { bootstrap: true });
-            return;
-          }
-          if (type !== "changed") return;
-          try {
-            const change = JSON.parse(payload) as DashboardChangeEvent;
-            if (change.kinds.includes("topology") || change.kinds.includes("metadata")) {
-              void reconcile(accessToken, { bootstrap: true });
-              return;
-            }
-            const sections = change.kinds.filter((kind): kind is DashboardSection =>
-              ["runtime", "reservation", "tests", "storage", "controller"].includes(kind),
-            );
-            void reconcile(accessToken, { projectIds: change.allProjects ? [] : change.projectIds, sections });
-          } catch {
-            void reconcile(accessToken, { bootstrap: true });
-          }
-        },
-        onError: () => setConnectionError(t("dashboard.connectionLost")),
-      });
       focusHandler = () => void reconcile(accessToken, { bootstrap: true });
       window.addEventListener("focus", focusHandler);
     }, 0);
@@ -185,10 +168,63 @@ export function useDashboard() {
       requestAbort.current = null;
       pending.current = emptyPending();
       inFlight.current = null;
-      events?.close();
       if (focusHandler) window.removeEventListener("focus", focusHandler);
     };
   }, [reconcile, t]);
+
+  // A credential change must update the shared stream's HTTP headers, but does not
+  // restart runtime bootstrap, abort runtime reads or install another subscription.
+  const eventVersion = useRef<string | null>(null);
+  const streamInterrupted = useRef(false);
+  useEffect(() => {
+    if (!token) return;
+    let readyCount = 0;
+    const events = connectDashboardEvents({
+      token,
+      knowledgeToken,
+      onEvent(type, payload) {
+        if (type === "knowledge-changed") {
+          try {
+            const value = JSON.parse(payload) as { projectIds: string[] };
+            if (Array.isArray(value.projectIds) && value.projectIds.every(id => typeof id === "string")) setKnowledgeChange(current => ({ version: current.version + 1, projectIds: value.projectIds }));
+          } catch { /* A reconnect reconciles knowledge separately. */ }
+          return;
+        }
+        if (type === "ready") {
+          setKnowledgeChange(current => ({ version: current.version + 1, projectIds: [] }));
+          let version: string | null = null;
+          try {
+            const value = JSON.parse(payload) as Pick<DashboardChangeEvent, "epoch" | "revision">;
+            if (typeof value.epoch === "string" && Number.isInteger(value.revision)) version = JSON.stringify([value.epoch, value.revision]);
+          } catch { /* Unknown versions require reconciliation after a reconnect. */ }
+          if (readyCount > 0 || streamInterrupted.current || (eventVersion.current !== null && eventVersion.current !== version)) {
+            void reconcile(token, { bootstrap: true });
+          }
+          readyCount += 1;
+          eventVersion.current = version;
+          streamInterrupted.current = false;
+          return;
+        }
+        if (type !== "changed") return;
+        try {
+          const change = JSON.parse(payload) as DashboardChangeEvent;
+          eventVersion.current = JSON.stringify([change.epoch, change.revision]);
+          if (change.kinds.includes("topology") || change.kinds.includes("metadata")) {
+            void reconcile(token, { bootstrap: true });
+            return;
+          }
+          const sections = change.kinds.filter((kind): kind is DashboardSection =>
+            ["runtime", "reservation", "tests", "storage", "controller"].includes(kind),
+          );
+          void reconcile(token, { projectIds: change.allProjects ? [] : change.projectIds, sections });
+        } catch {
+          void reconcile(token, { bootstrap: true });
+        }
+      },
+      onError: () => { streamInterrupted.current = true; setConnectionError(t("dashboard.connectionLost")); },
+    });
+    return () => events.close();
+  }, [token, knowledgeToken, reconcile, t]);
 
   const mutate = useCallback(async (path: string, body: unknown, success: string, method: "POST" | "DELETE" = "POST") => {
     if (!token) throw new Error(t("dashboard.sessionPending"));
@@ -257,5 +293,5 @@ export function useDashboard() {
     };
   }, [monitoredProjectIds, t, token]);
 
-  return { data, observedAt, token, loading, error: connectionError ?? error, notice, dismissNotice: () => setNotice(null), mutate, setError, runningCount };
+  return { data, observedAt, token, knowledgeToken, knowledgeSessionVersion, changeKnowledgeToken, knowledgeChange, loading, error: connectionError ?? error, notice, dismissNotice: () => setNotice(null), mutate, setError, runningCount };
 }

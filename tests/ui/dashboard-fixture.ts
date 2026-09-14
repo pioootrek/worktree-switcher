@@ -54,6 +54,9 @@ export async function mountDashboard(
     const streams = new Set<{ send(frame: string): void; disconnect(): void }>();
     const events = {
       active: 0,
+      opened: 0,
+      lastKnowledgeToken: "",
+      version: { epoch: "fixture", revision: 0 },
       lastUrl: "",
       lastToken: "",
       emit(type: string, data: unknown = {}) {
@@ -68,6 +71,7 @@ export async function mountDashboard(
       if (url.pathname !== "/api/events") return nativeFetch(input, init);
       events.lastUrl = `${url.pathname}${url.search}`;
       events.lastToken = new Headers(init?.headers).get("X-Worktree-Switcher-Token") ?? "";
+      events.lastKnowledgeToken = new Headers(init?.headers).get("Authorization") ?? "";
       if (events.lastToken !== "ui-fixture-token") return new Response("Unauthorized", { status: 401 });
       let streamController: ReadableStreamDefaultController<Uint8Array>;
       let connected = true;
@@ -90,7 +94,8 @@ export async function mountDashboard(
           streamController = controller;
           streams.add(connection);
           events.active += 1;
-          queueMicrotask(() => connection.send("event: ready\ndata: {\"epoch\":\"fixture\",\"revision\":0}\n\n"));
+          events.opened += 1;
+          queueMicrotask(() => connection.send(`event: ready\ndata: ${JSON.stringify(events.version)}\n\n`));
         },
         cancel: cleanup,
       });

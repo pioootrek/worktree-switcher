@@ -196,3 +196,36 @@ describe("knowledge service SQLite flow", () => {
     store.close();
   });
 });
+
+describe("knowledge browsing", () => {
+  it("matches Polish title casing and normalized accents before paging tasks and threads", () => {
+    const { store, service, actor } = setup();
+    for (const [index, title] of ["ŁÓDŹ", "łódź", "Other", "ŁÓDŹ".normalize("NFD")].entries()) {
+      service.createTask("project-1", { title, description: "Details" }, { idempotencyKey: `task-${index}` }, actor);
+      service.createThread("project-1", { title, body: "Details" }, { idempotencyKey: `thread-${index}` }, actor);
+    }
+    for (const query of ["łódź", "ŁÓDŹ", "ŁÓDŹ".normalize("NFD")]) {
+      for (const operation of ["tasks", "threads"] as const) {
+        const pages = [0, 1, 2].map(offset => service.execute({ operation, input: { projectId: "project-1", query, limit: 1, offset } }, actor) as { items: Array<{ id: string; title: string }>; nextOffset: number | null });
+        expect(pages.map(page => page.items.length)).toEqual([1, 1, 1]);
+        expect(new Set(pages.flatMap(page => page.items.map(item => item.id))).size).toBe(3);
+        expect(pages.map(page => page.nextOffset)).toEqual([1, 2, null]);
+      }
+    }
+    store.close();
+  });
+
+  it("filters before pagination, returns summaries, and lists only readable projects", () => {
+    const { store, service, actor } = setup();
+    for (let index = 0; index < 4; index++) service.createTask("project-1", { title: index % 2 ? "Chosen" : "Other", description: "Full description", priority: index % 2 ? "now" : "later" }, { idempotencyKey: `task-${index}` }, actor);
+    const first = service.execute({ operation: "tasks", input: { projectId: "project-1", priority: "now", query: "chosen", limit: 1 } }, actor) as { items: Array<{ id: string }>; nextOffset: number };
+    expect(first.items).toHaveLength(1);
+    expect(first.items[0]).not.toHaveProperty("description");
+    expect(first.nextOffset).toBe(1);
+    const second = service.execute({ operation: "tasks", input: { projectId: "project-1", priority: "now", offset: first.nextOffset, limit: 1 } }, actor) as { items: Array<{ id: string }>; nextOffset: null };
+    expect(second.items[0].id).not.toBe(first.items[0].id); expect(second.nextOffset).toBeNull();
+    expect(service.execute({ operation: "projects", input: {} }, actor)).toMatchObject({ items: [{ id: "project-1", writable: true }], nextOffset: null });
+    expect(service.execute({ operation: "project", input: { projectId: "project-1" } }, actor)).toMatchObject({ id: "project-1", writable: true });
+    store.close();
+  });
+});

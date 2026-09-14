@@ -315,3 +315,56 @@ before contributing code.
 
 [MIT](LICENSE). Dependency attribution is recorded in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Project knowledge
+
+The **Knowledge** view contains Backlog and Discussions, including replies,
+linked tasks, title/status/priority filters and revision conflicts. Knowledge
+projects remain available without a runtime project or repository. The Memory
+tab identifies the next stage; memory approval and Hub import are not implemented
+by this slice.
+
+Knowledge requires an owner session or a scoped agent token. The existing
+pairing token and shared runtime MCP token do not grant knowledge access. Use
+`worktree-switcher identity bootstrap-owner` for the initial owner, then supply
+that session through `WORKTREE_SWITCHER_OWNER_TOKEN` for identity administration.
+Use `identity renew-owner` before expiry; `identity recover-owner` is a local
+recovery operation that requires the controller to be stopped and acquires its
+singleton lock. Enter an active session in **Sign in to knowledge** in the UI.
+
+Create a project with `identity create-knowledge-project --name "My project"`.
+Give the owner and each participating agent explicit grants with
+`identity grant-knowledge --principal-id <principal-id> --project-id <project-id>
+--permissions knowledge:read,knowledge:write`. Existing `create-agent` and
+`issue-agent-token` commands provide agent credentials. Keep credentials private.
+
+The online CLI uses `WORKTREE_SWITCHER_KNOWLEDGE_TOKEN` (or
+`WORKTREE_SWITCHER_OWNER_TOKEN`) and never opens the database:
+
+```bash
+worktree-switcher knowledge projects
+worktree-switcher knowledge threads --json '{"projectId":"<project-id>"}'
+worktree-switcher knowledge create_thread --input-file finding.json
+```
+
+`finding.json` contains `projectId`, `title`, `body` and `idempotencyKey`.
+Reuse the same key and input after a lost response. Editing a task requires
+`expectedRevision`; conflicts preserve the saved record. CLI failures return
+nonzero and carry the application error code. The command lists its available
+operations when invoked without an operation. `--json` and `--input-file` contain
+only the operation input; authentication comes from the environment.
+
+Scoped MCP sessions expose `get_identity` and `knowledge_*` tools, including
+`knowledge_projects`, `knowledge_create_thread`, `knowledge_create_reply`,
+`knowledge_task_from_thread`, `knowledge_create_task` and `knowledge_update_task`.
+HTTP uses `POST /api/knowledge` with a bearer credential and the envelope
+`{"operation":"threads","input":{"projectId":"<project-id>"}}`.
+All three transports invoke the same application operations. Pages default to
+25 records (maximum 100) and provide `nextOffset`; requests are limited to 64 KiB.
+Thread and task lists contain summaries; full bodies use the detail operations.
+
+Record links use `?view=knowledge&knowledgeProject=...&knowledgeTab=...&record=...`
+and survive refresh of the static dashboard. Drafts, write failures and retry
+keys remain in the current browser tab's session storage. Knowledge changes
+reuse the dashboard event connection, filter projects by current grants and
+refresh only knowledge. Revoked grants also block reads and idempotent retries.

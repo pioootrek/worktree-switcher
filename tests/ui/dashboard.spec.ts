@@ -698,3 +698,22 @@ test("test launch dialog follows the chosen worktree and resets its preset", asy
   expect(requests.at(-1)).toEqual({ path: "/api/projects/web/tests", method: "POST", body: { worktreePath: "/fixture/alt", presetId: "node:check" } });
   expect(errors).toEqual([]);
 });
+
+
+test("dashboard history restores each section without duplicate entries", async ({ page }) => {
+  await mountDashboard(page);
+  const nav = (name: string) => page.getByRole("button", { name, exact: true });
+  await nav("Tests").click();
+  await expect(page).toHaveURL(/view=tests/);
+  await nav("Resources").click();
+  await nav("Logs").click();
+  const historyLength = await page.evaluate(() => window.history.length);
+  await nav("Logs").click();
+  expect(await page.evaluate(() => window.history.length)).toBe(historyLength);
+  await page.goBack(); await expect(nav("Resources")).toHaveAttribute("aria-current", "page");
+  await page.goBack(); await expect(nav("Tests")).toHaveAttribute("aria-current", "page");
+  await page.goForward(); await expect(nav("Resources")).toHaveAttribute("aria-current", "page");
+  await nav("Knowledge").click();
+  await page.goBack(); await expect(nav("Resources")).toHaveAttribute("aria-current", "page");
+  await page.reload(); await expect(nav("Resources")).toHaveAttribute("aria-current", "page");
+});
