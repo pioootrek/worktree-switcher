@@ -274,3 +274,167 @@ test("Back and Forward never initialize an editor from the previous record", asy
   expect(f.records[1].description).toBe("Updated B");
   expect(f.errors).toEqual([]);
 });
+
+async function mountMemory(page: Page) {
+  const fixture = await mountKnowledge(page);
+  const memories: import("../../src/shared/contracts/knowledge-memory").KnowledgeMemory[] = [];
+  const saved = new Map<string, unknown>();
+  const entries: unknown[] = [];
+  let loseResponse = false;
+  await page.route("**/api/knowledge", async route => {
+    const { operation, input } = route.request().postDataJSON();
+    const record = memories.find(item => item.id === input.memoryId);
+    const pageResult = (items: unknown[]) => ({ items, nextOffset: null });
+    if (operation === "search") return route.fulfill({ json: pageResult(memories.filter(item => (input.includeInactive || item.status === "active") && (!input.query || `${item.title} ${item.body}`.includes(input.query))).map(item => ({ ...item, kind: "memory", excerpt: item.body.slice(0, 300), threadId: null }))) });
+    if (operation === "memory") return route.fulfill({ json: record });
+    if (operation === "history") return route.fulfill({ json: pageResult(entries) });
+    if (operation === "task_context" || operation === "export_context") {
+      const task = fixture.records.find(item => item.id === input.taskId)!;
+      const items = memories.filter(item => item.status === "active").map(item => ({ ...item, excerpt: item.body, bodyTruncated: false, sourceStates: item.sources.map(source => ({ source, currentRevision: 1, stale: false, inactive: false })) }));
+      const context = { formatVersion: 1, generatedAt: "2026-09-14", projectId: input.projectId, task, scope: task.description, scopeTruncated: false, decisions: items.filter(item => item.category === "decision" && item.approval), proposals: items.filter(item => item.category !== "question" && !item.approval), openQuestions: items.filter(item => item.category === "question"), evidence: [], nextOffset: null, fingerprint: `version-${memories.map(item => item.revision).join("-")}` };
+      if (operation === "task_context") return route.fulfill({ json: context });
+      return route.fulfill({ json: { ...context, format: input.format, content: JSON.stringify(context) } });
+    }
+    if (!["create_memory", "update_memory", "approve_memory", "archive_memory", "restore_memory", "supersede_memory"].includes(operation)) return route.fallback();
+    if (saved.has(input.idempotencyKey)) return route.fulfill({ json: { value: saved.get(input.idempotencyKey), replayed: true } });
+    if (operation !== "create_memory" && record?.revision !== input.expectedRevision) return route.fulfill({ status: 409, json: { code: "revision_conflict", currentRevision: record?.revision, error: "Conflict" } });
+    let value = record;
+    if (operation === "create_memory") {
+      value = { ...input, id: `memory-${memories.length}`, revision: 1, status: "active", approval: null, supersededBy: null, createdBy: "owner", createdAt: "2026-09-14", updatedAt: "2026-09-14" };
+      memories.push(value!);
+    } else {
+      entries.push({ id: entries.length, operation, revision: record!.revision + 1, previousJson: JSON.stringify(record), principalId: "owner" });
+      Object.assign(record!, { revision: record!.revision + 1, approval: null });
+      if (operation === "update_memory") Object.assign(record!, { title: input.title, body: input.body, category: input.category, tags: input.tags, legacyId: input.legacyId, sources: input.sources });
+      if (operation === "approve_memory") record!.approval = { revision: record!.revision, principalId: "owner", approvedAt: "2026-09-14" };
+      if (operation === "archive_memory") record!.status = "archived";
+      if (operation === "restore_memory") record!.status = "active";
+      if (operation === "supersede_memory") { record!.status = "superseded"; record!.supersededBy = { id: input.replacementId, revision: input.replacementRevision }; }
+    }
+    saved.set(input.idempotencyKey, structuredClone(value));
+    if (loseResponse) { loseResponse = false; return route.abort("failed"); }
+    return route.fulfill({ json: { value, replayed: false } });
+  });
+  await page.getByRole("button", { name: "Quick save", exact: true }).click();
+  await page.getByLabel("Title", { exact: true }).fill("K4 task");
+  await page.getByLabel("Body", { exact: true }).fill("Preserve decisions between sessions");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "K4 task", exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "Memory", exact: true }).click();
+  return { ...fixture, memories, loseResponse: () => { loseResponse = true; } };
+}
+
+async function addMemory(page: Page, title: string, category = "decision") {
+  await page.getByRole("button", { name: "Add memory", exact: true }).click();
+  await page.getByLabel("Title", { exact: true }).fill(title);
+  await page.getByLabel("Body", { exact: true }).fill("Use one SQLite owner");
+  await page.getByLabel("Memory category", { exact: true }).selectOption(category);
+  await page.getByLabel("Source record ID", { exact: true }).fill("k0");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+}
+
+test("memory approval, edit invalidation, archive, supersession and context export", async ({ page }) => {
+  const f = await mountMemory(page);
+  await addMemory(page, "Storage decision");
+  await page.getByRole("button", { name: "Approve this revision", exact: true }).click();
+  await expect(page.getByText("Approved by owner, revision 2", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Edit memory", exact: true }).click();
+  await page.getByLabel("Body", { exact: true }).fill("Use SQLite with revision history");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Active · Proposed", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Archive memory", exact: true }).click();
+  await expect(page.getByText("Archived · Proposed", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Restore memory", exact: true }).click();
+  await page.getByRole("button", { name: "Approve this revision", exact: true }).click();
+  await expect(page.getByText("Approved by owner, revision 6", { exact: true })).toBeVisible();
+  await addMemory(page, "Retention question", "question");
+  await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+  await page.getByRole("link", { name: "K4 task", exact: true }).click();
+  await page.getByRole("button", { name: "Next session context", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Approved decisions", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Retention question/ })).toBeVisible();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download JSON", exact: true }).click();
+  expect((await download).suggestedFilename()).toBe("task-context-k0-0.json");
+  f.memories[1].revision++;
+  await page.getByRole("button", { name: "Next session context", exact: true }).click();
+  await expect(page.getByText("The downloaded export is now out of date. Download a new version.", { exact: true })).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: test.info().outputPath("k4-context-desktop.png"), fullPage: true });
+  await page.getByRole("tab", { name: "Memory", exact: true }).click();
+  await addMemory(page, "Replacement");
+  await page.getByRole("link", { name: "Storage decision", exact: true }).click();
+  await page.getByLabel("Replacement memory ID", { exact: true }).fill("memory-2");
+  await page.getByRole("button", { name: "Supersede with this record", exact: true }).click();
+  await expect(page.getByText("Superseded · Proposed", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Replacement: memory-2 · r1", exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Switch language to Polish" }).click();
+  await expect(page.getByRole("button", { name: "Zatwierdź tę rewizję", exact: true })).toBeDisabled();
+  await expect(page.getByLabel("Szukaj w tytułach, treści i pamięci", { exact: true })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("k4-memory-mobile-pl.png"), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(f.errors).toEqual([]);
+});
+
+test("memory draft retries a lost response after reload without duplicating the record", async ({ page }) => {
+  const f = await mountMemory(page);
+  await page.getByRole("button", { name: "Add memory", exact: true }).click();
+  await page.getByLabel("Title", { exact: true }).fill("Recovered memory");
+  await page.getByLabel("Body", { exact: true }).fill("Evidence");
+  await page.getByLabel("Source record ID", { exact: true }).fill("k0");
+  f.loseResponse();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Saving failed.", { exact: false })).toBeVisible();
+  expect(f.memories).toHaveLength(1);
+  await page.reload();
+  await page.getByRole("button", { name: "Add memory", exact: true }).click();
+  await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Recovered memory");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Recovered memory", exact: true })).toBeVisible();
+  expect(f.memories).toHaveLength(1);
+  expect(f.errors).toEqual([]);
+});
+
+test("context pagination returns to the actual preceding page after a byte-limited page", async ({ page }) => {
+  const f = await mountMemory(page);
+  const offsets: number[] = [];
+  await page.route("**/api/knowledge", route => {
+    const { operation, input } = route.request().postDataJSON();
+    if (operation !== "task_context") return route.fallback();
+    offsets.push(input.offset);
+    return route.fulfill({ json: { formatVersion: 1, projectId: input.projectId, task: f.records[0], scope: `Context page ${input.offset}`, decisions: [], proposals: [], openQuestions: [], evidence: [], nextOffset: input.offset === 0 ? 7 : input.offset === 7 ? 14 : null, fingerprint: "test", scopeTruncated: false } });
+  });
+  await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+  await page.getByRole("link", { name: "K4 task", exact: true }).click();
+  await page.getByRole("button", { name: "Next session context", exact: true }).click();
+  const section = page.getByRole("button", { name: "Next session context", exact: true }).locator("..");
+  await expect(section.getByText("Context page 0", { exact: true })).toBeVisible();
+  await section.getByRole("button", { name: "Next page", exact: true }).click();
+  await expect(section.getByText("Context page 7", { exact: true })).toBeVisible();
+  await section.getByRole("button", { name: "Next page", exact: true }).click();
+  await expect(section.getByText("Context page 14", { exact: true })).toBeVisible();
+  await section.getByRole("button", { name: "Previous page", exact: true }).click();
+  await expect(section.getByText("Context page 7", { exact: true })).toBeVisible();
+  expect(offsets).toEqual([0, 7, 14, 7]);
+  await section.getByLabel("Entries per context page", { exact: true }).selectOption("1");
+  await expect(section.getByText("Context page 0", { exact: true })).toBeVisible();
+  expect(f.errors).toEqual([]);
+});
+
+test("dashboard Refresh retries failed memory reads and clears their error", async ({ page }) => {
+  const f = await mountMemory(page);
+  let failed = true;
+  await page.route("**/api/knowledge", route => {
+    const { operation } = route.request().postDataJSON();
+    if (operation === "search" && failed) return route.fulfill({ status: 503, json: { code: "unavailable", error: "Retry" } });
+    return route.fallback();
+  });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(page.getByText("Could not read knowledge.", { exact: false })).toBeVisible();
+  failed = false;
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(page.getByText("Could not read knowledge.", { exact: false })).toHaveCount(0);
+  expect(f.errors).toEqual([]);
+});

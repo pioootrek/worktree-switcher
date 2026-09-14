@@ -11,6 +11,8 @@ import { useI18n } from "@/i18n/provider";
 import type { KnowledgeFilters } from "@/shared/contracts/knowledge";
 import { isKnowledgeAccessError, knowledgeIdentity } from "./knowledge-client";
 import { KnowledgeEditor, fieldClass, type EditorMode } from "./knowledge-editor";
+import { MemoryPanel } from "./memory-panel";
+import { TaskContext } from "./task-context";
 import { useKnowledge, type KnowledgeTab } from "./use-knowledge";
 
 export function KnowledgeDashboard({ token, setToken, change }: { token: string; setToken: (value: string) => void; change: { version: number; projectIds: string[] } }) {
@@ -74,7 +76,7 @@ export function KnowledgeDashboard({ token, setToken, change }: { token: string;
     {!projects.items.length && !selection.projectId && <p>{t("knowledge.noProjectsHelp")}</p>}
     <Tabs value={selection.tab} onValueChange={value => navigate(value as KnowledgeTab)}><TabsList aria-label={t("knowledge.title")}><TabsTrigger value="backlog">{t("knowledge.backlog")}</TabsTrigger><TabsTrigger value="discussions">{t("knowledge.discussions")}</TabsTrigger><TabsTrigger value="memory">{t("knowledge.memory")}</TabsTrigger></TabsList></Tabs>
     {notice && <p role="status" className="text-sm">{t("knowledge.saved")}</p>}
-    {selection.tab === "memory" ? <div className="rounded-xl border border-border p-6"><h3 className="font-semibold">{t("knowledge.memory")}</h3><p className="mt-2 text-muted-foreground">{t("knowledge.memoryLater")}</p></div> : selection.projectId && <>
+    {selection.tab === "memory" ? (selection.projectId ? <MemoryPanel key={`${identity.principal.id}:${selection.projectId}:${selection.recordId}`} token={token} principalId={identity.principal.id} projectId={selection.projectId} recordId={selection.recordId} writable={Boolean(writable)} approvable={identity.principal.kind === "owner" && identity.credential.kind === "owner_session" && project?.status === "active"} changeVersion={change.version + model.refreshVersion} onSelect={navigate} /> : <p>{t("knowledge.noProjectsHelp")}</p>) : selection.projectId && <>
       <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-muted-foreground">{t(writable ? "knowledge.independent" : "knowledge.readOnly")}</p><Button ref={actionRef} disabled={!writable} onClick={() => { setMode(selection.tab === "discussions" ? "thread" : "task"); setNotice(false); }}>{t("knowledge.quickSave")}</Button></div>
       <form className="flex flex-wrap items-end gap-3" key={`${selection.projectId}:${selection.tab}`} onSubmit={event => {
         event.preventDefault(); const form = new FormData(event.currentTarget);
@@ -104,6 +106,7 @@ export function KnowledgeDashboard({ token, setToken, change }: { token: string;
             <p className="break-all text-xs text-muted-foreground">{t("knowledge.attribution", { author: detail.createdBy, revision: detail.revision })}</p>
             <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{"description" in detail ? detail.description : detail.body}</p>
             <div className="flex flex-wrap gap-2">{"description" in detail ? <Button variant="outline" disabled={!writable} onClick={() => setMode("edit")}>{t("knowledge.edit")}</Button> : <><Button variant="outline" disabled={!writable} onClick={() => setMode("reply")}>{t("knowledge.reply")}</Button><Button variant="outline" disabled={!writable} onClick={() => setMode("from_thread")}>{t("knowledge.fromThread")}</Button></>}</div>
+            {"description" in detail && <TaskContext key={`${selection.projectId}:${detail.id}`} token={token} projectId={selection.projectId} taskId={detail.id} changeVersion={change.version + detail.revision + model.refreshVersion} />}
             {model.relations.items.length > 0 && <section className="space-y-2" aria-label={t("knowledge.relations")}><h4 className="font-medium">{t("knowledge.relations")}</h4><ul className="space-y-2">{model.relations.items.map(relation => {
               const source = relation.sourceId === detail.id;
               const targetId = source ? relation.targetId : relation.sourceId;

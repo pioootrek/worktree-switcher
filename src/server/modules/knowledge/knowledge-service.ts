@@ -19,14 +19,10 @@ import type {
   KnowledgeThread,
 } from "./contracts";
 
-export type KnowledgeErrorCode = "invalid_request" | "not_found" | "revision_conflict" | "idempotency_conflict" | "limit_exceeded";
-
-export class KnowledgeError extends Error {
-  constructor(readonly code: KnowledgeErrorCode, message: string, readonly currentRevision?: number) {
-    super(message);
-    this.name = "KnowledgeError";
-  }
-}
+import { KnowledgeError } from "./knowledge-error";
+export { KnowledgeError } from "./knowledge-error";
+export type { KnowledgeErrorCode } from "./knowledge-error";
+import { KnowledgeMemoryService } from "./knowledge-memory-service";
 
 export interface KnowledgeWriteOptions { idempotencyKey: string }
 
@@ -70,6 +66,10 @@ export class KnowledgeService {
 
   private dispatch(request: KnowledgeRequest, actor: AuthenticatedPrincipal) {
     switch (request.operation) {
+      case "memories": case "memory": case "create_memory": case "update_memory":
+      case "approve_memory": case "archive_memory": case "restore_memory": case "supersede_memory":
+      case "search": case "task_context": case "export_context": case "check_context_export":
+        return new KnowledgeMemoryService(this.store, this.identity, this.clock, this.id, this.changed).execute(request, actor);
       case "project": {
         this.identity.authorizeKnowledge(actor, request.input.projectId, "knowledge:read");
         const project = this.store.getKnowledgeProject(request.input.projectId)!;
@@ -84,6 +84,12 @@ export class KnowledgeService {
       case "threads": {
         const page = this.listThreads(request.input.projectId, actor, request.input);
         return { ...page, items: page.items.map(recordSummary) };
+      }
+      case "reply": {
+        this.identity.authorizeKnowledge(actor, request.input.projectId, "knowledge:read");
+        const reply = this.store.getReply(request.input.projectId, request.input.replyId);
+        if (!reply) throw new KnowledgeError("not_found", "Reply not found.");
+        return reply;
       }
       case "thread": return this.thread(request.input.projectId, request.input.threadId, actor);
       case "replies": return this.listReplies(request.input.projectId, request.input.threadId, actor, request.input);

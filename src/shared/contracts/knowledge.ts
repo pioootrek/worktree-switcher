@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { memorySchemas } from "./knowledge-memory-schemas";
 
 export interface KnowledgeProject {
   id: string;
@@ -9,7 +10,7 @@ export interface KnowledgeProject {
   updatedAt: string;
 }
 
-export type KnowledgeRecordKind = "thread" | "reply" | "task";
+export type KnowledgeRecordKind = "thread" | "reply" | "task" | "memory";
 export type KnowledgeTaskStatus = "open" | "in_progress" | "blocked" | "done" | "archived";
 export type KnowledgeTaskPriority = "now" | "next" | "later";
 export type KnowledgeRelationType = "derived_from" | "blocks" | "relates_to" | "supersedes";
@@ -67,7 +68,7 @@ export interface KnowledgeHistoryEntry {
   projectId: string;
   recordKind: KnowledgeRecordKind | "project" | "relation";
   recordId: string;
-  operation: "created" | "updated" | "archived" | "linked" | "unlinked";
+  operation: "created" | "updated" | "archived" | "linked" | "unlinked" | "approved" | "superseded";
   previousJson: string | null;
   principalId: string;
   authenticationMethod: "owner_session" | "agent_token" | "worker_token";
@@ -110,19 +111,21 @@ const body = z.string().trim().min(1).max(65536);
 const query = z.string().trim().max(200).optional();
 export const knowledgeStatus = z.enum(["open", "in_progress", "blocked", "done", "archived"]);
 export const knowledgePriority = z.enum(["now", "next", "later"]);
-const record = { ...project, recordId: id, recordKind: z.enum(["thread", "reply", "task"]) };
+const record = { ...project, recordId: id, recordKind: z.enum(["thread", "reply", "task", "memory"]) };
 
 /** One validated application contract for HTTP, MCP and CLI. */
 export const knowledgeSchemas = {
+  ...memorySchemas,
   project: z.strictObject({ ...project }),
   projects: z.strictObject({ ...page }),
   threads: z.strictObject({ ...project, ...page, query }),
+  reply: z.strictObject({ ...project, replyId: id }),
   thread: z.strictObject({ ...project, threadId: id }),
   replies: z.strictObject({ ...project, threadId: id, ...page }),
   tasks: z.strictObject({ ...project, ...page, query, status: knowledgeStatus.optional(), priority: knowledgePriority.optional() }),
   task: z.strictObject({ ...project, taskId: id }),
   relations: z.strictObject({ ...record, ...page }),
-  history: z.strictObject({ ...record, recordKind: z.enum(["thread", "reply", "task", "project", "relation"]), ...page }),
+  history: z.strictObject({ ...record, recordKind: z.enum(["thread", "reply", "task", "memory", "project", "relation"]), ...page }),
   create_thread: z.strictObject({ ...project, ...write, title, body }),
   create_reply: z.strictObject({ ...project, ...write, threadId: id, body }),
   create_task: z.strictObject({ ...project, ...write, title, description: body, priority: knowledgePriority.optional() }),

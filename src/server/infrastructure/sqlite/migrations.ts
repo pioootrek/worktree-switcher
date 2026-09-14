@@ -553,6 +553,41 @@ function applyMigrations(database: Database.Database): void {
       recordMigration(database, 19);
     })();
   }
+  if (!hasMigration(database, 20)) {
+    database.transaction(() => {
+      database.exec(`
+        ALTER TABLE knowledge_history RENAME TO knowledge_history_k3;
+        DROP INDEX knowledge_history_record;
+      `);
+      database.exec(KNOWLEDGE_CONTENT_SCHEMA
+        .replace("('project', 'thread', 'reply', 'task', 'relation')", "('project', 'thread', 'reply', 'task', 'relation', 'memory')")
+        .replace("('created', 'updated', 'archived', 'linked', 'unlinked')", "('created', 'updated', 'archived', 'linked', 'unlinked', 'approved', 'superseded')"));
+      database.exec(`
+        INSERT INTO knowledge_history SELECT * FROM knowledge_history_k3;
+        DROP TABLE knowledge_history_k3;
+        CREATE TABLE IF NOT EXISTS knowledge_memories (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          category TEXT NOT NULL CHECK(category IN ('decision', 'question', 'note')),
+          tags_json TEXT NOT NULL,
+          legacy_id TEXT,
+          sources_json TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('active', 'archived', 'superseded')),
+          superseded_by_json TEXT,
+          approval_json TEXT,
+          revision INTEGER NOT NULL CHECK(revision > 0),
+          created_by TEXT NOT NULL REFERENCES remote_principals(id),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS knowledge_memories_project ON knowledge_memories(project_id, status, updated_at DESC, id);
+      `);
+      recordMigration(database, 20);
+    })();
+  }
+
 }
 
 function ensureLaunchPresetColumn(database: Database.Database): void {
