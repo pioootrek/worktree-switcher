@@ -1,0 +1,143 @@
+import { expect, test, type Page } from "@playwright/test";
+import { dashboardFixture, mountDashboard } from "./dashboard-fixture";
+
+async function mountKnowledge(page: Page) {
+  await page.addInitScript(() => sessionStorage.setItem("worktree-switcher-knowledge-token", "knowledge-fixture"));
+  const data = dashboardFixture(); data.projects = [];
+  const fixture = await mountDashboard(page, data);
+  const project = { id: "knowledge-only", name: "Knowledge without server", status: "active", writable: true, revision: 1, createdAt: "2026-01-01", updatedAt: "2026-01-01" };
+  const records: Array<{ id: string; projectId: string; title: string; body?: string; description?: string; priority?: string; status?: string; revision: number; createdBy: string }> = [];
+  const replies: Array<{ id: string; threadId: string; body: string; revision: number; createdBy: string }> = [];
+  const calls: Array<{ operation: string; input: Record<string, unknown> }> = [];
+  const saved = new Map<string, unknown>();
+  let failSave = false;
+  await page.route("**/api/identity", route => route.fulfill({ json: { principal: { id: "owner", kind: "owner" }, credential: { kind: "owner_session" } } }));
+  await page.route("**/api/knowledge", async route => {
+    const request = route.request().postDataJSON(); calls.push(request);
+    const { operation, input } = request;
+    const pageResult = (items: unknown[]) => ({ items, nextOffset: null });
+    if (operation === "projects") return route.fulfill({ json: pageResult([project]) });
+    if (operation === "project") return route.fulfill({ json: project });
+    if (operation === "tasks" || operation === "threads") return route.fulfill({ json: pageResult(records.filter(record => (operation === "tasks" ? "description" in record : "body" in record) && (!input.query || record.title.includes(input.query)) && (!input.status || record.status === input.status) && (!input.priority || record.priority === input.priority))) });
+    if (operation === "task" || operation === "thread") return route.fulfill({ json: records.find(record => record.id === (input.taskId ?? input.threadId)) });
+    if (operation === "relations") return route.fulfill({ json: pageResult([]) });
+    if (operation === "replies") return route.fulfill({ json: pageResult(replies.filter(reply => reply.threadId === input.threadId)) });
+    if (failSave) return route.fulfill({ status: 503, json: { code: "unavailable", error: "Unavailable" } });
+    if (saved.has(input.idempotencyKey)) return route.fulfill({ json: { value: saved.get(input.idempotencyKey), replayed: true } });
+    if (operation === "create_reply") {
+      const reply = { id: `r${replies.length}`, threadId: input.threadId, body: input.body, revision: 1, createdBy: "owner" }; replies.push(reply); saved.set(input.idempotencyKey, reply);
+      return route.fulfill({ json: { value: reply, replayed: false } });
+    }
+    if (operation === "update_task") {
+      const record = records.find(record => record.id === input.taskId)!;
+      if (record.revision !== input.expectedRevision) return route.fulfill({ status: 409, json: { code: "revision_conflict", currentRevision: record.revision, error: "Conflict" } });
+      Object.assign(record, { title: input.title, description: input.description, priority: input.priority, status: input.status, revision: record.revision + 1 }); saved.set(input.idempotencyKey, record);
+      return route.fulfill({ json: { value: record, replayed: false } });
+    }
+    const record = { id: `k${records.length}`, projectId: project.id, title: input.title, ...(operation === "create_thread" ? { body: input.body } : { description: input.description, status: "open", priority: input.priority ?? "later" }), revision: 1, createdBy: "owner" };
+    records.push(record);
+    const value = operation === "task_from_thread" ? { task: record, relation: { targetId: input.threadId } } : record;
+    saved.set(input.idempotencyKey, value);
+    return route.fulfill({ json: { value, replayed: false } });
+  });
+  await page.getByRole("button", { name: "Knowledge", exact: true }).click();
+  await expect(page.getByLabel("Knowledge project", { exact: true })).toHaveValue(project.id);
+  return { ...fixture, records, calls, setFailure: (value: boolean) => { failSave = value; } };
+}
+
+test("knowledge without runtime: discussion, reply, task, filters and static deep link", async ({ page }) => {
+  const f = await mountKnowledge(page);
+  await page.getByRole("tab", { name: "Discussions", exact: true }).click();
+  await page.getByRole("button", { name: "Quick save", exact: true }).click();
+  await page.getByLabel("Title", { exact: true }).fill("Finding"); await page.getByLabel("Body", { exact: true }).fill("Evidence");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Finding", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Reply", exact: true }).click();
+  await page.getByLabel("Body", { exact: true }).fill("Confirmed"); await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Confirmed", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Create task from thread", exact: true }).click();
+  await page.getByLabel("Title", { exact: true }).fill("Fix finding"); await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Fix finding", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/knowledgeTab=backlog.*record=/);
+  await page.reload(); await expect(page.getByRole("heading", { name: "Fix finding", exact: true })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("knowledge-desktop.png"), fullPage: true });
+  await page.getByLabel("Search titles").fill("Absent"); await page.getByRole("button", { name: "Filter", exact: true }).click();
+  await expect(page.getByText("No entries match these filters.")).toBeVisible();
+  expect(f.calls.some(call => call.operation === "tasks" && call.input.query === "Absent")).toBe(true);
+  expect(f.requests).toEqual([]); expect(f.errors).toEqual([]);
+  expect(await page.evaluate(() => (window as unknown as { fixtureEvents: { active: number } }).fixtureEvents.active)).toBe(1);
+});
+
+test("conflict and failed save keep drafts after reload; knowledge events avoid dashboard refresh", async ({ page }) => {
+  const f = await mountKnowledge(page);
+  await page.getByRole("button", { name: "Quick save", exact: true }).click();
+  await page.getByLabel("Title", { exact: true }).fill("Task"); await page.getByLabel("Body", { exact: true }).fill("Original");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "Edit task", exact: true }).click();
+  await page.getByLabel("Body", { exact: true }).fill("Local draft");
+  f.records[0].description = "Other client"; f.records[0].revision = 2;
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Someone changed this record.", { exact: false })).toBeVisible();
+  await expect(page.getByLabel("Body", { exact: true })).toHaveValue("Local draft");
+  await page.reload();
+  await expect(page.getByLabel("Body", { exact: true })).toHaveValue("Local draft");
+  await expect(page.getByText("Someone changed this record.", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Keep draft and use current revision" }).click();
+  f.setFailure(true);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Saving failed.", { exact: false })).toBeVisible();
+  const failedKey = f.calls.filter(call => call.operation === "update_task").at(-1)!.input.idempotencyKey;
+  await page.reload(); await expect(page.getByText("Saving failed.", { exact: false })).toBeVisible();
+  f.setFailure(false); await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
+  expect(f.calls.filter(call => call.operation === "update_task").at(-1)!.input.idempotencyKey).toBe(failedKey);
+  let dashboardReads = 0;
+  page.on("request", request => { if (new URL(request.url()).pathname.startsWith("/api/dashboard")) dashboardReads++; });
+  f.records[0].description = "Live update"; f.records[0].revision = 4;
+  await page.evaluate(() => (window as unknown as { fixtureEvents: { emit: (type: string, value: unknown) => void } }).fixtureEvents.emit("knowledge-changed", { projectIds: ["knowledge-only"] }));
+  await expect(page.getByText("Live update", { exact: true })).toBeVisible(); expect(dashboardReads).toBe(0);
+  expect(f.errors).toEqual([]);
+});
+
+test("Polish and mobile knowledge navigation has labeled fields and no overflow", async ({ page }) => {
+  await mountKnowledge(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Switch language to Polish" }).click();
+  await expect(page.getByLabel("Projekt wiedzy", { exact: true })).toBeVisible();
+  expect((await page.getByLabel("Projekt wiedzy", { exact: true }).boundingBox())!.width).toBeGreaterThan(280);
+  expect((await page.getByLabel("Szukaj w tytułach", { exact: true }).boundingBox())!.width).toBeGreaterThan(280);
+  await page.getByRole("button", { name: "Szybki zapis", exact: true }).click();
+  await expect(page.getByLabel("Tytuł", { exact: true })).toBeFocused();
+  await page.getByLabel("Tytuł", { exact: true }).fill("Zadanie"); await page.keyboard.press("Tab");
+  await expect(page.getByLabel("Treść", { exact: true })).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("knowledge-mobile-pl.png"), fullPage: true });
+});
+
+test("changing credentials clears the previous principal's visible knowledge before loading", async ({ page }) => {
+  const f = await mountKnowledge(page);
+  f.records.push({ id: "private", projectId: "knowledge-only", title: "Private task", description: "Private content", status: "open", priority: "now", revision: 1, createdBy: "owner" });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.getByRole("link", { name: "Private task", exact: true }).click();
+  await expect(page.getByText("Private content", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Sign out of knowledge" }).click();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let requested = false;
+  await page.route("**/api/identity", route => route.fulfill({ json: { principal: { id: "other-agent", kind: "agent" }, credential: { kind: "agent_token" } } }));
+  await page.route("**/api/knowledge", async route => {
+    requested = true;
+    await gate;
+    if (route.request().postDataJSON().operation === "projects") return route.fulfill({ json: { items: [], nextOffset: null } });
+    return route.fulfill({ status: 403, json: { code: "knowledge_forbidden", error: "Denied" } });
+  });
+  try {
+    await page.getByLabel("Knowledge credential", { exact: true }).fill("new-credential");
+    await page.getByRole("button", { name: "Sign in to knowledge", exact: true }).click();
+    await expect.poll(() => requested).toBe(true);
+    await expect(page.getByText("Private content", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Private task", { exact: true })).toHaveCount(0);
+  } finally { release(); }
+  await expect(page.getByText("Could not read knowledge.", { exact: false })).toBeVisible();
+  expect(f.errors).toEqual([]);
+});

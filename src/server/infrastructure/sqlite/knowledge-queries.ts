@@ -1,3 +1,4 @@
+import type { KnowledgeFilters, KnowledgeProjectSummary } from "@/shared/contracts/knowledge";
 import Database from "better-sqlite3";
 
 import {
@@ -30,6 +31,23 @@ const mapTask = (row: TaskRow): KnowledgeTask => ({ id: row.id, projectId: row.p
 export class KnowledgeQueries implements KnowledgeStore {
   constructor(private readonly database: Database.Database) {}
 
+  listKnowledgeProjects(principalId: string, limit: number, offset: number): KnowledgePage<KnowledgeProjectSummary> {
+    const rows = this.database.prepare(`SELECT p.*, EXISTS(SELECT 1 FROM json_each(g.permissions_json) WHERE value = 'knowledge:write') AS writable
+      FROM knowledge_projects p JOIN knowledge_project_grants g ON g.project_id = p.id
+      WHERE g.principal_id = ? AND g.revoked_at IS NULL
+      AND EXISTS(SELECT 1 FROM json_each(g.permissions_json) WHERE value = 'knowledge:read')
+      ORDER BY p.name, p.id LIMIT ? OFFSET ?`).all(principalId, limit + 1, offset) as Array<{ id: string; name: string; status: KnowledgeProject["status"]; revision: number; created_at: string; updated_at: string; writable: number }>;
+    return this.page(rows.map(row => ({ id: row.id, name: row.name, status: row.status, revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at, writable: Boolean(row.writable) })), limit, offset);
+  }
+
+  createTask(task: KnowledgeTask, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeTask> {
+    return this.mutate("task.create", context, () => {
+      this.insertTask(task);
+      this.history(task.projectId, "task", task.id, "created", null, task.revision, context, task.createdAt);
+      return task;
+    });
+  }
+
   getKnowledgeProject(id: string): KnowledgeProject | null {
     const row = this.database.prepare("SELECT id, name, status, revision, created_at, updated_at FROM knowledge_projects WHERE id = ?").get(id) as { id: string; name: string; status: KnowledgeProject["status"]; revision: number; created_at: string; updated_at: string } | undefined;
     return row ? { id: row.id, name: row.name, status: row.status, revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at } : null;
@@ -44,8 +62,8 @@ export class KnowledgeQueries implements KnowledgeStore {
     return row?.knowledge_project_id ?? null;
   }
 
-  listThreads(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeThread> {
-    return this.page((this.database.prepare("SELECT * FROM knowledge_threads WHERE project_id = ? ORDER BY updated_at DESC, id LIMIT ? OFFSET ?").all(projectId, limit + 1, offset) as ThreadRow[]).map(mapThread), limit, offset);
+  listThreads(projectId: string, limit: number, offset: number, filters: KnowledgeFilters = {}): KnowledgePage<KnowledgeThread> {
+    return this.page((this.database.prepare("SELECT * FROM knowledge_threads WHERE project_id = ? AND instr(lower(title), lower(?)) > 0 ORDER BY updated_at DESC, id LIMIT ? OFFSET ?").all(projectId, filters.query ?? "", limit + 1, offset) as ThreadRow[]).map(mapThread), limit, offset);
   }
   getThread(projectId: string, id: string): KnowledgeThread | null {
     const row = this.database.prepare("SELECT * FROM knowledge_threads WHERE project_id = ? AND id = ?").get(projectId, id) as ThreadRow | undefined;
@@ -62,8 +80,8 @@ export class KnowledgeQueries implements KnowledgeStore {
     const row = this.database.prepare("SELECT * FROM knowledge_tasks WHERE project_id = ? AND id = ?").get(projectId, id) as TaskRow | undefined;
     return row ? mapTask(row) : null;
   }
-  listTasks(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeTask> {
-    return this.page((this.database.prepare("SELECT * FROM knowledge_tasks WHERE project_id = ? ORDER BY updated_at DESC, id LIMIT ? OFFSET ?").all(projectId, limit + 1, offset) as TaskRow[]).map(mapTask), limit, offset);
+  listTasks(projectId: string, limit: number, offset: number, filters: KnowledgeFilters = {}): KnowledgePage<KnowledgeTask> {
+    return this.page((this.database.prepare("SELECT * FROM knowledge_tasks WHERE project_id = ? AND instr(lower(title), lower(?)) > 0 AND (? IS NULL OR status = ?) AND (? IS NULL OR priority = ?) ORDER BY updated_at DESC, id LIMIT ? OFFSET ?").all(projectId, filters.query ?? "", filters.status ?? null, filters.status ?? null, filters.priority ?? null, filters.priority ?? null, limit + 1, offset) as TaskRow[]).map(mapTask), limit, offset);
   }
   listHistory(projectId: string, recordKind: KnowledgeHistoryEntry["recordKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeHistoryEntry> {
     const rows = (this.database.prepare("SELECT * FROM knowledge_history WHERE project_id = ? AND record_kind = ? AND record_id = ? ORDER BY id LIMIT ? OFFSET ?").all(projectId, recordKind, recordId, limit + 1, offset) as HistoryRow[]).map((row) => ({ id: row.id, projectId: row.project_id, recordKind: row.record_kind, recordId: row.record_id, operation: row.operation, previousJson: row.previous_json, principalId: row.principal_id, authenticationMethod: row.authentication_method, revision: row.revision, createdAt: row.created_at }));

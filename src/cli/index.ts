@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { runKnowledgeCommand } from "./knowledge-management";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { homedir, networkInterfaces } from "node:os";
@@ -65,6 +66,10 @@ async function main(): Promise<void> {
     writeCliLine(paths.databasePath);
     return;
   }
+  if (command === "knowledge") {
+    await runKnowledgeCommand(process.argv.slice(3), paths, { write: writeCliLine });
+    return;
+  }
   if (command === "identity") {
     await runIdentityCommand(process.argv.slice(3), paths, { write: writeCliLine });
     return;
@@ -128,7 +133,7 @@ async function main(): Promise<void> {
     ...(projectId ? { projectIds: [projectId] } : {}),
   }));
   const identity = new IdentityService(store);
-  const knowledge = new KnowledgeService(store, identity);
+  const knowledge = new KnowledgeService(store, identity, undefined, undefined, events.publishKnowledge);
   const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs, undefined, storage, undefined, undefined, tests, lifecycle, knowledge);
   const accessToken = randomBytes(32).toString("base64url");
   const sessionId = randomBytes(8).toString("hex");

@@ -1,3 +1,4 @@
+import { registerKnowledgeTools } from "./transports/mcp/knowledge-tools";
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
@@ -187,6 +188,7 @@ export class McpRuntime {
     const server = new McpServer({ name: "worktree-switcher", version: packageJson.version });
     if (session.authentication.kind === "principal") {
       const actor = session.authentication.actor;
+      registerKnowledgeTools(server, this.service, actor);
       server.registerTool("get_identity", {
         description: "Read the authenticated principal, credential metadata, and active knowledge grants.",
         annotations: { readOnlyHint: true, idempotentHint: true },

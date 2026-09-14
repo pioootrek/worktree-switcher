@@ -70,6 +70,7 @@ function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
 
 export function connectDashboardEvents(options: {
   token: string;
+  knowledgeToken?: string;
   onEvent: EventHandler;
   onError: () => void;
   fetcher?: Fetcher;
@@ -89,6 +90,7 @@ export function connectDashboardEvents(options: {
           cache: "no-store",
           headers: {
             Accept: "text/event-stream",
+            ...(options.knowledgeToken ? { Authorization: `Bearer ${options.knowledgeToken}` } : {}),
             "X-Worktree-Switcher-Token": options.token,
           },
           signal: controller.signal,

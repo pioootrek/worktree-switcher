@@ -34,6 +34,19 @@ export function useDashboard() {
   const { locale, t } = useI18n();
   const [data, setData] = useState<ControllerDashboardResponse>({ projects: [], capacity: EMPTY_CAPACITY, testQueue: EMPTY_TEST_QUEUE, mcp: EMPTY_MCP_STATUS });
   const [token, setToken] = useState("");
+  const [knowledgeToken, setKnowledgeToken] = useState("");
+  const [knowledgeSessionVersion, setKnowledgeSessionVersion] = useState(0);
+  const [knowledgeChange, setKnowledgeChange] = useState({ version: 0, projectIds: [] as string[] });
+  const changeKnowledgeToken = useCallback((value: string) => {
+    if (value) window.sessionStorage.setItem("worktree-switcher-knowledge-token", value);
+    else window.sessionStorage.removeItem("worktree-switcher-knowledge-token");
+    setKnowledgeToken(value);
+    setKnowledgeSessionVersion(current => current + 1);
+  }, []);
+  useEffect(() => {
+    const timer = setTimeout(() => setKnowledgeToken(window.sessionStorage.getItem("worktree-switcher-knowledge-token") ?? ""), 0);
+    return () => clearTimeout(timer);
+  }, []);
   const [loading, setLoading] = useState(true);
   const [observedAt, setObservedAt] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -152,8 +165,17 @@ export function useDashboard() {
       void reconcile(accessToken, { bootstrap: true });
       events = connectDashboardEvents({
         token: accessToken,
+        knowledgeToken,
         onEvent(type, payload) {
+          if (type === "knowledge-changed") {
+            try {
+              const value = JSON.parse(payload) as { projectIds: string[] };
+              if (Array.isArray(value.projectIds) && value.projectIds.every(id => typeof id === "string")) setKnowledgeChange(current => ({ version: current.version + 1, projectIds: value.projectIds }));
+            } catch { /* A reconnect reconciles knowledge separately. */ }
+            return;
+          }
           if (type === "ready") {
+            setKnowledgeChange(current => ({ version: current.version + 1, projectIds: [] }));
             readyCount += 1;
             if (readyCount > 1) void reconcile(accessToken, { bootstrap: true });
             return;
@@ -188,7 +210,7 @@ export function useDashboard() {
       events?.close();
       if (focusHandler) window.removeEventListener("focus", focusHandler);
     };
-  }, [reconcile, t]);
+  }, [reconcile, t, knowledgeToken]);
 
   const mutate = useCallback(async (path: string, body: unknown, success: string, method: "POST" | "DELETE" = "POST") => {
     if (!token) throw new Error(t("dashboard.sessionPending"));
@@ -257,5 +279,5 @@ export function useDashboard() {
     };
   }, [monitoredProjectIds, t, token]);
 
-  return { data, observedAt, token, loading, error: connectionError ?? error, notice, dismissNotice: () => setNotice(null), mutate, setError, runningCount };
+  return { data, observedAt, token, knowledgeToken, knowledgeSessionVersion, changeKnowledgeToken, knowledgeChange, loading, error: connectionError ?? error, notice, dismissNotice: () => setNotice(null), mutate, setError, runningCount };
 }

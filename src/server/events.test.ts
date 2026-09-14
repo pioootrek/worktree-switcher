@@ -47,3 +47,23 @@ describe("EventStream", () => {
     events.close();
   });
 });
+
+describe("knowledge events", () => {
+  it("filters at delivery time, honors revocation and never broadcasts knowledge to legacy clients", async () => {
+    vi.useFakeTimers();
+    const events = new EventStream();
+    const legacy = response(); const scoped = response();
+    let allowed = true;
+    events.add(legacy.value);
+    events.add(scoped.value, id => { if (!allowed || id !== "allowed") throw new Error("denied"); });
+    events.publishKnowledge("private"); events.publishKnowledge("allowed"); events.publishKnowledge("allowed");
+    await vi.advanceTimersByTimeAsync(250);
+    expect(legacy.messages).toHaveLength(1);
+    expect(scoped.messages).toHaveLength(2);
+    expect(scoped.messages[1]).toBe('event: knowledge-changed\ndata: {"projectIds":["allowed"]}\n\n');
+    events.publishKnowledge("allowed"); allowed = false;
+    await vi.advanceTimersByTimeAsync(250);
+    expect(scoped.messages).toHaveLength(2);
+    events.close();
+  });
+});

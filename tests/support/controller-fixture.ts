@@ -21,7 +21,8 @@ export interface ControllerFixture {
   endpoint: string; accessUrl: string; projects: FixtureProject[];
   request<T>(path: string, init?: RequestInit): Promise<T>;
   requestResult<T>(path: string, init?: RequestInit): Promise<HttpResult<T>>;
-  mcp(): Promise<FixtureMcpClient>;
+  mcp(token?: string): Promise<FixtureMcpClient>;
+  cli(args: string[], environment?: Record<string, string>): Promise<string>;
   setMode(project: FixtureProject, mode: ServerMode, worktreePath?: string): Promise<void>;
   releaseGate(project: FixtureProject, worktreePath?: string): Promise<void>;
   releaseTestGate(project: FixtureProject, worktreePath?: string): Promise<void>;
@@ -129,8 +130,8 @@ export async function startControllerFixture(projectCount = 3, projectKinds: Fix
       projects.push({ id: result.project.id, name, port: ports[index]!, kind: kinds[index]!, ...repositories[index]! });
     }
     const fixture: ControllerFixture = { endpoint, accessUrl, projects, request, requestResult,
-      async mcp() {
-        const mcpToken = (await readFile(join(data, "mcp-token"), "utf8")).trim(); const client = new Client({ name: `capacity-${randomUUID()}`, version: "1" });
+      async mcp(scopedToken?: string) {
+        const mcpToken = scopedToken ?? (await readFile(join(data, "mcp-token"), "utf8")).trim(); const client = new Client({ name: `capacity-${randomUUID()}`, version: "1" });
         await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${mcpPort}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${mcpToken}` } } }));
         return { async call<T>(name: string, args: Record<string, unknown> = {}) {
           const result = await client.callTool({ name, arguments: args });
@@ -151,6 +152,12 @@ export async function startControllerFixture(projectCount = 3, projectKinds: Fix
           const value = JSON.parse(part.text) as T & { error?: string };
           return value;
         }, close: () => client.close() };
+      },
+      async cli(args, environment = {}) {
+        const result = await exec(process.execPath, [join(repositoryRoot, "dist/cli/index.js"), ...args], {
+          cwd: repositoryRoot, env: { ...process.env, WORKTREE_SWITCHER_DATA_DIR: data, WORKTREE_SWITCHER_STATE_DIR: state, ...environment }, timeout: 30000,
+        });
+        return result.stdout;
       },
       async setMode(project, mode, worktreePath = project.main) { await writeFile(join(worktreePath, "mode.txt"), mode); await unlink(join(worktreePath, "release.txt")).catch(() => undefined); },
       async releaseGate(project, worktreePath = project.main) { await writeFile(join(worktreePath, "release.txt"), "go"); },

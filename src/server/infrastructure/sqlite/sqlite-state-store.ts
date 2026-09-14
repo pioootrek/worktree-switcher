@@ -1,3 +1,4 @@
+import type { KnowledgeFilters, KnowledgeProjectSummary } from "@/shared/contracts/knowledge";
 import type { PendingTestRun, ProjectRegistration, ReservationRequest, StateStore, TestRunStatusRecord, WorktreeStorageSample } from "@/server/state-store";
 import type { Project, Reservation, ServerCapacitySettings, TestEnvironmentProfile, TestQueueSettings, TestRun, TestRunPhase, WorktreeStorageSnapshot } from "@/shared/contracts";
 import type {
@@ -453,8 +454,16 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
     return this.knowledge.getRuntimeLinkOwner(runtimeProjectId);
   }
 
-  listThreads(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeThread> {
-    return this.knowledge.listThreads(projectId, limit, offset);
+  listKnowledgeProjects(principalId: string, limit: number, offset: number): KnowledgePage<KnowledgeProjectSummary> {
+    return this.knowledge.listKnowledgeProjects(principalId, limit, offset);
+  }
+
+  createTask(task: KnowledgeTask, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeTask> {
+    return this.knowledge.createTask(task, context);
+  }
+
+  listThreads(projectId: string, limit: number, offset: number, filters?: KnowledgeFilters): KnowledgePage<KnowledgeThread> {
+    return this.knowledge.listThreads(projectId, limit, offset, filters);
   }
 
   getThread(projectId: string, id: string): KnowledgeThread | null {
@@ -473,8 +482,8 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
     return this.knowledge.getTask(projectId, id);
   }
 
-  listTasks(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeTask> {
-    return this.knowledge.listTasks(projectId, limit, offset);
+  listTasks(projectId: string, limit: number, offset: number, filters?: KnowledgeFilters): KnowledgePage<KnowledgeTask> {
+    return this.knowledge.listTasks(projectId, limit, offset, filters);
   }
 
   listHistory(projectId: string, recordKind: KnowledgeHistoryEntry["recordKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeHistoryEntry> {

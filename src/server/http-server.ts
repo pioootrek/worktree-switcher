@@ -1,3 +1,4 @@
+import { KnowledgeError, knowledgeFailure } from "./modules/knowledge";
 import { timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -392,6 +393,36 @@ export function createControllerServer(options: {
     try {
       if (url.pathname.startsWith("/api/")) {
         response.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+        if (url.pathname === "/api/knowledge") {
+          if (request.headers.origin && !hasValidOrigin(request, options.publicOrigin)) {
+            json(response, 403, { code: "origin_forbidden", error: "Request origin rejected." });
+            return;
+          }
+          if (request.method !== "POST") {
+            response.setHeader("Allow", "POST");
+            json(response, 405, { code: "method_not_allowed", error: "Use POST." });
+            return;
+          }
+          let actor: AuthenticatedPrincipal;
+          try {
+            const token = bearerToken(request);
+            if (!token || !options.identity) throw new Error("Missing identity");
+            actor = options.identity.authenticateBearer(token);
+          } catch {
+            json(response, 401, { code: "invalid_credential", error: "An active knowledge credential is required." });
+            return;
+          }
+          try {
+            let input: unknown;
+            try { input = await readJson(request); }
+            catch (error) { throw new KnowledgeError(error instanceof Error && error.message === "Żądanie jest zbyt duże." ? "limit_exceeded" : "invalid_request", "Invalid knowledge JSON request."); }
+            json(response, 200, options.service.executeKnowledge(input, actor));
+          } catch (error) {
+            const failure = knowledgeFailure(error);
+            json(response, failure.status, failure.body);
+          }
+          return;
+        }
         if (url.pathname === "/api/identity/bootstrap") {
           if (request.headers.origin && !hasValidOrigin(request, options.publicOrigin)) {
             json(response, 403, { error: localizeServerMessage("Odrzucono żądanie z obcego originu.", locale) });
@@ -510,7 +541,11 @@ export function createControllerServer(options: {
             "Content-Type": "text/event-stream",
             "X-Accel-Buffering": "no",
           });
-          options.events.add(response);
+          const knowledgeToken = bearerToken(request);
+          options.events.add(response, knowledgeToken && options.identity ? (projectId) => {
+            const actor = options.identity!.authenticateBearer(knowledgeToken);
+            options.identity!.authorizeKnowledge(actor, projectId, "knowledge:read");
+          } : undefined);
           return;
         }
         if (request.method === "POST" && url.pathname === "/api/projects") {

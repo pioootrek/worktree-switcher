@@ -96,6 +96,10 @@ export class ControlService {
       () => this.lifecycle.capacityStatusCompact(), () => this.testQueueStatus());
   }
 
+  executeKnowledge(input: unknown, actor: AuthenticatedPrincipal) {
+    return this.requireKnowledge().execute(input, actor);
+  }
+
   knowledgeThreads(projectId: string, actor: AuthenticatedPrincipal, options?: KnowledgePageOptions) {
     return this.requireKnowledge().listThreads(projectId, actor, options);
   }

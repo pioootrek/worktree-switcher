@@ -1,3 +1,4 @@
+import type { KnowledgeProject } from "@/shared/contracts/knowledge";
 export type PrincipalKind = "owner" | "agent" | "worker";
 export type IdentityStatus = "active" | "revoked";
 
@@ -47,15 +48,7 @@ export type KnowledgePermission =
   | "attachments:read"
   | "attachments:write";
 
-export interface KnowledgeProject {
-  id: string;
-  name: string;
-  status: "active" | "archived";
-  revision: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
+export type { KnowledgeProject } from "@/shared/contracts/knowledge";
 export interface KnowledgeProjectGrant {
   principalId: string;
   projectId: string;
