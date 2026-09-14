@@ -304,13 +304,14 @@ export class IdentityService {
     actor: AuthenticatedPrincipal,
     projectId: string,
     permission: KnowledgePermission,
+    options: { allowArchived?: boolean } = {},
   ): void {
     this.requireCurrentAuthentication(actor);
     const project = this.store.getKnowledgeProject(projectId);
     const grant = this.store.getKnowledgeProjectGrant(actor.principalId, projectId);
     if (
       !project
-      || project.status !== "active"
+      || (project.status !== "active" && permission !== "knowledge:read" && !options.allowArchived)
       || !grant
       || grant.revokedAt !== null
       || !grant.permissions.includes(permission)

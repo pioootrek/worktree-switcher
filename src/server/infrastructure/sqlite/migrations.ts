@@ -131,6 +131,85 @@ const IDENTITY_AND_KNOWLEDGE_ACCESS_SCHEMA = `
   );
 `;
 
+const KNOWLEDGE_CONTENT_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS knowledge_threads (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision > 0),
+    created_by TEXT NOT NULL REFERENCES remote_principals(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS knowledge_threads_project ON knowledge_threads(project_id, updated_at DESC, id);
+
+  CREATE TABLE IF NOT EXISTS knowledge_replies (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+    thread_id TEXT NOT NULL REFERENCES knowledge_threads(id),
+    body TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision > 0),
+    created_by TEXT NOT NULL REFERENCES remote_principals(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS knowledge_replies_thread ON knowledge_replies(project_id, thread_id, created_at, id);
+
+  CREATE TABLE IF NOT EXISTS knowledge_tasks (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('open', 'in_progress', 'blocked', 'done', 'archived')),
+    priority TEXT NOT NULL CHECK(priority IN ('now', 'next', 'later')),
+    revision INTEGER NOT NULL CHECK(revision > 0),
+    created_by TEXT NOT NULL REFERENCES remote_principals(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS knowledge_tasks_project ON knowledge_tasks(project_id, updated_at DESC, id);
+
+  CREATE TABLE IF NOT EXISTS knowledge_relations (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+    type TEXT NOT NULL CHECK(type IN ('derived_from', 'blocks', 'relates_to', 'supersedes')),
+    source_kind TEXT NOT NULL CHECK(source_kind IN ('thread', 'reply', 'task')),
+    source_id TEXT NOT NULL,
+    target_kind TEXT NOT NULL CHECK(target_kind IN ('thread', 'reply', 'task')),
+    target_id TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision > 0),
+    created_by TEXT NOT NULL REFERENCES remote_principals(id),
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, type, source_kind, source_id, target_kind, target_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS knowledge_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+    record_kind TEXT NOT NULL CHECK(record_kind IN ('project', 'thread', 'reply', 'task', 'relation')),
+    record_id TEXT NOT NULL,
+    operation TEXT NOT NULL CHECK(operation IN ('created', 'updated', 'archived', 'linked', 'unlinked')),
+    previous_json TEXT,
+    principal_id TEXT NOT NULL REFERENCES remote_principals(id),
+    authentication_method TEXT NOT NULL CHECK(authentication_method IN ('owner_session', 'agent_token', 'worker_token')),
+    revision INTEGER NOT NULL CHECK(revision > 0),
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS knowledge_history_record ON knowledge_history(project_id, record_kind, record_id, id);
+
+  CREATE TABLE IF NOT EXISTS knowledge_idempotency (
+    principal_id TEXT NOT NULL REFERENCES remote_principals(id),
+    project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+    operation TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_hash TEXT NOT NULL CHECK(length(request_hash) = 64),
+    result_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(principal_id, project_id, operation, idempotency_key)
+  );
+`;
+
 const schema = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
@@ -247,6 +326,7 @@ const schema = `
   ${REMOTE_VERIFICATION_SCHEMA}
   ${REMOTE_VERIFICATION_ATTEMPT_SCHEMA}
   ${IDENTITY_AND_KNOWLEDGE_ACCESS_SCHEMA}
+  ${KNOWLEDGE_CONTENT_SCHEMA}
 
   INSERT OR IGNORE INTO schema_migrations(version, applied_at)
     VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -465,6 +545,12 @@ function applyMigrations(database: Database.Database): void {
     database.transaction(() => {
       database.prepare("UPDATE principal_credentials SET token_prefix = 'wts_' || id").run();
       recordMigration(database, 18);
+    })();
+  }
+  if (!hasMigration(database, 19)) {
+    database.transaction(() => {
+      database.exec(KNOWLEDGE_CONTENT_SCHEMA);
+      recordMigration(database, 19);
     })();
   }
 }

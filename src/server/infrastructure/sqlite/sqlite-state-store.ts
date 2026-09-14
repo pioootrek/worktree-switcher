@@ -22,24 +22,27 @@ import type {
   Principal,
   PrincipalCredential,
 } from "@/server/modules/identity";
+import type { KnowledgeHistoryEntry, KnowledgeMutationContext, KnowledgeMutationResult, KnowledgePage, KnowledgeRelation, KnowledgeReply, KnowledgeRuntimeLinkResult, KnowledgeStore, KnowledgeTask, KnowledgeThread } from "@/server/modules/knowledge";
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { initializeSchema } from "./migrations";
 import { IdentityQueries } from "./identity-queries";
+import { KnowledgeQueries } from "./knowledge-queries";
 import { mapProject, type ProjectRow } from "./project-mapping";
 import { equalHash, mapReservation, type ReservationRow } from "./reservation-mapping";
 import { RemoteVerificationQueries } from "./remote-verification-queries";
 import { StorageQueries } from "./storage-queries";
 import { TestRunQueries } from "./test-run-queries";
 
-export class SqliteStateStore implements StateStore, IdentityStore, RemoteVerificationStore, RemoteVerificationAttemptStore, RemoteVerificationProvisioningStore {
+export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeStore, RemoteVerificationStore, RemoteVerificationAttemptStore, RemoteVerificationProvisioningStore {
   private readonly database: Database.Database;
   private readonly testRuns: TestRunQueries;
   private readonly storage: StorageQueries;
   private readonly remoteVerification: RemoteVerificationQueries;
   private readonly identity: IdentityQueries;
+  private readonly knowledge: KnowledgeQueries;
 
   constructor(databasePath: string) {
     mkdirSync(dirname(databasePath), { recursive: true });
@@ -52,6 +55,7 @@ export class SqliteStateStore implements StateStore, IdentityStore, RemoteVerifi
     this.storage = new StorageQueries(this.database);
     this.remoteVerification = new RemoteVerificationQueries(this.database);
     this.identity = new IdentityQueries(this.database);
+    this.knowledge = new KnowledgeQueries(this.database);
   }
 
   listProjects(): Project[] {
@@ -435,6 +439,70 @@ export class SqliteStateStore implements StateStore, IdentityStore, RemoteVerifi
 
   saveKnowledgeProjectRuntimeLink(link: KnowledgeProjectRuntimeLink, actor: string): void {
     this.identity.saveKnowledgeProjectRuntimeLink(link, actor);
+  }
+
+  findIdempotentResult<T>(operation: string, context: KnowledgeMutationContext): KnowledgeMutationResult<T> | null {
+    return this.knowledge.findIdempotentResult<T>(operation, context);
+  }
+
+  hasRuntimeProject(id: string): boolean {
+    return this.knowledge.hasRuntimeProject(id);
+  }
+
+  getRuntimeLinkOwner(runtimeProjectId: string): string | null {
+    return this.knowledge.getRuntimeLinkOwner(runtimeProjectId);
+  }
+
+  listThreads(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeThread> {
+    return this.knowledge.listThreads(projectId, limit, offset);
+  }
+
+  getThread(projectId: string, id: string): KnowledgeThread | null {
+    return this.knowledge.getThread(projectId, id);
+  }
+
+  listReplies(projectId: string, threadId: string, limit: number, offset: number): KnowledgePage<KnowledgeReply> {
+    return this.knowledge.listReplies(projectId, threadId, limit, offset);
+  }
+
+  listRelations(projectId: string, recordKind: KnowledgeRelation["sourceKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeRelation> {
+    return this.knowledge.listRelations(projectId, recordKind, recordId, limit, offset);
+  }
+
+  getTask(projectId: string, id: string): KnowledgeTask | null {
+    return this.knowledge.getTask(projectId, id);
+  }
+
+  listTasks(projectId: string, limit: number, offset: number): KnowledgePage<KnowledgeTask> {
+    return this.knowledge.listTasks(projectId, limit, offset);
+  }
+
+  listHistory(projectId: string, recordKind: KnowledgeHistoryEntry["recordKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeHistoryEntry> {
+    return this.knowledge.listHistory(projectId, recordKind, recordId, limit, offset);
+  }
+
+  createThread(thread: KnowledgeThread, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeThread> {
+    return this.knowledge.createThread(thread, context);
+  }
+
+  createReply(reply: KnowledgeReply, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeReply> {
+    return this.knowledge.createReply(reply, context);
+  }
+
+  createTaskFromThread(task: KnowledgeTask, relation: KnowledgeRelation, context: KnowledgeMutationContext): KnowledgeMutationResult<{ task: KnowledgeTask; relation: KnowledgeRelation }> {
+    return this.knowledge.createTaskFromThread(task, relation, context);
+  }
+
+  updateTask(task: KnowledgeTask, expectedRevision: number, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeTask> {
+    return this.knowledge.updateTask(task, expectedRevision, context);
+  }
+
+  updateKnowledgeProject(project: KnowledgeProject, expectedRevision: number, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeProject> {
+    return this.knowledge.updateKnowledgeProject(project, expectedRevision, context);
+  }
+
+  setKnowledgeProjectRuntimeLink(link: KnowledgeProjectRuntimeLink, expectedRevision: number, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeRuntimeLinkResult> {
+    return this.knowledge.setKnowledgeProjectRuntimeLink(link, expectedRevision, context);
   }
 
   getRemoteProjectIdentity(id: string): RemoteProjectIdentity | null {
