@@ -587,6 +587,26 @@ function applyMigrations(database: Database.Database): void {
       recordMigration(database, 20);
     })();
   }
+  if (!hasMigration(database, 21)) {
+    database.transaction(() => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS knowledge_attachments (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+          record_kind TEXT NOT NULL CHECK(record_kind IN ('thread','reply','task','memory')),
+          record_id TEXT NOT NULL,
+          filename TEXT NOT NULL,
+          media_type TEXT NOT NULL,
+          size INTEGER NOT NULL CHECK(size >= 0),
+          sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+          created_by TEXT NOT NULL REFERENCES remote_principals(id),
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS knowledge_attachments_record ON knowledge_attachments(project_id, record_kind, record_id, created_at, id);
+      `);
+      recordMigration(database, 21);
+    })();
+  }
 
 }
 

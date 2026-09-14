@@ -1,4 +1,5 @@
 import type { KnowledgeMemory, KnowledgeSearchHit, KnowledgeSearchOptions } from "@/shared/contracts/knowledge-memory";
+import type { KnowledgeAttachment } from "@/shared/contracts/knowledge-attachments";
 import type { KnowledgeFilters, KnowledgeProjectSummary } from "@/shared/contracts/knowledge";
 import type { PendingTestRun, ProjectRegistration, ReservationRequest, StateStore, TestRunStatusRecord, WorktreeStorageSample } from "@/server/state-store";
 import type { Project, Reservation, ServerCapacitySettings, TestEnvironmentProfile, TestQueueSettings, TestRun, TestRunPhase, WorktreeStorageSnapshot } from "@/shared/contracts";
@@ -59,6 +60,9 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
     this.identity = new IdentityQueries(this.database);
     this.knowledge = new KnowledgeQueries(this.database);
   }
+
+  backup(destination: string): Promise<void> { return this.database.backup(destination).then(() => undefined); }
+  schemaVersion(): number { return (this.database.prepare("SELECT max(version) version FROM schema_migrations").get() as { version: number }).version; }
 
   listProjects(): Project[] {
     const rows = this.database.prepare("SELECT * FROM projects ORDER BY name COLLATE NOCASE").all() as ProjectRow[];
@@ -467,6 +471,10 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
   searchKnowledge(projectId: string, limit: number, offset: number, options: KnowledgeSearchOptions): KnowledgePage<KnowledgeSearchHit> {
     return this.knowledge.searchKnowledge(projectId, limit, offset, options);
   }
+  saveAttachment(value: KnowledgeAttachment): void { this.knowledge.saveAttachment(value); }
+  getAttachment(projectId: string, id: string): KnowledgeAttachment | null { return this.knowledge.getAttachment(projectId, id); }
+  listAttachments(projectId: string, recordKind: KnowledgeAttachment["recordKind"], recordId: string): KnowledgeAttachment[] { return this.knowledge.listAttachments(projectId, recordKind, recordId); }
+  attachmentBytesForProject(projectId: string): number { return this.knowledge.attachmentBytesForProject(projectId); }
 
   listKnowledgeProjects(principalId: string, limit: number, offset: number): KnowledgePage<KnowledgeProjectSummary> {
     return this.knowledge.listKnowledgeProjects(principalId, limit, offset);

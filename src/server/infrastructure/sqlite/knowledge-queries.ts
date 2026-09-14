@@ -16,6 +16,7 @@ import {
   type KnowledgeThread,
 } from "@/server/modules/knowledge";
 import type { KnowledgeProject, KnowledgeProjectRuntimeLink } from "@/server/modules/identity";
+import type { KnowledgeAttachment } from "@/shared/contracts/knowledge-attachments";
 
 type ThreadRow = { id: string; project_id: string; title: string; body: string; revision: number; created_by: string; created_at: string; updated_at: string };
 type ReplyRow = { id: string; project_id: string; thread_id: string; body: string; revision: number; created_by: string; created_at: string; updated_at: string };
@@ -36,6 +37,25 @@ const mapTask = (row: TaskRow): KnowledgeTask => ({ id: row.id, projectId: row.p
 export class KnowledgeQueries implements KnowledgeStore {
   constructor(private readonly database: Database.Database) {
     database.function("knowledge_fold", { deterministic: true }, value => String(value).normalize("NFC").toLowerCase());
+  }
+
+  saveAttachment(value: KnowledgeAttachment): void {
+    this.database.prepare(`INSERT INTO knowledge_attachments
+      (id, project_id, record_kind, record_id, filename, media_type, size, sha256, created_by, created_at)
+      VALUES (@id,@projectId,@recordKind,@recordId,@filename,@mediaType,@size,@sha256,@createdBy,@createdAt)`).run(value);
+  }
+  getAttachment(projectId: string, id: string): KnowledgeAttachment | null {
+    const row = this.database.prepare(`SELECT id, project_id projectId, record_kind recordKind, record_id recordId,
+      filename, media_type mediaType, size, sha256, created_by createdBy, created_at createdAt FROM knowledge_attachments WHERE project_id = ? AND id = ?`).get(projectId, id) as KnowledgeAttachment | undefined;
+    return row ?? null;
+  }
+  listAttachments(projectId: string, recordKind: KnowledgeAttachment["recordKind"], recordId: string): KnowledgeAttachment[] {
+    return this.database.prepare(`SELECT id, project_id projectId, record_kind recordKind, record_id recordId,
+      filename, media_type mediaType, size, sha256, created_by createdBy, created_at createdAt FROM knowledge_attachments
+      WHERE project_id = ? AND record_kind = ? AND record_id = ? ORDER BY created_at, id`).all(projectId, recordKind, recordId) as KnowledgeAttachment[];
+  }
+  attachmentBytesForProject(projectId: string): number {
+    return (this.database.prepare("SELECT coalesce(sum(size),0) total FROM knowledge_attachments WHERE project_id = ?").get(projectId) as { total: number }).total;
   }
 
 
