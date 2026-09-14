@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -36,7 +36,8 @@ describe("logical knowledge project transfer",()=>{
     const existing=targetStore.exportKnowledgeProject("existing-project"); importKnowledgeProject(targetStore,targetIdentity,destination,join(targetRoot,"knowledge-attachments"),targetOwner);
     expect(targetStore.exportKnowledgeProject(source.project.id)).toEqual(sourceSnapshot); expect(targetStore.exportKnowledgeProject("existing-project")).toEqual(existing);
     expect(targetStore.listProjects()).toEqual([]); expect(targetStore.listKnowledgeProjectGrants(targetOwner.principalId)).toEqual([]);
-    expect(readFileSync(join(targetRoot,"knowledge-attachments",createHash("sha256").update("evidence").digest("hex").slice(0,2),createHash("sha256").update("evidence").digest("hex")),"utf8")).toBe("evidence");
+    const importedObject=join(targetRoot,"knowledge-attachments",createHash("sha256").update("evidence").digest("hex").slice(0,2),createHash("sha256").update("evidence").digest("hex"));
+    expect(readFileSync(importedObject,"utf8")).toBe("evidence"); expect(statSync(importedObject).mode&0o777).toBe(0o600);
     targetStore.close();
   });
 
@@ -46,6 +47,12 @@ describe("logical knowledge project transfer",()=>{
     expect(()=>importKnowledgeProject(f.store,f.identity,destination,f.attachmentDirectory,f.owner)).toThrowError(expect.objectContaining({code:"invalid_request"}));
     writeFileSync(data,original); expect(()=>importKnowledgeProject(f.store,f.identity,destination,f.attachmentDirectory,f.owner)).toThrowError(expect.objectContaining({code:"invalid_request"})); expect(f.store.listThreads(f.project.id,25,0).items).toHaveLength(1); f.store.close();
     expect(existsSync(destination)).toBe(true);
+  });
+
+  it("rejects archived project snapshots instead of importing an inaccessible project",()=>{
+    const root=mkdtempSync(join(tmpdir(),"knowledge-import-archived-")); roots.push(root); const f=fixture(root),destination=join(root,"export"); exportKnowledgeProject(f.store,f.identity,f.project.id,destination,f.attachmentDirectory,f.owner,{applicationVersion:"test"});
+    rewriteSnapshot(destination,snapshot=>{(snapshot as MutableSnapshot&{project:{status:string}}).project.status="archived";});
+    expect(()=>importKnowledgeProject(f.store,f.identity,destination,join(root,"imported-attachments"),f.owner)).toThrowError(expect.objectContaining({code:"invalid_request",message:"Archived knowledge projects cannot be imported."})); f.store.close();
   });
 
   it("exports a project through the offline owner CLI command",async()=>{
