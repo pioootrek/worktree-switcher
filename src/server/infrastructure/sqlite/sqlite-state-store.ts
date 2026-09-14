@@ -25,7 +25,8 @@ import type {
   Principal,
   PrincipalCredential,
 } from "@/server/modules/identity";
-import type { KnowledgeHistoryEntry, KnowledgeMutationContext, KnowledgeMutationResult, KnowledgePage, KnowledgeRelation, KnowledgeReply, KnowledgeRuntimeLinkResult, KnowledgeStore, KnowledgeTask, KnowledgeThread } from "@/server/modules/knowledge";
+import type { KnowledgeHistoryEntry, KnowledgeMutationContext, KnowledgeMutationResult, KnowledgePage, KnowledgeProjectSnapshot, KnowledgeRelation, KnowledgeReply, KnowledgeRuntimeLinkResult, KnowledgeStore, KnowledgeTask, KnowledgeThread } from "@/server/modules/knowledge";
+import { KnowledgeError } from "@/server/modules/knowledge";
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -63,6 +64,55 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
 
   backup(destination: string): Promise<void> { return this.database.backup(destination).then(() => undefined); }
   schemaVersion(): number { return (this.database.prepare("SELECT max(version) version FROM schema_migrations").get() as { version: number }).version; }
+
+  exportKnowledgeProject(projectId: string): KnowledgeProjectSnapshot | null {
+    const project = this.database.prepare("SELECT * FROM knowledge_projects WHERE id = ?").get(projectId) as Record<string, unknown> | undefined;
+    if (!project) return null;
+    const table = (name: string) => this.database.prepare(`SELECT * FROM ${name} WHERE project_id = ? ORDER BY id`).all(projectId) as Array<Record<string, unknown>>;
+    const memories = table("knowledge_memories");
+    const history:Array<Record<string,unknown>> = table("knowledge_history").map((value, index) => { const { id, ...row }=value; void id; return { ordinal: index + 1, ...row }; });
+    const required = new Set<string>();
+    for (const rows of [table("knowledge_threads"), table("knowledge_replies"), table("knowledge_tasks"), memories, table("knowledge_relations"), history, table("knowledge_attachments")]) {
+      for (const row of rows) for (const key of ["created_by", "principal_id"]) if (typeof row[key] === "string") required.add(row[key] as string);
+    }
+    for (const row of memories) {
+      if (typeof row.approval_json !== "string" || !row.approval_json) continue;
+      const approval = JSON.parse(row.approval_json) as { principalId?: unknown };
+      if (typeof approval.principalId === "string") required.add(approval.principalId);
+    }
+    return { project, threads: table("knowledge_threads"), replies: table("knowledge_replies"), tasks: table("knowledge_tasks"), memories,
+      relations: table("knowledge_relations"), history, attachments: table("knowledge_attachments"), requiredPrincipals: [...required].sort() };
+  }
+
+  importKnowledgeProject(snapshot: KnowledgeProjectSnapshot): void {
+    this.database.transaction(() => {
+      const projectId = snapshot.project.id;
+      if (typeof projectId !== "string" || this.database.prepare("SELECT 1 FROM knowledge_projects WHERE id = ?").get(projectId)) throw new KnowledgeError("invalid_request", "Knowledge project already exists or has an invalid ID.");
+      for (const principalId of snapshot.requiredPrincipals) if (!this.database.prepare("SELECT 1 FROM remote_principals WHERE id = ?").get(principalId)) throw new KnowledgeError("invalid_request", `Required historical principal is missing: ${principalId}`);
+      const columns:Record<string,string[]>={
+        knowledge_projects:["id","name","status","revision","created_at","updated_at"],
+        knowledge_threads:["id","project_id","title","body","revision","created_by","created_at","updated_at"],
+        knowledge_replies:["id","project_id","thread_id","body","revision","created_by","created_at","updated_at"],
+        knowledge_tasks:["id","project_id","title","description","status","priority","revision","created_by","created_at","updated_at"],
+        knowledge_memories:["id","project_id","title","body","category","tags_json","legacy_id","sources_json","status","superseded_by_json","approval_json","revision","created_by","created_at","updated_at"],
+        knowledge_relations:["id","project_id","type","source_kind","source_id","target_kind","target_id","revision","created_by","created_at"],
+        knowledge_history:["ordinal","project_id","record_kind","record_id","operation","previous_json","principal_id","authentication_method","revision","created_at"],
+        knowledge_attachments:["id","project_id","record_kind","record_id","filename","media_type","size","sha256","created_by","created_at"],
+      };
+      const insert = (table: string, rows: Array<Record<string, unknown>>) => {
+        const expected=columns[table]!;
+        for (const row of rows) {
+          if(Object.keys(row).sort().join("\0")!==[...expected].sort().join("\0")) throw new KnowledgeError("invalid_request", `Invalid ${table} record shape.`);
+          if(table!=="knowledge_projects"&&row.project_id!==projectId) throw new KnowledgeError("invalid_request", `Foreign project record in ${table}.`);
+          const inserted=table==="knowledge_history"?expected.filter(column=>column!=="ordinal"):expected;
+          this.database.prepare(`INSERT INTO ${table} (${inserted.join(",")}) VALUES (${inserted.map(() => "?").join(",")})`).run(...inserted.map(key => row[key]));
+        }
+      };
+      insert("knowledge_projects", [snapshot.project]);
+      insert("knowledge_threads", snapshot.threads); insert("knowledge_tasks", snapshot.tasks); insert("knowledge_memories", snapshot.memories);
+      insert("knowledge_replies", snapshot.replies); insert("knowledge_relations", snapshot.relations); insert("knowledge_history", snapshot.history); insert("knowledge_attachments", snapshot.attachments);
+    }).immediate();
+  }
 
   listProjects(): Project[] {
     const rows = this.database.prepare("SELECT * FROM projects ORDER BY name COLLATE NOCASE").all() as ProjectRow[];

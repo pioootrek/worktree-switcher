@@ -322,7 +322,7 @@ export class IdentityService {
     }
   }
 
-  private requireOwnerSession(actor: AuthenticatedPrincipal): void {
+  requireOwnerSession(actor: AuthenticatedPrincipal): void {
     this.requireCurrentAuthentication(actor);
     if (actor.principalKind !== "owner" || actor.authenticationMethod !== "owner_session") {
       throw new IdentityError("owner_authentication_required", "Ta operacja wymaga uwierzytelnionej sesji właściciela.");
