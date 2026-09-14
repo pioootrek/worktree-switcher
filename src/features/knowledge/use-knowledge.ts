@@ -115,5 +115,5 @@ export function useKnowledge(token: string, change: { version: number; projectId
     return () => { clearTimeout(timer); abort.abort(); };
   }, [token, identity, selection, filters, offset, replyOffset, relationOffset, revision]);
 
-  return { relations, relationOffset, setRelationOffset, identity, project, projects, projectOffset, setProjectOffset, selection, select, filters, setFilters: (value: KnowledgeFilters) => { setFilters(value); setOffset(0); }, offset, setOffset, detail, rows, replies, replyOffset, setReplyOffset, loading, error: error || discoveryError, sessionError, reload };
+  return { refreshVersion: revision, relations, relationOffset, setRelationOffset, identity, project, projects, projectOffset, setProjectOffset, selection, select, filters, setFilters: (value: KnowledgeFilters) => { setFilters(value); setOffset(0); }, offset, setOffset, detail, rows, replies, replyOffset, setReplyOffset, loading, error: error || discoveryError, sessionError, reload };
 }

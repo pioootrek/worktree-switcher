@@ -318,11 +318,59 @@ before contributing code.
 
 ## Project knowledge
 
-The **Knowledge** view contains Backlog and Discussions, including replies,
-linked tasks, title/status/priority filters and revision conflicts. Knowledge
-projects remain available without a runtime project or repository. The Memory
-tab identifies the next stage; memory approval and Hub import are not implemented
-by this slice.
+The **Knowledge** view contains Backlog, Discussions and Memory. Knowledge
+projects remain available without a runtime project or repository. Memory stores
+decisions, open questions and notes with pinned source revisions, tags and an
+optional legacy ID. Hub import remains a later stage.
+
+Memory requires at least one source: a record in the same project with its
+current revision, or an explicit HTTP/HTTPS link. Only an owner session with
+`knowledge:approve` can approve memory. Approval is a revisioned mutation and
+points to the resulting revision. Editing, archiving or restoring clears current
+approval; history retains its provenance. Superseded records remain readable and
+immutable, with the replacement's ID and revision. Supersession retains the
+approval of the earlier revision as historical provenance. Memory writes also
+require `knowledge:read` because their responses include retained content.
+
+The Memory search can include threads, replies and tasks. It matches literal
+Unicode text in titles and bodies, with filters for record type, state, memory
+tags and memory legacy IDs. Archived and superseded records are hidden unless
+explicitly included. Search is project-scoped and never scans Git.
+
+A task's **Next session context** shows its scope, directly linked memory,
+approved decisions, proposals and open questions. Source revisions disclose
+stale or inactive evidence. Excerpts are labelled and link to the full records;
+no model-generated summary is implied. Context and export responses are bounded
+to 256 KiB. Read subsequent pages using `nextOffset`; retain the same page limit.
+
+`knowledge task_context` requires `knowledge:read`. `knowledge export_context`
+also requires `knowledge:export` and returns Markdown or JSON in `content`.
+Exports are versioned context pages, not a project backup. They include IDs,
+revisions, generation time, page coordinates and a fingerprint. Compare an old
+export using `knowledge check_context_export` with the same project, task,
+limit, offset and fingerprint. Its `current` field describes that page only.
+
+```bash
+worktree-switcher knowledge create_memory --input-file memory.json
+worktree-switcher knowledge search --json '{"projectId":"<project-id>","query":"storage"}'
+worktree-switcher knowledge task_context --json '{"projectId":"<project-id>","taskId":"<task-id>"}'
+worktree-switcher knowledge export_context --json '{"projectId":"<project-id>","taskId":"<task-id>","format":"markdown"}'
+```
+
+Example `memory.json` (replace IDs and the source revision):
+
+```json
+{
+  "projectId": "<project-id>",
+  "title": "Storage decision",
+  "body": "Keep one SQLite connection owner.",
+  "category": "decision",
+  "tags": ["storage"],
+  "legacyId": null,
+  "sources": [{ "kind": "task", "id": "<task-id>", "revision": 1 }],
+  "idempotencyKey": "storage-decision-1"
+}
+```
 
 Knowledge requires an owner session or a scoped agent token. The existing
 pairing token and shared runtime MCP token do not grant knowledge access. Use

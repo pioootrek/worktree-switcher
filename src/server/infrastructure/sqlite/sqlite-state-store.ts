@@ -1,3 +1,4 @@
+import type { KnowledgeMemory, KnowledgeSearchHit, KnowledgeSearchOptions } from "@/shared/contracts/knowledge-memory";
 import type { KnowledgeFilters, KnowledgeProjectSummary } from "@/shared/contracts/knowledge";
 import type { PendingTestRun, ProjectRegistration, ReservationRequest, StateStore, TestRunStatusRecord, WorktreeStorageSample } from "@/server/state-store";
 import type { Project, Reservation, ServerCapacitySettings, TestEnvironmentProfile, TestQueueSettings, TestRun, TestRunPhase, WorktreeStorageSnapshot } from "@/shared/contracts";
@@ -452,6 +453,19 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
 
   getRuntimeLinkOwner(runtimeProjectId: string): string | null {
     return this.knowledge.getRuntimeLinkOwner(runtimeProjectId);
+  }
+
+
+  getMemory(projectId: string, id: string): KnowledgeMemory | null { return this.knowledge.getMemory(projectId, id); }
+  getReply(projectId: string, id: string): KnowledgeReply | null { return this.knowledge.getReply(projectId, id); }
+  listMemories(projectId: string, limit: number, offset: number, query: string, includeInactive: boolean, taskId?: string): KnowledgePage<KnowledgeMemory> {
+    return this.knowledge.listMemories(projectId, limit, offset, query, includeInactive, taskId);
+  }
+  saveMemory(memory: KnowledgeMemory, expectedRevision: number | null, operation: string, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeMemory> {
+    return this.knowledge.saveMemory(memory, expectedRevision, operation, context);
+  }
+  searchKnowledge(projectId: string, limit: number, offset: number, options: KnowledgeSearchOptions): KnowledgePage<KnowledgeSearchHit> {
+    return this.knowledge.searchKnowledge(projectId, limit, offset, options);
   }
 
   listKnowledgeProjects(principalId: string, limit: number, offset: number): KnowledgePage<KnowledgeProjectSummary> {

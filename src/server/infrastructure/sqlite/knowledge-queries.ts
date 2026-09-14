@@ -1,3 +1,4 @@
+import type { KnowledgeMemory, KnowledgeSearchHit, KnowledgeSearchOptions } from "@/shared/contracts/knowledge-memory";
 import type { KnowledgeFilters, KnowledgeProjectSummary } from "@/shared/contracts/knowledge";
 import Database from "better-sqlite3";
 
@@ -21,6 +22,10 @@ type ReplyRow = { id: string; project_id: string; thread_id: string; body: strin
 type TaskRow = { id: string; project_id: string; title: string; description: string; status: KnowledgeTask["status"]; priority: KnowledgeTask["priority"]; revision: number; created_by: string; created_at: string; updated_at: string };
 type HistoryRow = { id: number; project_id: string; record_kind: KnowledgeHistoryEntry["recordKind"]; record_id: string; operation: KnowledgeHistoryEntry["operation"]; previous_json: string | null; principal_id: string; authentication_method: KnowledgeHistoryEntry["authenticationMethod"]; revision: number; created_at: string };
 type RelationRow = { id: string; project_id: string; type: KnowledgeRelation["type"]; source_kind: KnowledgeRelation["sourceKind"]; source_id: string; target_kind: KnowledgeRelation["targetKind"]; target_id: string; revision: number; created_by: string; created_at: string };
+
+type MemoryRow = { id: string; project_id: string; title: string; body: string; category: KnowledgeMemory["category"]; tags_json: string; legacy_id: string | null; sources_json: string; status: KnowledgeMemory["status"]; superseded_by_json: string | null; approval_json: string | null; revision: number; created_by: string; created_at: string; updated_at: string };
+const mapMemory = (row: MemoryRow): KnowledgeMemory => ({ id: row.id, projectId: row.project_id, title: row.title, body: row.body, category: row.category, tags: JSON.parse(row.tags_json), legacyId: row.legacy_id, sources: JSON.parse(row.sources_json), status: row.status, supersededBy: row.superseded_by_json ? JSON.parse(row.superseded_by_json) : null, approval: row.approval_json ? JSON.parse(row.approval_json) : null, revision: row.revision, createdBy: row.created_by, createdAt: row.created_at, updatedAt: row.updated_at });
+
 type IdempotencyRow = { request_hash: string; result_json: string };
 
 const mapThread = (row: ThreadRow): KnowledgeThread => ({ id: row.id, projectId: row.project_id, title: row.title, body: row.body, revision: row.revision, createdBy: row.created_by, createdAt: row.created_at, updatedAt: row.updated_at });
@@ -31,6 +36,67 @@ const mapTask = (row: TaskRow): KnowledgeTask => ({ id: row.id, projectId: row.p
 export class KnowledgeQueries implements KnowledgeStore {
   constructor(private readonly database: Database.Database) {
     database.function("knowledge_fold", { deterministic: true }, value => String(value).normalize("NFC").toLowerCase());
+  }
+
+
+  getMemory(projectId: string, id: string): KnowledgeMemory | null {
+    const row = this.database.prepare("SELECT * FROM knowledge_memories WHERE project_id = ? AND id = ?").get(projectId, id) as MemoryRow | undefined;
+    return row ? mapMemory(row) : null;
+  }
+
+  getReply(projectId: string, id: string): KnowledgeReply | null {
+    const row = this.database.prepare("SELECT * FROM knowledge_replies WHERE project_id = ? AND id = ?").get(projectId, id) as ReplyRow | undefined;
+    return row ? mapReply(row) : null;
+  }
+
+  listMemories(projectId: string, limit: number, offset: number, query: string, includeInactive: boolean, taskId?: string): KnowledgePage<KnowledgeMemory> {
+    const rows = this.database.prepare(`SELECT * FROM knowledge_memories
+      WHERE project_id = @projectId AND (@inactive OR status = 'active')
+      AND instr(knowledge_fold(title || char(10) || body || char(10) || coalesce((SELECT group_concat(value, char(10)) FROM json_each(tags_json)), '') || char(10) || coalesce(legacy_id, '')), knowledge_fold(@query)) > 0
+      AND (@taskId IS NULL OR EXISTS(SELECT 1 FROM json_each(sources_json) s WHERE json_extract(s.value, '$.kind') = 'task' AND json_extract(s.value, '$.id') = @taskId))
+      ORDER BY updated_at DESC, id LIMIT @limit OFFSET @offset`).all({ projectId, limit: limit + 1, offset, query, inactive: Number(includeInactive), taskId: taskId ?? null }) as MemoryRow[];
+    return this.page(rows.map(mapMemory), limit, offset);
+  }
+
+  saveMemory(memory: KnowledgeMemory, expectedRevision: number | null, operation: string, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeMemory> {
+    return this.mutate(operation, context, () => {
+      const previous = this.getMemory(memory.projectId, memory.id);
+      const values = { id: memory.id, projectId: memory.projectId, title: memory.title, body: memory.body, category: memory.category,
+        tags: JSON.stringify(memory.tags), legacyId: memory.legacyId, sources: JSON.stringify(memory.sources), status: memory.status,
+        supersededBy: memory.supersededBy ? JSON.stringify(memory.supersededBy) : null, approval: memory.approval ? JSON.stringify(memory.approval) : null,
+        revision: memory.revision, createdBy: memory.createdBy, createdAt: memory.createdAt, updatedAt: memory.updatedAt };
+      if (expectedRevision === null) {
+        this.database.prepare(`INSERT INTO knowledge_memories VALUES (@id, @projectId, @title, @body, @category, @tags, @legacyId, @sources, @status, @supersededBy, @approval, @revision, @createdBy, @createdAt, @updatedAt)`).run(values);
+      } else {
+        const result = this.database.prepare(`UPDATE knowledge_memories SET title = @title, body = @body, category = @category,
+          tags_json = @tags, legacy_id = @legacyId, sources_json = @sources, status = @status, superseded_by_json = @supersededBy,
+          approval_json = @approval, revision = @revision, updated_at = @updatedAt WHERE project_id = @projectId AND id = @id AND revision = @expectedRevision`).run({ ...values, expectedRevision });
+        if (!result.changes) throw new KnowledgeError("revision_conflict", "Memory revision changed.", previous?.revision);
+      }
+      const historyOperation = operation === "create_memory" ? "created" : operation === "approve_memory" ? "approved"
+        : operation === "supersede_memory" ? "superseded" : operation === "archive_memory" ? "archived" : "updated";
+      this.history(memory.projectId, "memory", memory.id, historyOperation, previous ? JSON.stringify(previous) : null, memory.revision, context, memory.updatedAt);
+      return memory;
+    });
+  }
+
+  searchKnowledge(projectId: string, limit: number, offset: number, options: KnowledgeSearchOptions): KnowledgePage<KnowledgeSearchHit> {
+    // Parameterized literal substring search matches Polish case folding and does not interpret SQL/FTS syntax.
+    const rows = this.database.prepare(`WITH records AS (
+      SELECT id, project_id, 'thread' AS kind, title, body, revision, 'active' AS status, updated_at, NULL AS thread_id, '[]' AS tags_json, NULL AS legacy_id FROM knowledge_threads WHERE project_id = @projectId
+      UNION ALL SELECT id, project_id, 'reply', '', body, revision, 'active', updated_at, thread_id, '[]', NULL FROM knowledge_replies WHERE project_id = @projectId
+      UNION ALL SELECT id, project_id, 'task', title, description, revision, status, updated_at, NULL, '[]', NULL FROM knowledge_tasks WHERE project_id = @projectId
+      UNION ALL SELECT id, project_id, 'memory', title, body, revision, status, updated_at, NULL, tags_json, legacy_id FROM knowledge_memories WHERE project_id = @projectId
+    ) SELECT id, project_id AS projectId, kind, title, substr(body, 1, 300) AS excerpt, revision, status, updated_at AS updatedAt, thread_id AS threadId FROM records
+      WHERE (@inactive OR @status IN ('archived', 'superseded') OR status NOT IN ('archived', 'superseded'))
+      AND (@kind IS NULL OR kind = @kind) AND (@status IS NULL OR status = @status)
+      AND (@legacyId IS NULL OR legacy_id = @legacyId)
+      AND (@tag IS NULL OR EXISTS(SELECT 1 FROM json_each(tags_json) WHERE knowledge_fold(value) = knowledge_fold(@tag)))
+      AND instr(knowledge_fold(title || char(10) || body || char(10) || coalesce((SELECT group_concat(value, char(10)) FROM json_each(tags_json)), '') || char(10) || coalesce(legacy_id, '')), knowledge_fold(@query)) > 0
+      ORDER BY updatedAt DESC, kind, id LIMIT @limit OFFSET @offset`).all({ projectId, limit: limit + 1, offset,
+        query: options.query ?? '', kind: options.kind ?? null, status: options.status ?? null, legacyId: options.legacyId ?? null,
+        tag: options.tag ?? null, inactive: Number(options.includeInactive ?? false) }) as KnowledgeSearchHit[];
+    return this.page(rows, limit, offset);
   }
 
   listKnowledgeProjects(principalId: string, limit: number, offset: number): KnowledgePage<KnowledgeProjectSummary> {
