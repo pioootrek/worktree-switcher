@@ -7,7 +7,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SqliteStateStore } from "./sqlite-store";
 import { IdentityService } from "./modules/identity";
-import { KnowledgeService } from "./modules/knowledge";
+import { KnowledgeAttachmentService, KnowledgeService } from "./modules/knowledge";
 import { ControlService } from "./control-service";
 import { ProcessManager } from "./process-manager";
 import { createControllerServer } from "./http-server";
@@ -33,18 +33,19 @@ async function setup(clock?: () => string) {
   const owner = identity.authenticateBearer(ownerSession.token);
   const project = identity.createKnowledgeProject({ name: "Knowledge without runtime" }, owner);
   const privateProject = identity.createKnowledgeProject({ name: "Private" }, owner);
-  identity.setKnowledgeGrant({ principalId: owner.principalId, projectId: project.id, permissions: ["knowledge:read", "knowledge:write"] }, owner);
+  identity.setKnowledgeGrant({ principalId: owner.principalId, projectId: project.id, permissions: ["knowledge:read", "knowledge:write", "attachments:read", "attachments:write"] }, owner);
   const agentTokens: string[] = [];
   const agents: string[] = [];
   for (const label of ["first", "second"]) {
     const agent = identity.createAgent(owner);
     agents.push(agent.id);
-    identity.setKnowledgeGrant({ principalId: agent.id, projectId: project.id, permissions: ["knowledge:read", "knowledge:write"] }, owner);
+    identity.setKnowledgeGrant({ principalId: agent.id, projectId: project.id, permissions: ["knowledge:read", "knowledge:write", "attachments:read", "attachments:write"] }, owner);
     agentTokens.push(identity.issueAgentToken({ principalId: agent.id, label }, owner).token);
   }
   const events = new EventStream();
   cleanups.push(() => events.close());
-  const knowledge = new KnowledgeService(store, identity, undefined, undefined, events.publishKnowledge);
+  const attachmentDirectory=join(directory,"attachments"); const attachmentService=new KnowledgeAttachmentService(store,identity,attachmentDirectory);
+  const knowledge = new KnowledgeService(store, identity, undefined, undefined, events.publishKnowledge,attachmentService);
   const git = { list: vi.fn(() => { throw new Error("Knowledge must not scan Git"); }) };
   const processes = new ProcessManager();
   const service = new ControlService(store, git as never, processes, undefined, undefined, undefined, undefined, undefined, undefined, undefined, knowledge);
@@ -74,6 +75,13 @@ async function setup(clock?: () => string) {
 }
 
 describe("real knowledge HTTP, MCP and CLI", () => {
+  it("accepts a bounded attachment through real HTTP and CLI transports", async () => {
+    const f=await setup(); const taskResponse=await f.http("create_task",{projectId:f.project.id,title:"Target",description:"Target",idempotencyKey:"target"});
+    const task=(await taskResponse.json() as {value:{id:string}}).value;
+    const input={projectId:f.project.id,recordKind:"task",recordId:task.id,filename:"evidence.bin",mediaType:"application/octet-stream",dataBase64:Buffer.alloc(64*1024,7).toString("base64"),idempotencyKey:"http-file"};
+    const uploaded=await f.http("create_attachment",input); expect(uploaded.status).toBe(200);
+    await runKnowledgeCommand(["create_attachment","--json",JSON.stringify({...input,idempotencyKey:"cli-file",filename:"cli.bin"})],f.paths,{environment:{WORKTREE_SWITCHER_KNOWLEDGE_TOKEN:f.agentTokens[0]},write:()=>{}});
+  });
   it.each(["grant", "credential", "expiry"] as const)("filters SSE with current %s state without recording passive credential usage", async kind => {
     let now = "2026-01-01T12:00:00.000Z";
     const f = await setup(() => now);

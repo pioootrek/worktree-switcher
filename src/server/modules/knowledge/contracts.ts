@@ -18,10 +18,12 @@ export interface KnowledgeRuntimeLinkResult {
 }
 
 export interface KnowledgeStore {
-  saveAttachment(attachment: KnowledgeAttachment): void;
+  saveAttachment(attachment: KnowledgeAttachment, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeAttachment>;
   getAttachment(projectId: string, id: string): KnowledgeAttachment | null;
-  listAttachments(projectId: string, recordKind: KnowledgeAttachment["recordKind"], recordId: string): KnowledgeAttachment[];
+  listAttachments(projectId: string, recordKind: KnowledgeAttachment["recordKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeAttachment>;
   attachmentBytesForProject(projectId: string): number;
+  attachmentCountForProject(projectId: string): number;
+  attachmentTargetExists(projectId: string, recordKind: KnowledgeAttachment["recordKind"], recordId: string): boolean;
   getMemory(projectId: string, id: string): KnowledgeMemory | null;
   getReply(projectId: string, id: string): KnowledgeReply | null;
   listMemories(projectId: string, limit: number, offset: number, query: string, includeInactive: boolean, taskId?: string): KnowledgePage<KnowledgeMemory>;

@@ -39,23 +39,29 @@ export class KnowledgeQueries implements KnowledgeStore {
     database.function("knowledge_fold", { deterministic: true }, value => String(value).normalize("NFC").toLowerCase());
   }
 
-  saveAttachment(value: KnowledgeAttachment): void {
-    this.database.prepare(`INSERT INTO knowledge_attachments
+  saveAttachment(value: KnowledgeAttachment, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeAttachment> {
+    return this.mutate("attachment.create", context, () => { this.database.prepare(`INSERT INTO knowledge_attachments
       (id, project_id, record_kind, record_id, filename, media_type, size, sha256, created_by, created_at)
-      VALUES (@id,@projectId,@recordKind,@recordId,@filename,@mediaType,@size,@sha256,@createdBy,@createdAt)`).run(value);
+      VALUES (@id,@projectId,@recordKind,@recordId,@filename,@mediaType,@size,@sha256,@createdBy,@createdAt)`).run(value); return value; });
   }
   getAttachment(projectId: string, id: string): KnowledgeAttachment | null {
     const row = this.database.prepare(`SELECT id, project_id projectId, record_kind recordKind, record_id recordId,
       filename, media_type mediaType, size, sha256, created_by createdBy, created_at createdAt FROM knowledge_attachments WHERE project_id = ? AND id = ?`).get(projectId, id) as KnowledgeAttachment | undefined;
     return row ?? null;
   }
-  listAttachments(projectId: string, recordKind: KnowledgeAttachment["recordKind"], recordId: string): KnowledgeAttachment[] {
-    return this.database.prepare(`SELECT id, project_id projectId, record_kind recordKind, record_id recordId,
+  listAttachments(projectId: string, recordKind: KnowledgeAttachment["recordKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeAttachment> {
+    const rows=this.database.prepare(`SELECT id, project_id projectId, record_kind recordKind, record_id recordId,
       filename, media_type mediaType, size, sha256, created_by createdBy, created_at createdAt FROM knowledge_attachments
-      WHERE project_id = ? AND record_kind = ? AND record_id = ? ORDER BY created_at, id`).all(projectId, recordKind, recordId) as KnowledgeAttachment[];
+      WHERE project_id = ? AND record_kind = ? AND record_id = ? ORDER BY created_at, id LIMIT ? OFFSET ?`).all(projectId, recordKind, recordId, limit+1, offset) as KnowledgeAttachment[];
+    return this.page(rows,limit,offset);
   }
   attachmentBytesForProject(projectId: string): number {
     return (this.database.prepare("SELECT coalesce(sum(size),0) total FROM knowledge_attachments WHERE project_id = ?").get(projectId) as { total: number }).total;
+  }
+  attachmentCountForProject(projectId: string): number { return (this.database.prepare("SELECT count(*) total FROM knowledge_attachments WHERE project_id=?").get(projectId) as {total:number}).total; }
+  attachmentTargetExists(projectId: string, kind: KnowledgeAttachment["recordKind"], id: string): boolean {
+    const table={thread:"knowledge_threads",reply:"knowledge_replies",task:"knowledge_tasks",memory:"knowledge_memories"}[kind];
+    return Boolean(this.database.prepare(`SELECT 1 FROM ${table} WHERE project_id=? AND id=?`).get(projectId,id));
   }
 
 

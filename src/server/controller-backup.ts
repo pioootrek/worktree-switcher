@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import Database from "better-sqlite3";
 
 export interface ControllerBackupManifest {
@@ -13,26 +13,20 @@ export interface ControllerBackupManifest {
 interface BackupSource { backup(destination: string): Promise<void>; schemaVersion(): number }
 const hash = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
 
-function filesBelow(root: string, directory=root): string[] {
-  if (!existsSync(directory)) return [];
-  return readdirSync(directory,{withFileTypes:true}).flatMap(entry => {
-    const path=join(directory,entry.name); const stat=lstatSync(path);
-    if (stat.isSymbolicLink()) throw new Error("Backup refuses symbolic links in attachment storage.");
-    return stat.isDirectory() ? filesBelow(root,path) : stat.isFile() ? [relative(root,path)] : [];
-  });
-}
 function safe(root: string, file: string): string {
   const target=resolve(root,file); if (!file || file.startsWith(sep) || target===resolve(root) || !target.startsWith(resolve(root)+sep)) throw new Error("Backup manifest contains an unsafe path."); return target;
 }
 
 export async function createControllerBackup(source: BackupSource, destination: string, options: {applicationVersion:string;attachmentDirectory:string;clock?:()=>string}): Promise<ControllerBackupManifest> {
   if (existsSync(destination)) throw new Error("Backup destination already exists.");
-  const staging=`${destination}.partial`; rmSync(staging,{recursive:true,force:true}); mkdirSync(join(staging,"attachments"),{recursive:true});
+  mkdirSync(dirname(destination),{recursive:true}); const staging=mkdtempSync(join(dirname(destination),`.${basename(destination)}.partial-`)); mkdirSync(join(staging,"attachments"),{recursive:true});
   try {
     const databaseFile=join(staging,"state.sqlite3"); await source.backup(databaseFile);
-    const attachments=filesBelow(options.attachmentDirectory).sort().map(file=>{
+    const snapshot=new Database(databaseFile,{readonly:true}); const required=(snapshot.prepare("SELECT DISTINCT sha256, size FROM knowledge_attachments ORDER BY sha256").all() as Array<{sha256:string;size:number}>); snapshot.close();
+    const attachments=required.map(({sha256,size})=>{ const file=join(sha256.slice(0,2),sha256);
       const from=safe(options.attachmentDirectory,file), to=safe(join(staging,"attachments"),file); mkdirSync(dirname(to),{recursive:true}); copyFileSync(from,to);
-      return {file,size:lstatSync(to).size,sha256:hash(to)};
+      if(lstatSync(to).size!==size||hash(to)!==sha256) throw new Error("Attachment storage does not match database metadata.");
+      return {file,size,sha256};
     });
     const manifest: ControllerBackupManifest={formatVersion:1,applicationVersion:options.applicationVersion,createdAt:(options.clock??(()=>new Date().toISOString()))(),database:{file:"state.sqlite3",size:lstatSync(databaseFile).size,sha256:hash(databaseFile),schemaVersion:source.schemaVersion()},attachments};
     writeFileSync(join(staging,"manifest.json"),JSON.stringify(manifest,null,2),{mode:0o600}); renameSync(staging,destination); return manifest;
@@ -45,7 +39,19 @@ export function restoreControllerBackup(source: string, databasePath: string, at
   const databaseFile=safe(source,manifest.database.file);
   if (lstatSync(databaseFile).size!==manifest.database.size || hash(databaseFile)!==manifest.database.sha256) throw new Error("Backup database integrity check failed.");
   for (const entry of manifest.attachments) { const file=safe(join(source,"attachments"),entry.file); if (!existsSync(file)||lstatSync(file).isSymbolicLink()||lstatSync(file).size!==entry.size||hash(file)!==entry.sha256) throw new Error("Backup attachment integrity check failed."); }
-  const check=new Database(databaseFile,{readonly:true,fileMustExist:true}); try { if (check.pragma("integrity_check",{simple:true})!=="ok") throw new Error("SQLite integrity check failed."); } finally { check.close(); }
-  mkdirSync(dirname(databasePath),{recursive:true}); const temporary=join(dirname(databasePath),`.${basename(databasePath)}.restore`); copyFileSync(databaseFile,temporary); renameSync(temporary,databasePath);
-  if (attachmentDirectory) { const staged=`${attachmentDirectory}.restore`; rmSync(staged,{recursive:true,force:true}); mkdirSync(staged,{recursive:true}); for (const entry of manifest.attachments) { const target=safe(staged,entry.file); mkdirSync(dirname(target),{recursive:true}); copyFileSync(safe(join(source,"attachments"),entry.file),target); } const previous=`${attachmentDirectory}.previous`; rmSync(previous,{recursive:true,force:true}); if(existsSync(attachmentDirectory)) renameSync(attachmentDirectory,previous); renameSync(staged,attachmentDirectory); rmSync(previous,{recursive:true,force:true}); }
+  const check=new Database(databaseFile,{readonly:true,fileMustExist:true}); try {
+    if (check.pragma("integrity_check",{simple:true})!=="ok") throw new Error("SQLite integrity check failed.");
+    const actual=(check.prepare("SELECT max(version) version FROM schema_migrations").get() as {version:number}).version;
+    if(actual!==manifest.database.schemaVersion||actual>21) throw new Error("Unsupported or inconsistent database schema version.");
+    const required=check.prepare("SELECT DISTINCT sha256, size FROM knowledge_attachments ORDER BY sha256").all() as Array<{sha256:string;size:number}>;
+    if(JSON.stringify(required)!==JSON.stringify(manifest.attachments.map(x=>({sha256:x.sha256,size:x.size})).sort((a,b)=>a.sha256.localeCompare(b.sha256)))) throw new Error("Backup attachment manifest is incomplete.");
+  } finally { check.close(); }
+  mkdirSync(dirname(databasePath),{recursive:true}); const stageRoot=mkdtempSync(join(dirname(databasePath),`.restore-`)); const stagedDatabase=join(stageRoot,"state.sqlite3"); copyFileSync(databaseFile,stagedDatabase);
+  const stagedAttachments=join(stageRoot,"attachments"); mkdirSync(stagedAttachments); for(const entry of manifest.attachments){const target=safe(stagedAttachments,entry.file);mkdirSync(dirname(target),{recursive:true});copyFileSync(safe(join(source,"attachments"),entry.file),target);}
+  const quarantine=join(stageRoot,"previous"); mkdirSync(quarantine); const moved:Array<[string,string]>=[];
+  try {
+    for(const current of [databasePath,`${databasePath}-wal`,`${databasePath}-shm`,...(attachmentDirectory?[attachmentDirectory]:[])]) if(existsSync(current)){const old=join(quarantine,basename(current));renameSync(current,old);moved.push([old,current]);}
+    renameSync(stagedDatabase,databasePath); if(attachmentDirectory) renameSync(stagedAttachments,attachmentDirectory);
+    try { rmSync(stageRoot,{recursive:true,force:true}); } catch { /* Restored state is committed; retained quarantine is recoverable. */ }
+  } catch(error) { if(existsSync(databasePath)) rmSync(databasePath,{force:true}); if(attachmentDirectory&&existsSync(attachmentDirectory)) rmSync(attachmentDirectory,{recursive:true,force:true}); for(const [old,current] of moved.reverse()) if(existsSync(old)) renameSync(old,current); rmSync(stageRoot,{recursive:true,force:true}); throw error; }
 }

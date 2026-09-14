@@ -30,7 +30,7 @@ export async function runKnowledgeCommand(args: string[], paths: AppPaths, depen
   if (args.length !== 1 && !(args.length === 3 && ["--json", "--input-file"].includes(args[1]!))) throw new Error("Use --json or --input-file with one JSON object.");
   let source = "{}";
   if (args[1] === "--input-file") {
-    if (statSync(args[2]!).size > 65536) throw new Error("limit_exceeded: Knowledge input exceeds 64 KiB.");
+    if (statSync(args[2]!).size > 14_100_000) throw new Error("limit_exceeded: Knowledge input exceeds the maximum operation size.");
     source = readFileSync(args[2]!, "utf8");
   } else if (args[1] === "--json") source = args[2]!;
   let input: unknown;
@@ -38,7 +38,7 @@ export async function runKnowledgeCommand(args: string[], paths: AppPaths, depen
   const parsed = knowledgeSchemas[operation as KnowledgeOperation].safeParse(input);
   if (!parsed.success) throw new Error("invalid_request: Invalid knowledge input.");
   const body = JSON.stringify({ operation, input: parsed.data });
-  if (Buffer.byteLength(body) > 65536) throw new Error("limit_exceeded: Knowledge request exceeds 64 KiB.");
+  if (Buffer.byteLength(body) > (operation === "create_attachment" ? 14_100_000 : 65536)) throw new Error("limit_exceeded: Knowledge request exceeds its operation limit.");
   const environment = dependencies.environment ?? process.env;
   const token = environment.WORKTREE_SWITCHER_KNOWLEDGE_TOKEN ?? environment.WORKTREE_SWITCHER_OWNER_TOKEN;
   if (!token) throw new Error("Set WORKTREE_SWITCHER_KNOWLEDGE_TOKEN to a scoped agent token or owner session.");

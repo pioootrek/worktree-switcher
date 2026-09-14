@@ -69,9 +69,9 @@ export class KnowledgeService {
 
   private dispatch(request: KnowledgeRequest, actor: AuthenticatedPrincipal) {
     switch (request.operation) {
-      case "attachments": return this.requireAttachments().list(request.input.projectId, request.input.recordKind, request.input.recordId, actor);
+      case "attachments": return this.requireAttachments().list(request.input.projectId, request.input.recordKind, request.input.recordId, actor,request.input.limit,request.input.offset);
       case "attachment": { const result = this.requireAttachments().download(request.input.projectId, request.input.attachmentId, actor); return { attachment: result.attachment, disposition: result.disposition, dataBase64: Buffer.from(result.data).toString("base64") }; }
-      case "create_attachment": return this.requireAttachments().upload(request.input.projectId, request.input.recordKind, request.input.recordId, { filename: request.input.filename, mediaType: request.input.mediaType, data: Buffer.from(request.input.dataBase64, "base64"), sha256: request.input.sha256 }, actor);
+      case "create_attachment": return this.requireAttachments().upload(request.input.projectId, request.input.recordKind, request.input.recordId, { filename: request.input.filename, mediaType: request.input.mediaType, data: Buffer.from(request.input.dataBase64, "base64"), sha256: request.input.sha256, idempotencyKey: request.input.idempotencyKey }, actor);
       case "memories": case "memory": case "create_memory": case "update_memory":
       case "approve_memory": case "archive_memory": case "restore_memory": case "supersede_memory":
       case "search": case "task_context": case "export_context": case "check_context_export":

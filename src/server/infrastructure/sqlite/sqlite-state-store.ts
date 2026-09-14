@@ -471,10 +471,12 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
   searchKnowledge(projectId: string, limit: number, offset: number, options: KnowledgeSearchOptions): KnowledgePage<KnowledgeSearchHit> {
     return this.knowledge.searchKnowledge(projectId, limit, offset, options);
   }
-  saveAttachment(value: KnowledgeAttachment): void { this.knowledge.saveAttachment(value); }
+  saveAttachment(value: KnowledgeAttachment, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeAttachment> { return this.knowledge.saveAttachment(value, context); }
   getAttachment(projectId: string, id: string): KnowledgeAttachment | null { return this.knowledge.getAttachment(projectId, id); }
-  listAttachments(projectId: string, recordKind: KnowledgeAttachment["recordKind"], recordId: string): KnowledgeAttachment[] { return this.knowledge.listAttachments(projectId, recordKind, recordId); }
+  listAttachments(projectId: string, recordKind: KnowledgeAttachment["recordKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeAttachment> { return this.knowledge.listAttachments(projectId, recordKind, recordId,limit,offset); }
   attachmentBytesForProject(projectId: string): number { return this.knowledge.attachmentBytesForProject(projectId); }
+  attachmentCountForProject(projectId: string): number { return this.knowledge.attachmentCountForProject(projectId); }
+  attachmentTargetExists(projectId: string, kind: KnowledgeAttachment["recordKind"], id: string): boolean { return this.knowledge.attachmentTargetExists(projectId,kind,id); }
 
   listKnowledgeProjects(principalId: string, limit: number, offset: number): KnowledgePage<KnowledgeProjectSummary> {
     return this.knowledge.listKnowledgeProjects(principalId, limit, offset);
