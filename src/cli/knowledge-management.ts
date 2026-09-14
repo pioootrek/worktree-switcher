@@ -2,6 +2,19 @@ import { readFileSync, statSync } from "node:fs";
 import type { AppPaths } from "../server/paths";
 import { knowledgeSchemas, type KnowledgeOperation, type KnowledgeFailure } from "../shared/contracts/knowledge";
 import { localDashboardEndpoint, readServiceAccess } from "./service-access";
+import { planHubImport } from "../server/modules/knowledge";
+
+function option(args: string[], name: string): string {
+  const index = args.indexOf(name), value = index < 0 ? undefined : args[index + 1];
+  if (!value || value.startsWith("--")) throw new Error(`${name} is required.`);
+  return value;
+}
+
+export function runHubImportPlanCommand(args: string[], write: (line: string) => void = console.log): void {
+  const allowed = new Set(["--repository", "--commit", "--source-id", "--validator-repository"]);
+  for (let index = 1; index < args.length; index += 2) if (!allowed.has(args[index]!) || !args[index + 1] || args[index + 1]!.startsWith("--")) throw new Error("Usage: knowledge plan-import --repository <path> --commit <sha> --source-id <id> --validator-repository <path>");
+  write(JSON.stringify(planHubImport({ repository: option(args, "--repository"), commit: option(args, "--commit"), sourceId: option(args, "--source-id"), validatorRepository: option(args, "--validator-repository") }), null, 2));
+}
 
 /** Extract global path options before the operation's strict argument validation. */
 export function parseKnowledgeCommandArgs(raw: string[]): { args: string[]; dataDir?: string; stateDir?: string } {
@@ -25,6 +38,7 @@ export async function runKnowledgeCommand(args: string[], paths: AppPaths, depen
   write?: (line: string) => void;
   environment?: Readonly<Record<string, string | undefined>>;
 } = {}): Promise<void> {
+  if (args[0] === "plan-import") { runHubImportPlanCommand(args, dependencies.write); return; }
   const operation = args[0];
   if (!operation || !Object.hasOwn(knowledgeSchemas, operation)) throw new Error(`Usage: knowledge <${Object.keys(knowledgeSchemas).join("|")}> [--json '<input> ' | --input-file <path>]`);
   if (args.length !== 1 && !(args.length === 3 && ["--json", "--input-file"].includes(args[1]!))) throw new Error("Use --json or --input-file with one JSON object.");
