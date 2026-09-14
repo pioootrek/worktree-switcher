@@ -17,6 +17,18 @@ export interface KnowledgeRuntimeLinkResult {
   project: KnowledgeProject;
 }
 
+export interface KnowledgeProjectSnapshot {
+  project: Record<string, unknown>;
+  threads: Array<Record<string, unknown>>;
+  replies: Array<Record<string, unknown>>;
+  tasks: Array<Record<string, unknown>>;
+  memories: Array<Record<string, unknown>>;
+  relations: Array<Record<string, unknown>>;
+  history: Array<Record<string, unknown>>;
+  attachments: Array<Record<string, unknown>>;
+  requiredPrincipals: string[];
+}
+
 export interface KnowledgeStore {
   saveAttachment(attachment: KnowledgeAttachment, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeAttachment>;
   getAttachment(projectId: string, id: string): KnowledgeAttachment | null;
