@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KnowledgeFilters, KnowledgeRelation, KnowledgePage, KnowledgeProjectSummary, KnowledgeReply, KnowledgeTask, KnowledgeTaskSummary, KnowledgeThread, KnowledgeThreadSummary } from "@/shared/contracts/knowledge";
-import { knowledgeIdentity, knowledgeRequest, type KnowledgeIdentity } from "./knowledge-client";
+import { isKnowledgeAccessError, knowledgeIdentity, knowledgeRequest, type KnowledgeIdentity } from "./knowledge-client";
 
 export type KnowledgeTab = "backlog" | "discussions" | "memory";
 export interface KnowledgeSelection { projectId: string; tab: KnowledgeTab; recordId: string }
@@ -25,6 +25,7 @@ export function useKnowledge(token: string, change: { version: number; projectId
   const [replyOffset, setReplyOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState(false);
   const [sessionError, setSessionError] = useState(false);
   const [revision, setRevision] = useState(0);
   const selectionRef = useRef(selection);
@@ -68,13 +69,18 @@ export function useKnowledge(token: string, change: { version: number; projectId
       knowledgeRequest<KnowledgePage<KnowledgeProjectSummary>>(token, "projects", { offset: projectOffset }, abort.signal),
     ]).then(([who, page]) => {
       if (abort.signal.aborted) return;
-      setIdentity(current => current?.principal.id === who.principal.id ? current : who); setProjects(page); setSessionError(false);
+      setIdentity(current => current?.principal.id === who.principal.id ? current : who); setProjects(page); setSessionError(false); setDiscoveryError(false);
       if (!selectionRef.current.projectId && page.items[0]) {
         const projectId = page.items[0].id;
         setSelection(current => ({ ...current, projectId }));
         const url = new URL(window.location.href); url.searchParams.set("knowledgeProject", projectId); window.history.replaceState(null, "", url);
       }
-    }).catch(() => { if (!abort.signal.aborted) { setIdentity(null); setProjects(emptyPage()); setSessionError(true); } });
+    }).catch(error => {
+      if (abort.signal.aborted) return;
+      if (isKnowledgeAccessError(error)) {
+        setIdentity(null); setProjects(emptyPage()); setProject(null); setDetail(null); setRows(emptyPage()); setReplies(emptyPage()); setRelations(emptyPage()); setSessionError(true);
+      } else setDiscoveryError(true);
+    });
     return () => abort.abort();
   }, [token, ready, projectOffset, revision]);
 
@@ -101,5 +107,5 @@ export function useKnowledge(token: string, change: { version: number; projectId
     return () => { clearTimeout(timer); abort.abort(); };
   }, [token, identity, selection, filters, offset, replyOffset, relationOffset, revision]);
 
-  return { relations, relationOffset, setRelationOffset, identity, project, projects, projectOffset, setProjectOffset, selection, select, filters, setFilters: (value: KnowledgeFilters) => { setFilters(value); setOffset(0); }, offset, setOffset, detail, rows, replies, replyOffset, setReplyOffset, loading, error, sessionError, reload };
+  return { relations, relationOffset, setRelationOffset, identity, project, projects, projectOffset, setProjectOffset, selection, select, filters, setFilters: (value: KnowledgeFilters) => { setFilters(value); setOffset(0); }, offset, setOffset, detail, rows, replies, replyOffset, setReplyOffset, loading, error: error || discoveryError, sessionError, reload };
 }

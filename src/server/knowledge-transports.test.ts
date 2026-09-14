@@ -22,13 +22,13 @@ import type { KnowledgeTask, KnowledgeThread, KnowledgePage } from "@/shared/con
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-async function setup() {
+async function setup(clock?: () => string) {
   const directory = mkdtempSync(join(tmpdir(), "knowledge-transports-"));
   cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
   writeFileSync(join(directory, "index.html"), "<title>Knowledge</title>");
   const store = new SqliteStateStore(join(directory, "state.sqlite3"));
   cleanups.push(() => store.close());
-  const identity = new IdentityService(store);
+  const identity = new IdentityService(store, clock);
   const ownerSession = identity.bootstrapOwnerSession();
   const owner = identity.authenticateBearer(ownerSession.token);
   const project = identity.createKnowledgeProject({ name: "Knowledge without runtime" }, owner);
@@ -74,6 +74,44 @@ async function setup() {
 }
 
 describe("real knowledge HTTP, MCP and CLI", () => {
+  it.each(["grant", "credential", "expiry"] as const)("filters SSE with current %s state without recording passive credential usage", async kind => {
+    let now = "2026-01-01T12:00:00.000Z";
+    const f = await setup(() => now);
+    f.identity.setKnowledgeGrant({ principalId: f.agents[0], projectId: f.privateProject.id, permissions: ["knowledge:read"] }, f.owner);
+    const eventCredential = f.identity.issueAgentToken({ principalId: f.agents[0], label: "SSE", ...(kind === "expiry" ? { expiresAt: "2026-01-01T13:00:00.000Z" } : {}) }, f.owner);
+    const eventToken = eventCredential.token;
+    const used = vi.spyOn(f.store, "recordCredentialUsed");
+    const abort = new AbortController();
+    const response = await fetch(`${f.base}/api/events`, { headers: { "X-Worktree-Switcher-Token": "pairing", Authorization: `Bearer ${eventToken}` }, signal: abort.signal });
+    expect(response.status).toBe(200);
+    expect(used.mock.calls.filter(([id]) => id === eventCredential.credential.id)).toHaveLength(1);
+    used.mockClear();
+    const reader = response.body!.getReader();
+    let frames = "";
+    const read = (async () => {
+      try { while (true) { const chunk = await reader.read(); if (chunk.done) break; frames += new TextDecoder().decode(chunk.value); } }
+      catch { if (!abort.signal.aborted) throw new Error("Unexpected stream failure"); }
+      finally { reader.releaseLock(); }
+    })();
+    try {
+      f.events.publishKnowledge(f.project.id); f.events.publishKnowledge(f.privateProject.id);
+      await vi.waitFor(() => expect(frames).toContain(`"projectIds":["${f.project.id}","${f.privateProject.id}"]`));
+      expect(used.mock.calls.filter(([id]) => id === eventCredential.credential.id)).toHaveLength(0);
+      if (kind === "grant") f.identity.revokeKnowledgeGrant(f.agents[0], f.project.id, f.owner);
+      else if (kind === "credential") f.identity.revokeCredential(eventCredential.credential.id, f.owner);
+      else now = "2100-01-01T00:00:00.000Z";
+      frames = "";
+      f.events.publishKnowledge(f.project.id); f.events.publishKnowledge(f.privateProject.id);
+      f.events.publish({ kinds: ["runtime"] });
+      await vi.waitFor(() => expect(frames).toContain("event: changed"));
+      if (kind === "grant") {
+        expect(frames).toContain(`"projectIds":["${f.privateProject.id}"]`);
+        expect(frames).not.toContain(f.project.id);
+      } else expect(frames).not.toContain("knowledge-changed");
+      expect(used.mock.calls.filter(([id]) => id === eventCredential.credential.id)).toHaveLength(0);
+    } finally { abort.abort(); await read; used.mockRestore(); }
+  });
+
   it("shares an owner and two agent sessions, retries once and leaves runtime untouched", async () => {
     const f = await setup();
     const projectId = f.project.id;

@@ -17,6 +17,12 @@ export async function knowledgeRequest<T, K extends KnowledgeOperation = Knowled
 export interface KnowledgeIdentity { principal: { id: string; kind: string }; credential: { kind: string } }
 export async function knowledgeIdentity(token: string, signal?: AbortSignal): Promise<KnowledgeIdentity> {
   const response = await fetch("/api/identity", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store", signal });
-  if (!response.ok) throw new KnowledgeClientError({ code: "credential_invalid", error: "Knowledge session expired." }, response.status);
+  if (!response.ok) throw new KnowledgeClientError(response.status === 401 || response.status === 403
+    ? { code: "invalid_credential", error: "Knowledge access denied." }
+    : { code: "load_failed", error: "Could not load knowledge identity." }, response.status);
   return response.json();
+}
+
+export function isKnowledgeAccessError(error: unknown): boolean {
+  return error instanceof KnowledgeClientError && (error.status === 401 || error.status === 403);
 }

@@ -30,7 +30,10 @@ export function Dashboard() {
   const { data, observedAt, token, loading, error, notice, dismissNotice, mutate, setError, runningCount, knowledgeToken, knowledgeSessionVersion, changeKnowledgeToken, knowledgeChange } = useDashboard();
   const [section, setSection] = useState<ProjectSection>("worktrees");
   useEffect(() => {
-    const sync = () => setSection(new URLSearchParams(window.location.search).get("view") === "knowledge" ? "knowledge" : "worktrees");
+    const sync = () => {
+      const view = new URLSearchParams(window.location.search).get("view");
+      setSection(projectSections.find(item => item.id === view)?.id ?? "worktrees");
+    };
     const timer = setTimeout(sync, 0);
     window.addEventListener("popstate", sync);
     return () => { clearTimeout(timer); window.removeEventListener("popstate", sync); };
@@ -40,9 +43,21 @@ export function Dashboard() {
   const allProjects = selectedProjectId === ALL_PROJECTS;
   const selectedSnapshot = data.projects.find(({ project }) => project.id === selectedProjectId) ?? data.projects[0];
 
+  const selectSection = (next: ProjectSection) => {
+    setSection(next);
+    const url = new URL(window.location.href);
+    if (next === "worktrees") url.searchParams.delete("view");
+    else url.searchParams.set("view", next);
+    if (next !== "knowledge") {
+      for (const key of ["knowledgeProject", "knowledgeTab", "record", "knowledgeEditor"]) url.searchParams.delete(key);
+    }
+    if (url.href !== window.location.href) window.history.pushState(null, "", url);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  };
+
   return (
     <SidebarProvider>
-      <ProjectNavigation section={section} projectName={allProjects ? t("projectSwitcher.all") : selectedSnapshot?.project.name} onSelect={(next) => { setSection(next); const url = new URL(window.location.href); if (next === "knowledge") url.searchParams.set("view", "knowledge"); else { for (const key of ["view", "knowledgeProject", "knowledgeTab", "record", "knowledgeEditor"]) url.searchParams.delete(key); } window.history.pushState(null, "", url); window.scrollTo({ top: 0, behavior: "instant" }); }} />
+      <ProjectNavigation section={section} projectName={allProjects ? t("projectSwitcher.all") : selectedSnapshot?.project.name} onSelect={selectSection} />
       <main className="min-w-0 flex-1">
         <header className="z-30 flex min-h-16 flex-wrap items-center justify-between gap-4 border-b border-border bg-background/92 px-4 py-3 backdrop-blur-xl sm:px-7 sticky top-0 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">

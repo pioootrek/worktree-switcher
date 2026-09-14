@@ -47,7 +47,7 @@ export function KnowledgeEditor({ token, principalId, projectId, mode, record, o
     try { sessionStorage.setItem(storageKey, JSON.stringify(value)); } catch { /* In-memory draft remains usable when storage is full. */ }
   };
   if (!draft) return <p role="status">{t("knowledge.loading")}</p>;
-  const edit = (patch: Partial<Draft>) => persist({ ...draft, ...patch, idempotencyKey: retryKey() });
+  const edit = (patch: Partial<Draft>) => persist({ ...draft, ...patch });
   const submit = async () => {
     persist(draft);
     setBusy(true);

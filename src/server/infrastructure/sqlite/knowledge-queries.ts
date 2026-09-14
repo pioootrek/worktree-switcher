@@ -29,7 +29,9 @@ const mapTask = (row: TaskRow): KnowledgeTask => ({ id: row.id, projectId: row.p
 
 /** Borrows the controller's singleton connection and owns no lifecycle. */
 export class KnowledgeQueries implements KnowledgeStore {
-  constructor(private readonly database: Database.Database) {}
+  constructor(private readonly database: Database.Database) {
+    database.function("knowledge_fold", { deterministic: true }, value => String(value).normalize("NFC").toLowerCase());
+  }
 
   listKnowledgeProjects(principalId: string, limit: number, offset: number): KnowledgePage<KnowledgeProjectSummary> {
     const rows = this.database.prepare(`SELECT p.*, EXISTS(SELECT 1 FROM json_each(g.permissions_json) WHERE value = 'knowledge:write') AS writable
@@ -63,7 +65,7 @@ export class KnowledgeQueries implements KnowledgeStore {
   }
 
   listThreads(projectId: string, limit: number, offset: number, filters: KnowledgeFilters = {}): KnowledgePage<KnowledgeThread> {
-    return this.page((this.database.prepare("SELECT * FROM knowledge_threads WHERE project_id = ? AND instr(lower(title), lower(?)) > 0 ORDER BY updated_at DESC, id LIMIT ? OFFSET ?").all(projectId, filters.query ?? "", limit + 1, offset) as ThreadRow[]).map(mapThread), limit, offset);
+    return this.page((this.database.prepare("SELECT * FROM knowledge_threads WHERE project_id = ? AND instr(knowledge_fold(title), knowledge_fold(?)) > 0 ORDER BY updated_at DESC, id LIMIT ? OFFSET ?").all(projectId, filters.query ?? "", limit + 1, offset) as ThreadRow[]).map(mapThread), limit, offset);
   }
   getThread(projectId: string, id: string): KnowledgeThread | null {
     const row = this.database.prepare("SELECT * FROM knowledge_threads WHERE project_id = ? AND id = ?").get(projectId, id) as ThreadRow | undefined;
@@ -81,7 +83,7 @@ export class KnowledgeQueries implements KnowledgeStore {
     return row ? mapTask(row) : null;
   }
   listTasks(projectId: string, limit: number, offset: number, filters: KnowledgeFilters = {}): KnowledgePage<KnowledgeTask> {
-    return this.page((this.database.prepare("SELECT * FROM knowledge_tasks WHERE project_id = ? AND instr(lower(title), lower(?)) > 0 AND (? IS NULL OR status = ?) AND (? IS NULL OR priority = ?) ORDER BY updated_at DESC, id LIMIT ? OFFSET ?").all(projectId, filters.query ?? "", filters.status ?? null, filters.status ?? null, filters.priority ?? null, filters.priority ?? null, limit + 1, offset) as TaskRow[]).map(mapTask), limit, offset);
+    return this.page((this.database.prepare("SELECT * FROM knowledge_tasks WHERE project_id = ? AND instr(knowledge_fold(title), knowledge_fold(?)) > 0 AND (? IS NULL OR status = ?) AND (? IS NULL OR priority = ?) ORDER BY updated_at DESC, id LIMIT ? OFFSET ?").all(projectId, filters.query ?? "", filters.status ?? null, filters.status ?? null, filters.priority ?? null, filters.priority ?? null, limit + 1, offset) as TaskRow[]).map(mapTask), limit, offset);
   }
   listHistory(projectId: string, recordKind: KnowledgeHistoryEntry["recordKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeHistoryEntry> {
     const rows = (this.database.prepare("SELECT * FROM knowledge_history WHERE project_id = ? AND record_kind = ? AND record_id = ? ORDER BY id LIMIT ? OFFSET ?").all(projectId, recordKind, recordId, limit + 1, offset) as HistoryRow[]).map((row) => ({ id: row.id, projectId: row.project_id, recordKind: row.record_kind, recordId: row.record_id, operation: row.operation, previousJson: row.previous_json, principalId: row.principal_id, authenticationMethod: row.authentication_method, revision: row.revision, createdAt: row.created_at }));

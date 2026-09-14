@@ -9,14 +9,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useI18n } from "@/i18n/provider";
 import type { KnowledgeFilters } from "@/shared/contracts/knowledge";
-import { knowledgeIdentity } from "./knowledge-client";
+import { isKnowledgeAccessError, knowledgeIdentity } from "./knowledge-client";
 import { KnowledgeEditor, fieldClass, type EditorMode } from "./knowledge-editor";
 import { useKnowledge, type KnowledgeTab } from "./use-knowledge";
 
 export function KnowledgeDashboard({ token, setToken, change }: { token: string; setToken: (value: string) => void; change: { version: number; projectIds: string[] } }) {
   const { t } = useI18n();
   const [credential, setCredential] = useState("");
-  const [loginError, setLoginError] = useState(false);
+  const [loginError, setLoginError] = useState<"auth" | "load" | null>(null);
   const [busy, setBusy] = useState(false);
   const [mode, updateMode] = useState<EditorMode | null>(null);
   const setMode = (next: EditorMode | null) => {
@@ -43,17 +43,21 @@ export function KnowledgeDashboard({ token, setToken, change }: { token: string;
   const navigate = (tab: KnowledgeTab, recordId = "", projectId = selection.projectId) => { close(); setNotice(false); model.select({ tab, recordId, projectId }); };
 
   if (!token || model.sessionError) return <form className="max-w-xl space-y-4 rounded-xl border border-border p-5" onSubmit={event => {
-    event.preventDefault(); setBusy(true); setLoginError(false);
-    void knowledgeIdentity(credential).then(() => { setToken(credential); setCredential(""); }).catch(() => setLoginError(true)).finally(() => setBusy(false));
+    event.preventDefault(); setBusy(true); setLoginError(null);
+    void knowledgeIdentity(credential).then(() => { setToken(credential); setCredential(""); }).catch(error => setLoginError(isKnowledgeAccessError(error) ? "auth" : "load")).finally(() => setBusy(false));
   }}>
     <h3 className="text-lg font-semibold">{t("knowledge.signIn")}</h3>
     <p className="text-sm text-muted-foreground">{t("knowledge.signInHelp")}</p>
-    {(loginError || model.sessionError) && <Alert variant="destructive"><AlertDescription>{t("knowledge.sessionExpired")}</AlertDescription></Alert>}
+    {(loginError || model.sessionError) && <Alert variant="destructive"><AlertDescription>{t(loginError === "load" ? "knowledge.loadFailed" : "knowledge.sessionExpired")}</AlertDescription></Alert>}
     <Label htmlFor="knowledge-credential">{t("knowledge.credential")}</Label><Input id="knowledge-credential" type="password" value={credential} onChange={event => setCredential(event.target.value)} required autoComplete="off" />
     <Button type="submit" disabled={busy}>{t("knowledge.signIn")}</Button>
   </form>;
 
-  if (!identity) return <p role="status">{t("knowledge.loading")}</p>;
+  if (!identity) return model.error ? <div className="space-y-3">
+    <Alert variant="destructive"><AlertDescription>{t("knowledge.loadFailed")}</AlertDescription></Alert>
+    <Button variant="outline" onClick={model.reload}>{t("knowledge.refresh")}</Button>
+    <Button variant="ghost" onClick={() => setToken("")}>{t("knowledge.signOut")}</Button>
+  </div> : <p role="status">{t("knowledge.loading")}</p>;
   return <div className="space-y-6">
     <div className="flex flex-wrap items-end gap-3">
       <div className="w-full min-w-0 space-y-2 sm:w-auto sm:flex-1"><Label htmlFor="knowledge-project">{t("knowledge.project")}</Label><select id="knowledge-project" className={fieldClass} value={selection.projectId} onChange={event => navigate(selection.tab, "", event.target.value)}>

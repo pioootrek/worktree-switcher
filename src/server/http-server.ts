@@ -542,8 +542,13 @@ export function createControllerServer(options: {
             "X-Accel-Buffering": "no",
           });
           const knowledgeToken = bearerToken(request);
-          options.events.add(response, knowledgeToken && options.identity ? (projectId) => {
-            const actor = options.identity!.authenticateBearer(knowledgeToken);
+          let knowledgeActor: AuthenticatedPrincipal | undefined;
+          try {
+            if (knowledgeToken && options.identity) knowledgeActor = options.identity.authenticateBearer(knowledgeToken);
+          } catch { /* Invalid optional knowledge credentials must not interrupt runtime events. */ }
+          const actor = knowledgeActor;
+          options.events.add(response, actor && options.identity ? (projectId) => {
+            // authorizeKnowledge rechecks credential expiry, revocation and grants without recording passive usage.
             options.identity!.authorizeKnowledge(actor, projectId, "knowledge:read");
           } : undefined);
           return;

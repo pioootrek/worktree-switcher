@@ -10,7 +10,9 @@ async function mountKnowledge(page: Page) {
   const replies: Array<{ id: string; threadId: string; body: string; revision: number; createdBy: string }> = [];
   const calls: Array<{ operation: string; input: Record<string, unknown> }> = [];
   const saved = new Map<string, unknown>();
+  const savedInputs = new Map<string, string>();
   let failSave = false;
+  let loseResponse = false;
   await page.route("**/api/identity", route => route.fulfill({ json: { principal: { id: "owner", kind: "owner" }, credential: { kind: "owner_session" } } }));
   await page.route("**/api/knowledge", async route => {
     const request = route.request().postDataJSON(); calls.push(request);
@@ -23,7 +25,11 @@ async function mountKnowledge(page: Page) {
     if (operation === "relations") return route.fulfill({ json: pageResult([]) });
     if (operation === "replies") return route.fulfill({ json: pageResult(replies.filter(reply => reply.threadId === input.threadId)) });
     if (failSave) return route.fulfill({ status: 503, json: { code: "unavailable", error: "Unavailable" } });
-    if (saved.has(input.idempotencyKey)) return route.fulfill({ json: { value: saved.get(input.idempotencyKey), replayed: true } });
+    if (saved.has(input.idempotencyKey)) {
+      if (savedInputs.get(input.idempotencyKey) !== JSON.stringify(input)) return route.fulfill({ status: 409, json: { code: "idempotency_conflict", error: "Different committed input" } });
+      return route.fulfill({ json: { value: saved.get(input.idempotencyKey), replayed: true } });
+    }
+    savedInputs.set(input.idempotencyKey, JSON.stringify(input));
     if (operation === "create_reply") {
       const reply = { id: `r${replies.length}`, threadId: input.threadId, body: input.body, revision: 1, createdBy: "owner" }; replies.push(reply); saved.set(input.idempotencyKey, reply);
       return route.fulfill({ json: { value: reply, replayed: false } });
@@ -38,11 +44,12 @@ async function mountKnowledge(page: Page) {
     records.push(record);
     const value = operation === "task_from_thread" ? { task: record, relation: { targetId: input.threadId } } : record;
     saved.set(input.idempotencyKey, value);
+    if (loseResponse) { loseResponse = false; return route.abort("failed"); }
     return route.fulfill({ json: { value, replayed: false } });
   });
   await page.getByRole("button", { name: "Knowledge", exact: true }).click();
   await expect(page.getByLabel("Knowledge project", { exact: true })).toHaveValue(project.id);
-  return { ...fixture, records, calls, setFailure: (value: boolean) => { failSave = value; } };
+  return { ...fixture, records, calls, setFailure: (value: boolean) => { failSave = value; }, loseNextResponse: () => { loseResponse = true; } };
 }
 
 test("knowledge without runtime: discussion, reply, task, filters and static deep link", async ({ page }) => {
@@ -140,4 +147,88 @@ test("changing credentials clears the previous principal's visible knowledge bef
   } finally { release(); }
   await expect(page.getByText("Could not read knowledge.", { exact: false })).toBeVisible();
   expect(f.errors).toEqual([]);
+});
+
+
+test("a committed save with a lost response keeps its retry key through edits and reload", async ({ page }) => {
+  const f = await mountKnowledge(page);
+  await page.getByRole("button", { name: "Quick save", exact: true }).click();
+  await page.getByLabel("Title", { exact: true }).fill("Original title");
+  await page.getByLabel("Body", { exact: true }).fill("Evidence");
+  f.loseNextResponse();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Saving failed.", { exact: false })).toBeVisible();
+  const firstKey = f.calls.filter(call => call.operation === "create_task").at(-1)!.input.idempotencyKey;
+  expect(f.records).toHaveLength(1);
+  await page.getByLabel("Title", { exact: true }).fill("Edited after lost response");
+  await page.reload();
+  await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Edited after lost response");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("This draft was already saved with different content.", { exact: false })).toBeVisible();
+  expect(f.calls.filter(call => call.operation === "create_task").at(-1)!.input.idempotencyKey).toBe(firstKey);
+  expect(f.records).toHaveLength(1);
+  await page.getByLabel("Title", { exact: true }).fill("Original title");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Original title", exact: true })).toBeVisible();
+  expect(f.records).toHaveLength(1);
+});
+
+for (const target of ["identity", "projects"] as const) {
+  test(`transient ${target} errors preserve the session and draft and offer retry after reload`, async ({ page }) => {
+    const f = await mountKnowledge(page);
+    await page.getByRole("button", { name: "Quick save", exact: true }).click();
+    await page.getByLabel("Title", { exact: true }).fill("Unsaved draft");
+    let fail = true;
+    await page.route(target === "identity" ? "**/api/identity" : "**/api/knowledge", async route => {
+      if (!fail || (target === "projects" && route.request().postDataJSON().operation !== "projects")) return route.fallback();
+      return target === "identity" ? route.fulfill({ status: 503, json: { error: "Unavailable" } }) : route.abort("failed");
+    });
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.getByText("Could not read knowledge.", { exact: false })).toBeVisible();
+    await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Unsaved draft");
+    await expect(page.getByLabel("Knowledge credential", { exact: true })).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByText("Could not read knowledge.", { exact: false })).toBeVisible();
+    await expect(page.getByLabel("Knowledge credential", { exact: true })).toHaveCount(0);
+    fail = false;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Unsaved draft");
+    await expect(page.getByText("Could not read knowledge.", { exact: false })).toHaveCount(0);
+    expect(f.errors).toEqual([]);
+  });
+}
+
+for (const status of [401, 403]) {
+  test(`knowledge discovery HTTP ${status} requires signing in again`, async ({ page }) => {
+    await mountKnowledge(page);
+    await page.route("**/api/identity", route => route.fulfill({ status, json: { error: "Denied" } }));
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.getByLabel("Knowledge credential", { exact: true })).toBeVisible();
+    await expect(page.getByText("The knowledge session expired", { exact: false })).toBeVisible();
+  });
+}
+
+test("knowledge sign-in changes only the shared stream credential, not runtime bootstrap", async ({ page }) => {
+  let dashboardReads = 0;
+  page.on("request", request => { if (new URL(request.url()).pathname.startsWith("/api/dashboard")) dashboardReads++; });
+  await mountKnowledge(page);
+  const events = () => page.evaluate(() => {
+    const value = (window as unknown as { fixtureEvents: { active: number; opened: number; lastKnowledgeToken: string } }).fixtureEvents;
+    return { active: value.active, opened: value.opened, token: value.lastKnowledgeToken };
+  });
+  await expect.poll(events).toEqual({ active: 1, opened: 1, token: "Bearer knowledge-fixture" });
+  expect(dashboardReads).toBe(1);
+  await page.getByRole("button", { name: "Sign out of knowledge" }).click();
+  await expect.poll(events).toEqual({ active: 1, opened: 2, token: "" });
+  expect(dashboardReads).toBe(1);
+  await page.getByLabel("Knowledge credential", { exact: true }).fill("second-credential");
+  await page.getByRole("button", { name: "Sign in to knowledge", exact: true }).click();
+  await expect(page.getByLabel("Knowledge project", { exact: true })).toBeVisible();
+  await expect.poll(events).toEqual({ active: 1, opened: 3, token: "Bearer second-credential" });
+  expect(dashboardReads).toBe(1);
+  // A runtime revision missed during credential replacement still requires reconciliation.
+  await page.evaluate(() => { (window as unknown as { fixtureEvents: { version: { revision: number } } }).fixtureEvents.version.revision++; });
+  await page.getByRole("button", { name: "Sign out of knowledge" }).click();
+  await expect.poll(() => dashboardReads).toBe(2);
+  await expect.poll(events).toEqual({ active: 1, opened: 4, token: "" });
 });

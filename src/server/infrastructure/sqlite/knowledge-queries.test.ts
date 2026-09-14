@@ -198,6 +198,23 @@ describe("knowledge service SQLite flow", () => {
 });
 
 describe("knowledge browsing", () => {
+  it("matches Polish title casing and normalized accents before paging tasks and threads", () => {
+    const { store, service, actor } = setup();
+    for (const [index, title] of ["ŁÓDŹ", "łódź", "Other", "ŁÓDŹ".normalize("NFD")].entries()) {
+      service.createTask("project-1", { title, description: "Details" }, { idempotencyKey: `task-${index}` }, actor);
+      service.createThread("project-1", { title, body: "Details" }, { idempotencyKey: `thread-${index}` }, actor);
+    }
+    for (const query of ["łódź", "ŁÓDŹ", "ŁÓDŹ".normalize("NFD")]) {
+      for (const operation of ["tasks", "threads"] as const) {
+        const pages = [0, 1, 2].map(offset => service.execute({ operation, input: { projectId: "project-1", query, limit: 1, offset } }, actor) as { items: Array<{ id: string; title: string }>; nextOffset: number | null });
+        expect(pages.map(page => page.items.length)).toEqual([1, 1, 1]);
+        expect(new Set(pages.flatMap(page => page.items.map(item => item.id))).size).toBe(3);
+        expect(pages.map(page => page.nextOffset)).toEqual([1, 2, null]);
+      }
+    }
+    store.close();
+  });
+
   it("filters before pagination, returns summaries, and lists only readable projects", () => {
     const { store, service, actor } = setup();
     for (let index = 0; index < 4; index++) service.createTask("project-1", { title: index % 2 ? "Chosen" : "Other", description: "Full description", priority: index % 2 ? "now" : "later" }, { idempotencyKey: `task-${index}` }, actor);
