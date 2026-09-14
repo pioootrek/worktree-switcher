@@ -2,6 +2,9 @@ export type Locale = "pl" | "en";
 export type TranslationValues = Record<string, string | number>;
 
 const pl = {
+  "knowledge.previouslyApproved": "Wcześniej zatwierdzone",
+  "knowledge.discardDraft": "Odrzuć lokalny szkic",
+  "knowledge.discardDraftHelp": "Pierwszy zapis został przyjęty. Możesz odrzucić ten lokalny szkic i otworzyć zapisany wpis z listy. Odrzucenie nie usuwa wpisu.",
   "knowledge.addMemory": "Dodaj wpis pamięci",
   "knowledge.editMemory": "Edytuj pamięć",
   "knowledge.approvalHelp": "Zapis tworzy propozycję. Zatwierdzenie dotyczy jednej rewizji i wygasa po edycji.",
@@ -617,6 +620,9 @@ const pl = {
 } as const;
 
 const en: Record<keyof typeof pl, string> = {
+  "knowledge.previouslyApproved": "Previously approved",
+  "knowledge.discardDraft": "Discard local draft",
+  "knowledge.discardDraftHelp": "The first save was accepted. You can discard this local draft and open the saved record from the list. Discarding does not delete the record.",
   "knowledge.addMemory": "Add memory",
   "knowledge.editMemory": "Edit memory",
   "knowledge.approvalHelp": "Saving creates a proposal. Approval applies to one revision and is cleared by editing.",

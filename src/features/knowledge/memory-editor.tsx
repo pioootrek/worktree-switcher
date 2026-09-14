@@ -57,6 +57,13 @@ export function MemoryEditor({ token, principalId, projectId, record, onSaved, o
     <h3 className="font-semibold">{t(record ? "knowledge.editMemory" : "knowledge.addMemory")}</h3>
     <p className="text-sm text-muted-foreground">{t("knowledge.approvalHelp")}</p>
     {draft.error && <p role="alert">{t(conflict ? "knowledge.conflict" : draft.error.code === "idempotency_conflict" ? "knowledge.retryConflict" : "knowledge.saveFailed")}</p>}
+    {draft.error?.code === "idempotency_conflict" && <div className="space-y-2">
+      <p className="text-sm">{t("knowledge.discardDraftHelp")}</p>
+      <Button type="button" variant="outline" disabled={busy} onClick={() => {
+        try { sessionStorage.removeItem(storageKey); } catch { /* The in-memory draft can still be discarded. */ }
+        setDraft(null); onClose();
+      }}>{t("knowledge.discardDraft")}</Button>
+    </div>}
     {conflict && <div className="space-y-2">
       {record && <><p>{t("knowledge.savedVersion", { revision: record.revision })}</p><p className="whitespace-pre-wrap break-words">{record.body}</p></>}
       <p className="text-sm">{t("knowledge.sourceConflict")}</p>

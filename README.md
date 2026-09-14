@@ -328,7 +328,9 @@ current revision, or an explicit HTTP/HTTPS link. Only an owner session with
 `knowledge:approve` can approve memory. Approval is a revisioned mutation and
 points to the resulting revision. Editing, archiving or restoring clears current
 approval; history retains its provenance. Superseded records remain readable and
-immutable, with the replacement's ID and revision.
+immutable, with the replacement's ID and revision. Supersession retains the
+approval of the earlier revision as historical provenance. Memory writes also
+require `knowledge:read` because their responses include retained content.
 
 The Memory search can include threads, replies and tasks. It matches literal
 Unicode text in titles and bodies, with filters for record type, state, memory

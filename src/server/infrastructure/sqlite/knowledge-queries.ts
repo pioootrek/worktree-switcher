@@ -88,7 +88,7 @@ export class KnowledgeQueries implements KnowledgeStore {
       UNION ALL SELECT id, project_id, 'task', title, description, revision, status, updated_at, NULL, '[]', NULL FROM knowledge_tasks WHERE project_id = @projectId
       UNION ALL SELECT id, project_id, 'memory', title, body, revision, status, updated_at, NULL, tags_json, legacy_id FROM knowledge_memories WHERE project_id = @projectId
     ) SELECT id, project_id AS projectId, kind, title, substr(body, 1, 300) AS excerpt, revision, status, updated_at AS updatedAt, thread_id AS threadId FROM records
-      WHERE (@inactive OR status NOT IN ('archived', 'superseded'))
+      WHERE (@inactive OR @status IN ('archived', 'superseded') OR status NOT IN ('archived', 'superseded'))
       AND (@kind IS NULL OR kind = @kind) AND (@status IS NULL OR status = @status)
       AND (@legacyId IS NULL OR legacy_id = @legacyId)
       AND (@tag IS NULL OR EXISTS(SELECT 1 FROM json_each(tags_json) WHERE knowledge_fold(value) = knowledge_fold(@tag)))

@@ -279,6 +279,7 @@ async function mountMemory(page: Page) {
   const fixture = await mountKnowledge(page);
   const memories: import("../../src/shared/contracts/knowledge-memory").KnowledgeMemory[] = [];
   const saved = new Map<string, unknown>();
+  const requestHashes = new Map<string, string>();
   const entries: unknown[] = [];
   let loseResponse = false;
   await page.route("**/api/knowledge", async route => {
@@ -296,7 +297,10 @@ async function mountMemory(page: Page) {
       return route.fulfill({ json: { ...context, format: input.format, content: JSON.stringify(context) } });
     }
     if (!["create_memory", "update_memory", "approve_memory", "archive_memory", "restore_memory", "supersede_memory"].includes(operation)) return route.fallback();
-    if (saved.has(input.idempotencyKey)) return route.fulfill({ json: { value: saved.get(input.idempotencyKey), replayed: true } });
+    if (saved.has(input.idempotencyKey)) {
+      if (requestHashes.get(input.idempotencyKey) !== JSON.stringify(input)) return route.fulfill({ status: 409, json: { code: "idempotency_conflict", error: "Different request" } });
+      return route.fulfill({ json: { value: saved.get(input.idempotencyKey), replayed: true } });
+    }
     if (operation !== "create_memory" && record?.revision !== input.expectedRevision) return route.fulfill({ status: 409, json: { code: "revision_conflict", currentRevision: record?.revision, error: "Conflict" } });
     let value = record;
     if (operation === "create_memory") {
@@ -304,7 +308,7 @@ async function mountMemory(page: Page) {
       memories.push(value!);
     } else {
       entries.push({ id: entries.length, operation, revision: record!.revision + 1, previousJson: JSON.stringify(record), principalId: "owner" });
-      Object.assign(record!, { revision: record!.revision + 1, approval: null });
+      Object.assign(record!, { revision: record!.revision + 1, approval: operation === "supersede_memory" ? record!.approval : null });
       if (operation === "update_memory") Object.assign(record!, { title: input.title, body: input.body, category: input.category, tags: input.tags, legacyId: input.legacyId, sources: input.sources });
       if (operation === "approve_memory") record!.approval = { revision: record!.revision, principalId: "owner", approvedAt: "2026-09-14" };
       if (operation === "archive_memory") record!.status = "archived";
@@ -312,6 +316,7 @@ async function mountMemory(page: Page) {
       if (operation === "supersede_memory") { record!.status = "superseded"; record!.supersededBy = { id: input.replacementId, revision: input.replacementRevision }; }
     }
     saved.set(input.idempotencyKey, structuredClone(value));
+    requestHashes.set(input.idempotencyKey, JSON.stringify(input));
     if (loseResponse) { loseResponse = false; return route.abort("failed"); }
     return route.fulfill({ json: { value, replayed: false } });
   });
@@ -367,7 +372,8 @@ test("memory approval, edit invalidation, archive, supersession and context expo
   await page.getByRole("link", { name: "Storage decision", exact: true }).click();
   await page.getByLabel("Replacement memory ID", { exact: true }).fill("memory-2");
   await page.getByRole("button", { name: "Supersede with this record", exact: true }).click();
-  await expect(page.getByText("Superseded · Proposed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Superseded · Previously approved", { exact: true })).toBeVisible();
+  await expect(page.getByText("Approved by owner, revision 6", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Replacement: memory-2 · r1", exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Switch language to Polish" }).click();
@@ -436,5 +442,68 @@ test("dashboard Refresh retries failed memory reads and clears their error", asy
   failed = false;
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(page.getByText("Could not read knowledge.", { exact: false })).toHaveCount(0);
+  expect(f.errors).toEqual([]);
+});
+
+
+test("an edited retry can discard its conflicting draft and open the committed memory", async ({ page }) => {
+  const f = await mountMemory(page);
+  await page.getByRole("button", { name: "Add memory", exact: true }).click();
+  await page.getByLabel("Title", { exact: true }).fill("Committed memory");
+  await page.getByLabel("Body", { exact: true }).fill("First body");
+  await page.getByLabel("Source record ID", { exact: true }).fill("k0");
+  f.loseResponse();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Saving failed.", { exact: false })).toBeVisible();
+  await page.getByLabel("Body", { exact: true }).fill("Edited after lost response");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Discard local draft", exact: true })).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "Add memory", exact: true }).click();
+  await expect(page.getByLabel("Body", { exact: true })).toHaveValue("Edited after lost response");
+  await page.getByRole("button", { name: "Discard local draft", exact: true }).click();
+  expect(f.memories).toHaveLength(1);
+  await page.getByRole("link", { name: "Committed memory", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Committed memory", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Add memory", exact: true }).click();
+  await expect(page.getByLabel("Title", { exact: true })).toHaveValue("");
+  expect(f.errors).toEqual([]);
+});
+
+test("memory selection and browser Back preserve filters and a later results page", async ({ page }) => {
+  const f = await mountMemory(page);
+  await addMemory(page, "Private A");
+  await addMemory(page, "Private B");
+  const searches: Record<string, unknown>[] = [];
+  await page.route("**/api/knowledge", route => {
+    const { operation, input } = route.request().postDataJSON();
+    if (operation !== "search") return route.fallback();
+    searches.push(input);
+    const items = f.memories.map(item => ({ ...item, kind: "memory", excerpt: item.body, threadId: null }));
+    return route.fulfill({ json: { items, nextOffset: input.offset === 0 ? 25 : null } });
+  });
+  await page.getByLabel("Search titles, content and memory", { exact: true }).fill("Private");
+  await page.getByLabel("Tag", { exact: true }).fill("scope");
+  await page.getByLabel("Legacy ID", { exact: true }).fill("OLD-1");
+  await page.getByLabel("Status", { exact: true }).selectOption("archived");
+  await page.getByLabel("Include archived and superseded", { exact: true }).check();
+  await page.getByRole("button", { name: "Filter", exact: true }).click();
+  await page.getByRole("button", { name: "Next page", exact: true }).first().click();
+  await expect.poll(() => searches.at(-1)?.offset).toBe(25);
+  await page.getByRole("link", { name: "Private A", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Private A", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Edit memory", exact: true }).click();
+  await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Private A");
+  await page.getByRole("link", { name: "Private B", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Private B", exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Private A", exact: true })).toBeVisible();
+  expect(searches.at(-1)).toMatchObject({ query: "Private", tag: "scope", legacyId: "OLD-1", kind: "memory", status: "archived", includeInactive: true, offset: 25 });
+  await expect(page.getByLabel("Search titles, content and memory", { exact: true })).toHaveValue("Private");
+  await expect(page.getByLabel("Tag", { exact: true })).toHaveValue("scope");
+  await expect(page.getByLabel("Status", { exact: true })).toHaveValue("archived");
+  await expect(page.getByRole("button", { name: "Next page", exact: true }).first()).toBeDisabled();
+  await page.getByRole("button", { name: "Edit memory", exact: true }).click();
+  await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Private A");
   expect(f.errors).toEqual([]);
 });

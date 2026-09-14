@@ -69,6 +69,29 @@ describe("K4 memory and session context", () => {
     expect(() => f.call("export_context", { taskId: f.task.id, format: "json" })).toThrowError(expect.objectContaining({ code: "knowledge_forbidden" }));
   });
 
+  it.each(["create_memory", "update_memory", "archive_memory", "restore_memory", "supersede_memory"] as const)("requires read access for %s and its replay after grant removal", operation => {
+    const f = setup();
+    let memory = f.create();
+    const replacement = f.create({ idempotencyKey: "replacement" });
+    if (operation === "restore_memory") memory = f.change("archive_memory", memory);
+    const input = { ...f.input, memoryId: memory.id, expectedRevision: memory.revision, idempotencyKey: "permitted" };
+    const request: Record<string, unknown> = operation === "create_memory" ? { ...f.input, idempotencyKey: "permitted" }
+      : operation === "update_memory" ? input
+        : { memoryId: memory.id, expectedRevision: memory.revision, idempotencyKey: "permitted",
+          ...(operation === "supersede_memory" ? { replacementId: replacement.id, replacementRevision: replacement.revision } : {}) };
+    const result = f.call<KnowledgeMutationResult<KnowledgeMemory>>(operation, request);
+    const history = f.store.listHistory(f.project.id, "memory", result.value.id, 100, 0);
+    const events = f.changed.mock.calls.length;
+    f.identity.setKnowledgeGrant({ principalId: f.agent.id, projectId: f.project.id, permissions: ["knowledge:write"] }, f.owner);
+    expect(() => f.call("memory", { memoryId: result.value.id })).toThrowError(expect.objectContaining({ code: "knowledge_forbidden" }));
+    for (const idempotencyKey of ["permitted", "fresh-denied"]) {
+      expect(() => f.call(operation, { ...request, idempotencyKey })).toThrowError(expect.objectContaining({ code: "knowledge_forbidden" }));
+    }
+    expect(f.store.getMemory(f.project.id, result.value.id)).toEqual(result.value);
+    expect(f.store.listHistory(f.project.id, "memory", result.value.id, 100, 0)).toEqual(history);
+    expect(f.changed).toHaveBeenCalledTimes(events);
+  });
+
   it("rejects cross-project, stale and self sources, spoofed approval and oversized writes", () => {
     const f = setup();
     const foreign = f.call<KnowledgeMutationResult<KnowledgeTask>>("create_task", { projectId: f.privateProject.id, title: "Private", description: "Secret", idempotencyKey: "private" }, f.owner).value;
@@ -88,12 +111,18 @@ describe("K4 memory and session context", () => {
     expect(() => f.change("supersede_memory", old, { replacementId: old.id, replacementRevision: old.revision })).toThrow();
     const superseded = f.change("supersede_memory", old, { replacementId: replacement.id, replacementRevision: replacement.revision });
     expect(superseded.supersededBy).toEqual({ id: replacement.id, revision: replacement.revision });
+    expect(superseded.approval).toEqual(old.approval);
+    expect(superseded.approval!.revision).toBeLessThan(superseded.revision);
+    expect(f.call<KnowledgePage<KnowledgeSearchHit>>("search", { status: "superseded" }).items.map(item => item.id)).toEqual([old.id]);
     expect(() => f.change("supersede_memory", replacement, { replacementId: old.id, replacementRevision: superseded.revision })).toThrow();
     const context = f.call<KnowledgeTaskContext>("task_context", { taskId: f.task.id });
     expect(context.decisions.map(item => item.id)).toEqual([replacement.id]);
     expect(f.call<KnowledgePage<KnowledgeSearchHit>>("search", { kind: "memory" }).items.map(item => item.id)).toEqual([replacement.id]);
     expect(f.call<KnowledgeMemory>("memory", { memoryId: old.id })).toEqual(superseded);
     const archived = f.change("archive_memory", replacement);
+    f.call("update_task", { taskId: f.task.id, title: f.task.title, description: f.task.description, priority: f.task.priority, status: "archived", expectedRevision: f.task.revision, idempotencyKey: "archive-task" });
+    expect(f.call<KnowledgePage<KnowledgeSearchHit>>("search", { status: "archived" }).items.map(item => item.id).sort()).toEqual([replacement.id, f.task.id].sort());
+    expect(f.call<KnowledgePage<KnowledgeSearchHit>>("search", { kind: "memory", status: "archived", includeInactive: false }).items.map(item => item.id)).toEqual([replacement.id]);
     expect(f.call<KnowledgePage<KnowledgeSearchHit>>("search", { kind: "memory" }).items).toEqual([]);
     expect(f.call<KnowledgePage<KnowledgeSearchHit>>("search", { kind: "memory", includeInactive: true }).items).toHaveLength(2);
     expect(f.change("restore_memory", archived)).toMatchObject({ status: "active", approval: null });

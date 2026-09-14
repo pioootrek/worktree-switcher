@@ -15,18 +15,27 @@ import type { KnowledgeTab } from "./use-knowledge";
 
 export { knowledgeSourceHref as sourceHref } from "@/shared/contracts/knowledge-links";
 
-export function MemoryPanel({ token, principalId, projectId, recordId, writable, approvable, changeVersion, onSelect }: {
+type MemoryPanelProps = {
   token: string; principalId: string; projectId: string; recordId: string; writable: boolean; approvable: boolean; changeVersion: number;
   onSelect: (tab: KnowledgeTab, id: string) => void;
+};
+type MemorySearchState = {
+  query: string; tag: string; legacyId: string; kind: KnowledgeSearchHit["kind"] | "";
+  status: "active" | "archived" | "superseded" | "open" | "in_progress" | "blocked" | "done" | "";
+  inactive: boolean; offset: number;
+};
+
+export function MemoryPanel(props: MemoryPanelProps) {
+  const [search, setSearch] = useState<MemorySearchState>({ query: "", tag: "", legacyId: "", kind: "memory", status: "", inactive: false, offset: 0 });
+  // Search survives selection; pending writes and drafts belong to one record.
+  return <MemoryPanelContent key={props.recordId} {...props} search={search} setSearch={setSearch} />;
+}
+
+function MemoryPanelContent({ token, principalId, projectId, recordId, writable, approvable, changeVersion, onSelect, search, setSearch }: MemoryPanelProps & {
+  search: MemorySearchState; setSearch: (value: MemorySearchState) => void;
 }) {
   const { t } = useI18n();
-  const [query, setQuery] = useState("");
-  const [tag, setTag] = useState("");
-  const [legacyId, setLegacyId] = useState("");
-  const [kind, setKind] = useState<KnowledgeSearchHit["kind"] | "">("memory");
-  const [status, setStatus] = useState<"active" | "archived" | "superseded" | "open" | "in_progress" | "blocked" | "done" | "">("");
-  const [inactive, setInactive] = useState(false);
-  const [offset, setOffset] = useState(0);
+  const { query, tag, legacyId, kind, status, inactive, offset } = search;
   const [page, setPage] = useState<KnowledgePage<KnowledgeSearchHit>>({ items: [], nextOffset: null });
   const [record, setRecord] = useState<KnowledgeMemory | null>(null);
   const [history, setHistory] = useState<KnowledgePage<KnowledgeHistoryEntry>>({ items: [], nextOffset: null });
@@ -71,13 +80,13 @@ export function MemoryPanel({ token, principalId, projectId, recordId, writable,
     } finally { setBusy(false); }
   };
   return <div className="space-y-5">
-    <form className="flex flex-wrap items-end gap-3" onSubmit={event => { event.preventDefault(); const data = new FormData(event.currentTarget); setQuery(String(data.get("query") ?? "")); setTag(String(data.get("tag") ?? "")); setLegacyId(String(data.get("legacy") ?? "")); setKind(String(data.get("kind")) as typeof kind); setStatus(String(data.get("status") ?? "") as typeof status); setInactive(data.has("inactive")); setOffset(0); setError(""); setVersion(v => v + 1); }}>
-      <div className="min-w-0 flex-1 space-y-2"><Label htmlFor="memory-query">{t("knowledge.searchContent")}</Label><Input id="memory-query" name="query" maxLength={200} /></div>
-      <div className="space-y-2"><Label htmlFor="memory-kind">{t("knowledge.sourceKind")}</Label><select id="memory-kind" name="kind" defaultValue="memory" className={fieldClass}><option value="">{t("knowledge.all")}</option>{(["memory", "task", "thread", "reply"] as const).map(value => <option key={value} value={value}>{t(`knowledge.source.${value}`)}</option>)}</select></div>
-      <div className="space-y-2"><Label htmlFor="memory-tag">{t("knowledge.tag")}</Label><Input id="memory-tag" name="tag" maxLength={80} /></div>
-      <div className="space-y-2"><Label htmlFor="memory-legacy">{t("knowledge.legacyId")}</Label><Input id="memory-legacy" name="legacy" maxLength={160} /></div>
-      <div className="space-y-2"><Label htmlFor="memory-status">{t("knowledge.status")}</Label><select id="memory-status" name="status" className={fieldClass}><option value="">{t("knowledge.all")}</option>{(["active", "archived", "superseded", "open", "in_progress", "blocked", "done"] as const).map(value => <option key={value} value={value}>{t(`knowledge.${value}`)}</option>)}</select></div>
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="inactive" />{t("knowledge.includeInactive")}</label>
+    <form className="flex flex-wrap items-end gap-3" onSubmit={event => { event.preventDefault(); const data = new FormData(event.currentTarget); setSearch({ query: String(data.get("query") ?? ""), tag: String(data.get("tag") ?? ""), legacyId: String(data.get("legacy") ?? ""), kind: String(data.get("kind")) as typeof kind, status: String(data.get("status") ?? "") as typeof status, inactive: data.has("inactive"), offset: 0 }); setError(""); setVersion(v => v + 1); }}>
+      <div className="min-w-0 flex-1 space-y-2"><Label htmlFor="memory-query">{t("knowledge.searchContent")}</Label><Input id="memory-query" name="query" defaultValue={query} maxLength={200} /></div>
+      <div className="space-y-2"><Label htmlFor="memory-kind">{t("knowledge.sourceKind")}</Label><select id="memory-kind" name="kind" defaultValue={kind} className={fieldClass}><option value="">{t("knowledge.all")}</option>{(["memory", "task", "thread", "reply"] as const).map(value => <option key={value} value={value}>{t(`knowledge.source.${value}`)}</option>)}</select></div>
+      <div className="space-y-2"><Label htmlFor="memory-tag">{t("knowledge.tag")}</Label><Input id="memory-tag" name="tag" defaultValue={tag} maxLength={80} /></div>
+      <div className="space-y-2"><Label htmlFor="memory-legacy">{t("knowledge.legacyId")}</Label><Input id="memory-legacy" name="legacy" defaultValue={legacyId} maxLength={160} /></div>
+      <div className="space-y-2"><Label htmlFor="memory-status">{t("knowledge.status")}</Label><select id="memory-status" name="status" defaultValue={status} className={fieldClass}><option value="">{t("knowledge.all")}</option>{(["active", "archived", "superseded", "open", "in_progress", "blocked", "done"] as const).map(value => <option key={value} value={value}>{t(`knowledge.${value}`)}</option>)}</select></div>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="inactive" defaultChecked={inactive} />{t("knowledge.includeInactive")}</label>
       <Button type="submit" variant="outline">{t("knowledge.filter")}</Button>
     </form>
     <Button disabled={!writable || busy || Boolean(pending)} onClick={() => setEditor("new")}>{t("knowledge.addMemory")}</Button>
@@ -90,12 +99,12 @@ export function MemoryPanel({ token, principalId, projectId, recordId, writable,
         event.preventDefault(); setEditor(null); onSelect(row.kind === "memory" ? "memory" : row.kind === "task" ? "backlog" : "discussions", row.threadId ?? row.id);
       }}>{row.title || t("knowledge.source.reply")}</a><p className="text-xs">{row.id} · {t(`knowledge.source.${row.kind}`)}</p><p className="break-words text-sm text-muted-foreground">{row.excerpt}</p></li>)}</ul>
         {!page.items.length && <p>{t("knowledge.empty")}</p>}
-        <div className="flex gap-2"><Button variant="outline" disabled={!offset} onClick={() => setOffset(Math.max(0, offset - 25))}>{t("knowledge.previous")}</Button><Button variant="outline" disabled={page.nextOffset === null} onClick={() => setOffset(page.nextOffset!)}>{t("knowledge.nextPage")}</Button></div>
+        <div className="flex gap-2"><Button variant="outline" disabled={!offset} onClick={() => setSearch({ ...search, offset: Math.max(0, offset - 25) })}>{t("knowledge.previous")}</Button><Button variant="outline" disabled={page.nextOffset === null} onClick={() => setSearch({ ...search, offset: page.nextOffset! })}>{t("knowledge.nextPage")}</Button></div>
       </div>
       {record && <article className="min-w-0 space-y-4 rounded-xl border border-border p-4">
         <h3 className="break-words text-xl font-semibold">{record.title}</h3>
         <p className="break-all text-xs">{record.id} · {t("knowledge.attribution", { author: record.createdBy, revision: record.revision })}</p>
-        <p>{t(`knowledge.${record.status}`)} · {t(record.approval?.revision === record.revision ? "knowledge.approved" : "knowledge.proposed")}</p>
+        <p>{t(`knowledge.${record.status}`)} · {t(record.approval?.revision === record.revision ? "knowledge.approved" : record.approval && record.status === "superseded" ? "knowledge.previouslyApproved" : "knowledge.proposed")}</p>
         {record.approval && <p className="break-all text-xs">{t("knowledge.approvedBy", { author: record.approval.principalId, revision: record.approval.revision })}</p>}
         <p className="whitespace-pre-wrap break-words">{record.body}</p>
         <p className="break-words text-sm">{record.tags.join(", ")}{record.legacyId ? ` · ${record.legacyId}` : ""}</p>

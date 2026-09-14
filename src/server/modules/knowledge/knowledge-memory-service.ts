@@ -29,7 +29,10 @@ export class KnowledgeMemoryService {
       : "idempotencyKey" in request.input ? "knowledge:write"
         : request.operation === "export_context" ? "knowledge:export" : "knowledge:read";
     this.identity.authorizeKnowledge(actor, projectId, permission, { allowArchived: true });
-    if (request.operation === "export_context") this.identity.authorizeKnowledge(actor, projectId, "knowledge:read");
+    // Mutation responses (including replay) contain retained record content.
+    if ("idempotencyKey" in request.input || request.operation === "export_context") {
+      this.identity.authorizeKnowledge(actor, projectId, "knowledge:read", { allowArchived: true });
+    }
     const limit = "limit" in request.input ? request.input.limit ?? 25 : 25;
     const offset = "offset" in request.input ? request.input.offset ?? 0 : 0;
     switch (request.operation) {
@@ -114,6 +117,7 @@ export class KnowledgeMemoryService {
           const replacement = this.memory(input.projectId, request.input.replacementId);
           if (replacement.id === memory.id || replacement.status !== "active") throw new KnowledgeError("invalid_request", "Choose a different active replacement.");
           if (replacement.revision !== request.input.replacementRevision) throw new KnowledgeError("revision_conflict", "Replacement revision changed.", replacement.revision);
+          memory.approval = previous.approval;
           memory.status = "superseded";
           memory.supersededBy = { id: replacement.id, revision: replacement.revision };
           break;
