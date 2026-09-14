@@ -23,7 +23,9 @@ describe("built knowledge controller and CLI", () => {
     } finally { await mcp.close(); }
     const args = ["knowledge", "task_from_thread", "--json", JSON.stringify({ projectId: project.id, threadId: thread.id, title: "Fix", description: "Acceptance", idempotencyKey: "cli-task" })];
     const environment = { WORKTREE_SWITCHER_KNOWLEDGE_TOKEN: agent.token };
-    const first = JSON.parse(await fixture.cli(args, environment)) as KnowledgeMutationResult<{ task: KnowledgeTask }>;
+    const projects = JSON.parse(await fixture.cli(["knowledge", "projects"], environment, "flags")) as KnowledgePage<{ id: string }>;
+    expect(projects.items.map(item => item.id)).toEqual([project.id]);
+    const first = JSON.parse(await fixture.cli(args, environment, "flags")) as KnowledgeMutationResult<{ task: KnowledgeTask }>;
     await fixture.restart();
     const retry = JSON.parse(await fixture.cli(args, environment)) as KnowledgeMutationResult<{ task: KnowledgeTask }>;
     expect(retry.value).toEqual(first.value); expect(retry.replayed).toBe(true);

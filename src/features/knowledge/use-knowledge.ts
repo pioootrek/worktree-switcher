@@ -31,18 +31,27 @@ export function useKnowledge(token: string, change: { version: number; projectId
   const selectionRef = useRef(selection);
   const reload = useCallback(() => setRevision(value => value + 1), []);
 
+  const changeSelection = useCallback((next: KnowledgeSelection) => {
+    const previous = selectionRef.current;
+    if (next.projectId === previous.projectId && next.tab === previous.tab && next.recordId === previous.recordId) return;
+    selectionRef.current = next;
+    setSelection(next); setOffset(0); setReplyOffset(0); setRelationOffset(0);
+    setRelations(emptyPage()); setDetail(null); setRows(emptyPage()); setReplies(emptyPage()); setError(false);
+    if (next.projectId !== previous.projectId || next.tab !== previous.tab) setFilters({});
+    if (next.projectId !== previous.projectId) setProject(null);
+  }, []);
+
   useEffect(() => {
     const sync = () => {
       const params = new URLSearchParams(window.location.search);
       const tab = params.get("knowledgeTab");
-      setSelection({ projectId: params.get("knowledgeProject") ?? "", tab: tab === "discussions" || tab === "memory" ? tab : "backlog", recordId: params.get("record") ?? "" });
+      changeSelection({ projectId: params.get("knowledgeProject") ?? "", tab: tab === "discussions" || tab === "memory" ? tab : "backlog", recordId: params.get("record") ?? "" });
       setReady(true);
     };
     const timer = setTimeout(sync, 0);
     window.addEventListener("popstate", sync);
     return () => { clearTimeout(timer); window.removeEventListener("popstate", sync); };
-  }, []);
-  useEffect(() => { selectionRef.current = selection; }, [selection]);
+  }, [changeSelection]);
   useEffect(() => {
     if (!change.projectIds.length || change.projectIds.includes(selectionRef.current.projectId)) {
       const timer = setTimeout(reload, 0);
@@ -51,14 +60,13 @@ export function useKnowledge(token: string, change: { version: number; projectId
   }, [change, reload]);
 
   const select = (next: KnowledgeSelection) => {
-    setSelection(next); setOffset(0); setReplyOffset(0); setRelationOffset(0); setRelations(emptyPage()); setDetail(null); setRows(emptyPage()); setReplies(emptyPage()); setError(false);
-    if (next.projectId !== selection.projectId || next.tab !== selection.tab) setFilters({});
+    changeSelection(next);
     const url = new URL(window.location.href);
     url.searchParams.set("view", "knowledge");
     url.searchParams.set("knowledgeProject", next.projectId);
     url.searchParams.set("knowledgeTab", next.tab);
     if (next.recordId) url.searchParams.set("record", next.recordId); else url.searchParams.delete("record");
-    window.history.pushState(null, "", url);
+    if (url.href !== window.location.href) window.history.pushState(null, "", url);
   };
 
   useEffect(() => {
@@ -72,7 +80,7 @@ export function useKnowledge(token: string, change: { version: number; projectId
       setIdentity(current => current?.principal.id === who.principal.id ? current : who); setProjects(page); setSessionError(false); setDiscoveryError(false);
       if (!selectionRef.current.projectId && page.items[0]) {
         const projectId = page.items[0].id;
-        setSelection(current => ({ ...current, projectId }));
+        changeSelection({ ...selectionRef.current, projectId });
         const url = new URL(window.location.href); url.searchParams.set("knowledgeProject", projectId); window.history.replaceState(null, "", url);
       }
     }).catch(error => {
@@ -82,7 +90,7 @@ export function useKnowledge(token: string, change: { version: number; projectId
       } else setDiscoveryError(true);
     });
     return () => abort.abort();
-  }, [token, ready, projectOffset, revision]);
+  }, [token, ready, projectOffset, revision, changeSelection]);
 
   useEffect(() => {
     if (!token || !identity || !selection.projectId) return;
@@ -98,11 +106,11 @@ export function useKnowledge(token: string, change: { version: number; projectId
           knowledgeRequest<KnowledgeProjectSummary>(token, "project", { projectId }, abort.signal),
           selection.recordId && selection.tab !== "memory" ? knowledgeRequest<KnowledgePage<KnowledgeRelation>>(token, "relations", { projectId, recordKind: selection.tab === "backlog" ? "task" : "thread", recordId: selection.recordId, offset: relationOffset }, abort.signal) : Promise.resolve(emptyPage<KnowledgeRelation>()),
         ]);
-        if (abort.signal.aborted) return;
+        if (abort.signal.aborted || selectionRef.current !== selection) return;
         setRelations(relationPage); setProject(selectedProject); setRows(page); setDetail(record); setReplies(responsePage); setError(false);
       } catch {
-        if (!abort.signal.aborted) { setRelations(emptyPage()); setProject(null); setRows(emptyPage()); setDetail(null); setReplies(emptyPage()); setError(true); }
-      } finally { if (!abort.signal.aborted) { clearTimeout(timer); setLoading(false); } }
+        if (!abort.signal.aborted && selectionRef.current === selection) { setRelations(emptyPage()); setProject(null); setRows(emptyPage()); setDetail(null); setReplies(emptyPage()); setError(true); }
+      } finally { if (!abort.signal.aborted && selectionRef.current === selection) { clearTimeout(timer); setLoading(false); } }
     })();
     return () => { clearTimeout(timer); abort.abort(); };
   }, [token, identity, selection, filters, offset, replyOffset, relationOffset, revision]);

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { runKnowledgeCommand } from "./knowledge-management";
+import { parseKnowledgeCommandArgs, runKnowledgeCommand } from "./knowledge-management";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { homedir, networkInterfaces } from "node:os";
@@ -57,7 +57,10 @@ function optionalPositiveNumber(value: string | undefined, label: string): numbe
 async function main(): Promise<void> {
   const locale = systemLocale(process.env);
   const command = process.argv[2] && !process.argv[2].startsWith("-") ? process.argv[2] : "start";
-  const paths = resolveAppPaths(option("--data-dir"), option("--state-dir"));
+  const knowledgeArgs = command === "knowledge" ? parseKnowledgeCommandArgs(process.argv.slice(3)) : undefined;
+  const paths = knowledgeArgs
+    ? resolveAppPaths(knowledgeArgs.dataDir, knowledgeArgs.stateDir)
+    : resolveAppPaths(option("--data-dir"), option("--state-dir"));
   if (command === "service") {
     await handleServiceCommand(process.argv.slice(3), paths);
     return;
@@ -67,7 +70,7 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "knowledge") {
-    await runKnowledgeCommand(process.argv.slice(3), paths, { write: writeCliLine });
+    await runKnowledgeCommand(knowledgeArgs!.args, paths, { write: writeCliLine });
     return;
   }
   if (command === "identity") {

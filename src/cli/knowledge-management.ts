@@ -3,6 +3,24 @@ import type { AppPaths } from "../server/paths";
 import { knowledgeSchemas, type KnowledgeOperation, type KnowledgeFailure } from "../shared/contracts/knowledge";
 import { localDashboardEndpoint, readServiceAccess } from "./service-access";
 
+/** Extract global path options before the operation's strict argument validation. */
+export function parseKnowledgeCommandArgs(raw: string[]): { args: string[]; dataDir?: string; stateDir?: string } {
+  const result: { args: string[]; dataDir?: string; stateDir?: string } = { args: [] };
+  for (let index = 0; index < raw.length; index++) {
+    const arg = raw[index];
+    if (arg === "--data-dir" || arg === "--state-dir") {
+      const value = raw[++index];
+      if (!value || value.startsWith("--")) throw new Error(`${arg} requires a directory path.`);
+      result[arg === "--data-dir" ? "dataDir" : "stateDir"] = value;
+    } else {
+      result.args.push(arg);
+      // Input values are opaque; a file name must never become a global flag.
+      if ((arg === "--json" || arg === "--input-file") && index + 1 < raw.length) result.args.push(raw[++index]);
+    }
+  }
+  return result;
+}
+
 export async function runKnowledgeCommand(args: string[], paths: AppPaths, dependencies: {
   write?: (line: string) => void;
   environment?: Readonly<Record<string, string | undefined>>;

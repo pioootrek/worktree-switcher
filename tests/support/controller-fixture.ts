@@ -22,7 +22,7 @@ export interface ControllerFixture {
   request<T>(path: string, init?: RequestInit): Promise<T>;
   requestResult<T>(path: string, init?: RequestInit): Promise<HttpResult<T>>;
   mcp(token?: string): Promise<FixtureMcpClient>;
-  cli(args: string[], environment?: Record<string, string>): Promise<string>;
+  cli(args: string[], environment?: Record<string, string>, pathMode?: "environment" | "flags"): Promise<string>;
   setMode(project: FixtureProject, mode: ServerMode, worktreePath?: string): Promise<void>;
   releaseGate(project: FixtureProject, worktreePath?: string): Promise<void>;
   releaseTestGate(project: FixtureProject, worktreePath?: string): Promise<void>;
@@ -153,9 +153,10 @@ export async function startControllerFixture(projectCount = 3, projectKinds: Fix
           return value;
         }, close: () => client.close() };
       },
-      async cli(args, environment = {}) {
-        const result = await exec(process.execPath, [join(repositoryRoot, "dist/cli/index.js"), ...args], {
-          cwd: repositoryRoot, env: { ...process.env, WORKTREE_SWITCHER_DATA_DIR: data, WORKTREE_SWITCHER_STATE_DIR: state, ...environment }, timeout: 30000,
+      async cli(args, environment = {}, pathMode = "environment") {
+        const pathArgs = pathMode === "flags" ? ["--data-dir", data, "--state-dir", state] : [];
+        const result = await exec(process.execPath, [join(repositoryRoot, "dist/cli/index.js"), ...args, ...pathArgs], {
+          cwd: repositoryRoot, env: { ...process.env, ...environment, WORKTREE_SWITCHER_DATA_DIR: pathMode === "flags" ? undefined : data, WORKTREE_SWITCHER_STATE_DIR: pathMode === "flags" ? undefined : state }, timeout: 30000,
         });
         return result.stdout;
       },

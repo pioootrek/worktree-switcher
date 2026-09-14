@@ -36,7 +36,9 @@ export function KnowledgeDashboard({ token, setToken, change }: { token: string;
   const [notice, setNotice] = useState(false);
   const actionRef = useRef<HTMLButtonElement>(null);
   const model = useKnowledge(token, change);
-  const { selection, identity, projects, detail } = model;
+  const { selection, identity, projects } = model;
+  const detail = model.detail?.id === selection.recordId && model.detail.projectId === selection.projectId
+    && ((selection.tab === "backlog" && "description" in model.detail) || (selection.tab === "discussions" && "body" in model.detail)) ? model.detail : null;
   const project = model.project?.id === selection.projectId ? model.project : undefined;
   const writable = project?.writable && project.status === "active";
   const close = () => { setMode(null); actionRef.current?.focus(); };

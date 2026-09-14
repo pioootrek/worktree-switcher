@@ -232,3 +232,45 @@ test("knowledge sign-in changes only the shared stream credential, not runtime b
   await expect.poll(() => dashboardReads).toBe(2);
   await expect.poll(events).toEqual({ active: 1, opened: 4, token: "" });
 });
+
+test("Back and Forward never initialize an editor from the previous record", async ({ page }) => {
+  const f = await mountKnowledge(page);
+  f.records.push(
+    { id: "a", projectId: "knowledge-only", title: "Task A", description: "Body A", status: "open", priority: "now", revision: 1, createdBy: "owner" },
+    { id: "b", projectId: "knowledge-only", title: "Task B", description: "Body B", status: "open", priority: "now", revision: 1, createdBy: "owner" },
+  );
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.getByRole("link", { name: "Task A", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Task A", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Task B", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Task B", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Edit task", exact: true }).click();
+  await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Task B");
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Task A", exact: true })).toBeVisible();
+  let requested = false;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/api/knowledge", async route => {
+    const { operation, input } = route.request().postDataJSON();
+    if (operation === "task" && input.taskId === "b") { requested = true; await gate; }
+    return route.fallback();
+  });
+  try {
+    await page.goForward();
+    await expect(page).toHaveURL(/record=b.*knowledgeEditor=edit/);
+    await expect.poll(() => requested).toBe(true);
+    await expect(page.getByLabel("Title", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Task A", exact: true })).toHaveCount(0);
+  } finally { release(); }
+  await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Task B");
+  await expect(page.getByLabel("Body", { exact: true })).toHaveValue("Body B");
+  await page.getByLabel("Body", { exact: true }).fill("Updated B");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
+  expect(f.calls.filter(call => call.operation === "update_task").at(-1)!.input.taskId).toBe("b");
+  expect(f.records[0].description).toBe("Body A");
+  expect(f.records[1].description).toBe("Updated B");
+  expect(f.errors).toEqual([]);
+});
