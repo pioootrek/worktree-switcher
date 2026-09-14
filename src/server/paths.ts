@@ -5,6 +5,7 @@ export interface AppPaths {
   controllerLockPath: string;
   dataDirectory: string;
   databasePath: string;
+  knowledgeAttachmentDirectory: string;
   mcpTokenPath: string;
   serviceAccessPath: string;
   stateDirectory: string;
@@ -34,6 +35,7 @@ export function resolveAppPaths(dataDirectory?: string, stateDirectory?: string)
     controllerLockPath: join(appStateDirectory, "controller.lock"),
     dataDirectory: appDirectory,
     databasePath: join(appDirectory, "state.sqlite3"),
+    knowledgeAttachmentDirectory: join(appDirectory, "knowledge-attachments"),
     mcpTokenPath: join(appDirectory, "mcp-token"),
     serviceAccessPath: join(appStateDirectory, "service-access.json"),
     stateDirectory: appStateDirectory,

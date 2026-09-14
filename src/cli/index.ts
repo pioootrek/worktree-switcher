@@ -19,6 +19,7 @@ import {
 } from "./controller-addresses";
 import { writeCliLine } from "./output";
 import { runIdentityCommand } from "./identity-management";
+import { runBackupCommand } from "./backup-management";
 import { pairingUrl } from "./pairing-url";
 import { openProjectGateway, runDoctorCommand, runProjectCommand } from "./project-management";
 import { localDashboardEndpoint, publicDashboardEndpoint, readServiceAccess, removeServiceAccess, writeServiceAccess } from "./service-access";
@@ -31,7 +32,7 @@ import { EventStream } from "../server/events";
 import { FileLogWriter } from "../server/log-writer";
 import { ProjectLifecycle } from "../server/modules/lifecycle";
 import { IdentityService } from "../server/modules/identity";
-import { KnowledgeService } from "../server/modules/knowledge";
+import { KnowledgeAttachmentService, KnowledgeService } from "../server/modules/knowledge";
 import { createMcpControllerServer } from "../server/mcp-http-server";
 import { SystemGitWorktreeReader } from "../server/git-worktrees";
 import { createControllerServer } from "../server/http-server";
@@ -75,6 +76,10 @@ async function main(): Promise<void> {
   }
   if (command === "identity") {
     await runIdentityCommand(process.argv.slice(3), paths, { write: writeCliLine });
+    return;
+  }
+  if (command === "backup") {
+    await runBackupCommand(process.argv.slice(3), paths, packageJson.version, writeCliLine);
     return;
   }
   if (command === "project" || command === "doctor") {
@@ -136,7 +141,8 @@ async function main(): Promise<void> {
     ...(projectId ? { projectIds: [projectId] } : {}),
   }));
   const identity = new IdentityService(store);
-  const knowledge = new KnowledgeService(store, identity, undefined, undefined, events.publishKnowledge);
+  const attachments = new KnowledgeAttachmentService(store, identity, paths.knowledgeAttachmentDirectory);
+  const knowledge = new KnowledgeService(store, identity, undefined, undefined, events.publishKnowledge, attachments);
   const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs, undefined, storage, undefined, undefined, tests, lifecycle, knowledge);
   const accessToken = randomBytes(32).toString("base64url");
   const sessionId = randomBytes(8).toString("hex");

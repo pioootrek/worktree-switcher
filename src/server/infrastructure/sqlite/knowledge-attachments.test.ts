@@ -1,0 +1,51 @@
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { SqliteStateStore } from "./sqlite-state-store";
+import { IdentityService } from "@/server/modules/identity";
+import { KnowledgeAttachmentService, KnowledgeService } from "@/server/modules/knowledge";
+
+const cleanups: Array<() => void> = []; afterEach(() => cleanups.splice(0).reverse().forEach(fn => fn()));
+function setup() {
+  const root = mkdtempSync(join(tmpdir(), "knowledge-attachment-")); cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  const store = new SqliteStateStore(join(root, "state.sqlite3")); cleanups.push(() => store.close());
+  const identity = new IdentityService(store); const owner = identity.authenticateBearer(identity.bootstrapOwnerSession().token);
+  const project = identity.createKnowledgeProject({ name: "Files" }, owner);
+  identity.setKnowledgeGrant({ principalId: owner.principalId, projectId: project.id, permissions: ["knowledge:read","knowledge:write","attachments:read", "attachments:write"] }, owner);
+  store.createTask({id:"task-1",projectId:project.id,title:"Task",description:"Target",status:"open",priority:"later",revision:1,createdBy:owner.principalId,createdAt:"2026-09-14T00:00:00.000Z",updatedAt:"2026-09-14T00:00:00.000Z"},{actor:owner,projectId:project.id,idempotencyKey:"task",requestHash:"0".repeat(64)});
+  const attachmentDirectory=join(root,"attachments"); return { store, identity, owner, project, attachmentDirectory, service: new KnowledgeAttachmentService(store, identity, attachmentDirectory, { fileBytes: 12, projectBytes: 20 }, () => "2026-09-14T00:00:00.000Z", (() => { let id=0; return () => `id-${++id}`; })()) };
+}
+describe("knowledge attachments", () => {
+  it("uploads, lists and downloads an immutable attachment through the authorized service", () => {
+    const f=setup(); const data=Buffer.from("evidence"); const saved=f.service.upload(f.project.id,"task","task-1",{filename:"proof.txt",mediaType:"text/plain",data,idempotencyKey:"upload"},f.owner).value;
+    expect(f.service.list(f.project.id,"task","task-1",f.owner).items).toEqual([saved]);
+    expect(f.service.download(f.project.id,saved.id,f.owner)).toEqual({attachment:saved,data,disposition:"attachment"});
+    expect(f.service.upload(f.project.id,"task","task-1",{filename:"proof.txt",mediaType:"text/plain",data,idempotencyKey:"upload"},f.owner)).toEqual({value:saved,replayed:true});
+  });
+  it("rejects unsafe names, mismatched hashes and bounded storage", () => {
+    const f=setup(); const input={mediaType:"text/plain",data:Buffer.from("evidence")};
+    expect(()=>f.service.upload(f.project.id,"task","task-1",{...input,filename:"../proof",idempotencyKey:"a"},f.owner)).toThrowError(expect.objectContaining({code:"invalid_request"}));
+    expect(()=>f.service.upload(f.project.id,"task","task-1",{...input,filename:"proof",sha256:"0".repeat(64),idempotencyKey:"b"},f.owner)).toThrowError(expect.objectContaining({code:"invalid_request"}));
+    expect(()=>f.service.upload(f.project.id,"task","task-1",{...input,filename:"large",data:Buffer.alloc(13),idempotencyKey:"c"},f.owner)).toThrowError(expect.objectContaining({code:"limit_exceeded"}));
+    expect(()=>f.service.upload(f.project.id,"task","missing",{...input,filename:"proof",idempotencyKey:"d"},f.owner)).toThrowError(expect.objectContaining({code:"not_found"}));
+  });
+  it("exposes files through the shared transport contract", () => {
+    const f=setup(); const api=new KnowledgeService(f.store,f.identity,undefined,undefined,undefined,f.service);
+    const saved=api.execute({operation:"create_attachment",input:{projectId:f.project.id,recordKind:"task",recordId:"task-1",filename:"proof.txt",mediaType:"text/plain",dataBase64:"ZXZpZGVuY2U=",idempotencyKey:"api-upload"}},f.owner) as {value:{id:string}};
+    expect(api.execute({operation:"attachment",input:{projectId:f.project.id,attachmentId:saved.value.id}},f.owner)).toMatchObject({dataBase64:"ZXZpZGVuY2U=",disposition:"attachment"});
+  });
+  it("rejects a symlinked content shard",()=>{
+    const f=setup(), data=Buffer.from("evidence"), hash=createHash("sha256").update(data).digest("hex"); const root=f.attachmentDirectory;
+    mkdirSync(root,{recursive:true}); const outside=mkdtempSync(join(tmpdir(),"attachment-outside-")); cleanups.push(()=>rmSync(outside,{recursive:true,force:true})); symlinkSync(outside,join(root,hash.slice(0,2)));
+    expect(()=>f.service.upload(f.project.id,"task","task-1",{filename:"proof",mediaType:"text/plain",data,idempotencyKey:"link"},f.owner)).toThrowError(expect.objectContaining({code:"invalid_request"}));
+  });
+  it("removes a newly installed object when metadata persistence fails",()=>{
+    const f=setup(), first=Buffer.from("first"); f.service.upload(f.project.id,"task","task-1",{filename:"one",mediaType:"text/plain",data:first,idempotencyKey:"one"},f.owner);
+    const data=Buffer.from("second"), hash=createHash("sha256").update(data).digest("hex"), root=f.attachmentDirectory;
+    const ids=(()=>{let n=0;return()=>n++===0?"temporary":"id-2";})(); const failing=new KnowledgeAttachmentService(f.store,f.identity,root,undefined,undefined,ids);
+    expect(()=>failing.upload(f.project.id,"task","task-1",{filename:"two",mediaType:"text/plain",data,idempotencyKey:"two"},f.owner)).toThrow();
+    expect(existsSync(join(root,hash.slice(0,2),hash))).toBe(false);
+  });
+});

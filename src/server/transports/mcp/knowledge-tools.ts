@@ -7,7 +7,7 @@ import { knowledgeFailure } from "@/server/modules/knowledge";
 /** Scoped sessions expose knowledge only; legacy runtime sessions never enter here. */
 export function registerKnowledgeTools(server: McpServer, service: ControlService, actor: AuthenticatedPrincipal): void {
   for (const [operation, schema] of Object.entries(knowledgeSchemas)) {
-    const readOnly = ["project", "projects", "threads", "thread", "replies", "reply", "tasks", "task", "relations", "history", "memories", "memory", "search", "task_context", "export_context", "check_context_export"].includes(operation);
+    const readOnly = ["project", "projects", "threads", "thread", "replies", "reply", "tasks", "task", "relations", "history", "memories", "memory", "search", "task_context", "export_context", "check_context_export", "attachments", "attachment"].includes(operation);
     server.registerTool(`knowledge_${operation}`, {
       description: `${operation.replaceAll("_", " ")} in project knowledge. Writes require a stable idempotencyKey; reuse it for an identical retry. Read pages expose nextOffset. No runtime claim or server operation.`,
       inputSchema: schema,

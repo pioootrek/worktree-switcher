@@ -23,6 +23,7 @@ import { KnowledgeError } from "./knowledge-error";
 export { KnowledgeError } from "./knowledge-error";
 export type { KnowledgeErrorCode } from "./knowledge-error";
 import { KnowledgeMemoryService } from "./knowledge-memory-service";
+import type { KnowledgeAttachmentService } from "./attachment-service";
 
 export interface KnowledgeWriteOptions { idempotencyKey: string }
 
@@ -51,13 +52,15 @@ export class KnowledgeService {
     private readonly clock: () => string = () => new Date().toISOString(),
     private readonly id: () => string = randomUUID,
     private readonly changed: (projectId: string) => void = () => undefined,
+    private readonly attachments?: KnowledgeAttachmentService,
   ) {}
 
   execute(value: unknown, actor: AuthenticatedPrincipal) {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new KnowledgeError("invalid_request", "Invalid knowledge request.");
     const envelope = value as Record<string, unknown>;
     if (Object.keys(envelope).some(key => key !== "operation" && key !== "input") || typeof envelope.operation !== "string" || !Object.hasOwn(knowledgeSchemas, envelope.operation)) throw new KnowledgeError("invalid_request", "Invalid knowledge operation.");
-    if (Buffer.byteLength(JSON.stringify(value), "utf8") > 65536) throw new KnowledgeError("limit_exceeded", "Knowledge request exceeds 64 KiB.");
+    const requestLimit = envelope.operation === "create_attachment" ? 14_100_000 : 65536;
+    if (Buffer.byteLength(JSON.stringify(value), "utf8") > requestLimit) throw new KnowledgeError("limit_exceeded", "Knowledge request exceeds its operation limit.");
     const parsed = knowledgeSchemas[envelope.operation as keyof typeof knowledgeSchemas].safeParse(envelope.input);
     if (!parsed.success) throw new KnowledgeError("invalid_request", "Invalid knowledge input.");
     const request = { operation: envelope.operation, input: parsed.data } as KnowledgeRequest;
@@ -66,6 +69,9 @@ export class KnowledgeService {
 
   private dispatch(request: KnowledgeRequest, actor: AuthenticatedPrincipal) {
     switch (request.operation) {
+      case "attachments": return this.requireAttachments().list(request.input.projectId, request.input.recordKind, request.input.recordId, actor,request.input.limit,request.input.offset);
+      case "attachment": { const result = this.requireAttachments().download(request.input.projectId, request.input.attachmentId, actor); return { attachment: result.attachment, disposition: result.disposition, dataBase64: Buffer.from(result.data).toString("base64") }; }
+      case "create_attachment": return this.requireAttachments().upload(request.input.projectId, request.input.recordKind, request.input.recordId, { filename: request.input.filename, mediaType: request.input.mediaType, data: Buffer.from(request.input.dataBase64, "base64"), sha256: request.input.sha256, idempotencyKey: request.input.idempotencyKey }, actor);
       case "memories": case "memory": case "create_memory": case "update_memory":
       case "approve_memory": case "archive_memory": case "restore_memory": case "supersede_memory":
       case "search": case "task_context": case "export_context": case "check_context_export":
@@ -109,6 +115,11 @@ export class KnowledgeService {
       case "restore_project": return this.restoreProject(request.input.projectId, request.input.expectedRevision, request.input, actor);
       case "link_runtime": return this.setRuntimeLink(request.input.projectId, request.input.runtimeProjectId, request.input.expectedRevision, request.input, actor);
     }
+  }
+
+  private requireAttachments(): KnowledgeAttachmentService {
+    if (!this.attachments) throw new KnowledgeError("invalid_request", "Attachment service is unavailable.");
+    return this.attachments;
   }
 
   createTask(projectId: string, input: { title: string; description: string; priority?: KnowledgeTaskPriority }, options: KnowledgeWriteOptions, actor: AuthenticatedPrincipal): KnowledgeMutationResult<KnowledgeTask> {

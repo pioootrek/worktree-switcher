@@ -134,6 +134,10 @@ export const knowledgeSchemas = {
   archive_project: z.strictObject({ ...project, ...write, ...revision }),
   restore_project: z.strictObject({ ...project, ...write, ...revision }),
   link_runtime: z.strictObject({ ...project, ...write, ...revision, runtimeProjectId: id.nullable() }),
+  attachments: z.strictObject({ ...record, ...page }),
+  attachment: z.strictObject({ ...project, attachmentId: id }),
+  create_attachment: z.strictObject({ ...record, ...write, filename: z.string().min(1).max(255), mediaType: z.string().min(1).max(255),
+    dataBase64: z.string().max(14_000_000), sha256: z.string().regex(/^[a-f0-9]{64}$/).optional() }),
 };
 export type KnowledgeOperation = keyof typeof knowledgeSchemas;
 export type KnowledgeInput<K extends KnowledgeOperation> = z.infer<(typeof knowledgeSchemas)[K]>;

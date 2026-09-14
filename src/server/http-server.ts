@@ -199,13 +199,13 @@ function parseReservation(value: unknown): {
   };
 }
 
-async function readJson(request: IncomingMessage): Promise<unknown> {
+async function readJson(request: IncomingMessage, limit = JSON_LIMIT): Promise<unknown> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > JSON_LIMIT) throw new Error("Żądanie jest zbyt duże.");
+    if (size > limit) throw new Error("Żądanie jest zbyt duże.");
     chunks.push(buffer);
   }
   if (chunks.length === 0) return {};
@@ -414,7 +414,7 @@ export function createControllerServer(options: {
           }
           try {
             let input: unknown;
-            try { input = await readJson(request); }
+            try { input = await readJson(request, 14_100_000); }
             catch (error) { throw new KnowledgeError(error instanceof Error && error.message === "Żądanie jest zbyt duże." ? "limit_exceeded" : "invalid_request", "Invalid knowledge JSON request."); }
             json(response, 200, options.service.executeKnowledge(input, actor));
           } catch (error) {
