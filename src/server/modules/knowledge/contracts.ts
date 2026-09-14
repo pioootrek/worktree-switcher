@@ -28,6 +28,16 @@ export interface KnowledgeProjectSnapshot {
   attachments: Array<Record<string, unknown>>;
   requiredPrincipals: string[];
 }
+export interface KnowledgeProjectExportManifest {
+  formatVersion: 1;
+  applicationVersion: string;
+  schemaVersion: number;
+  createdAt: string;
+  projectId: string;
+  data: { file: "project.json"; size: number; sha256: string };
+  attachments: Array<{ file: string; size: number; sha256: string }>;
+  counts: Record<string, number>;
+}
 
 export interface KnowledgeStore {
   saveAttachment(attachment: KnowledgeAttachment, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeAttachment>;
