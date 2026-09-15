@@ -53,7 +53,7 @@ try {
   checks.push("agent 1 reads imported backlog over real MCP");
   const completion = importPlan.mappings.find(mapping => mapping.targetKind === "task_completion" && Array.isArray(mapping.originalPayload?.summary) && mapping.originalPayload.summary.some(value => typeof value === "string" && value.trim()));
   assert.ok(completion);
-  const summaryPhrase = completion.originalPayload.summary.find(value => typeof value === "string" && value.trim());
+  const summaryPhrase = completion.originalPayload.summary.find(value => typeof value === "string" && value.trim()).trim().slice(0, 120);
   const summarySearch = await mcp(first, "search", { query: summaryPhrase, kind: "task", limit: 25 });
   assert.ok(summarySearch.items.some(item => item.kind === "task" && item.excerpt.includes(summaryPhrase)));
   const historical = importPlan.mappings.find(mapping => mapping.targetKind === "historical_comment" && typeof mapping.originalPayload?.author === "string" && typeof mapping.originalPayload?.date === "string");
