@@ -250,6 +250,12 @@ export function planHubImportAgainstValidator(options: HubImportPlanOptions, exp
       register(mapping(file, "unclassified", null, null, "source_only"));
     }
   }
+  const importedNotePaths = new Set(mappings.filter(item => item.targetKind === "memory").map(item => item.sourcePath));
+  for (const item of mappings) {
+    if (item.targetKind !== "attachment") continue;
+    const parentPath = `${item.sourcePath.split("/").slice(0, 4).join("/")}/note.json`;
+    if (!importedNotePaths.has(parentPath)) missing.push({ sourcePath: item.sourcePath, reference: parentPath, blocking: true, reason: "attachment_parent_missing" });
+  }
   if (!validatorValid) missing.push({ sourcePath: "docs/backlog", reference: expectedValidatorCommit, blocking: true, reason: "hub_validation_failed" });
   const kinds = (kind: HubImportMapping["sourceKind"]) => mappings.filter(item => item.sourceKind === kind).length;
   const base = {

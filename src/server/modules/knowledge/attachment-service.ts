@@ -40,12 +40,12 @@ export class KnowledgeAttachmentService {
   }
 
   list(projectId: string, recordKind: KnowledgeAttachmentRecordKind, recordId: string, actor: AuthenticatedPrincipal, limit=25, offset=0) {
-    this.identity.authorizeKnowledge(actor, projectId, "attachments:read");
+    this.identity.authorizeKnowledge(actor, projectId, "attachments:read", { allowArchived: true });
     return this.store.listAttachments(projectId, recordKind, recordId,Math.min(Math.max(limit,1),100),Math.max(offset,0));
   }
 
   download(projectId: string, attachmentId: string, actor: AuthenticatedPrincipal): KnowledgeAttachmentDownload {
-    this.identity.authorizeKnowledge(actor, projectId, "attachments:read");
+    this.identity.authorizeKnowledge(actor, projectId, "attachments:read", { allowArchived: true });
     const attachment = this.store.getAttachment(projectId, attachmentId);
     if (!attachment) throw new KnowledgeError("not_found", "Attachment not found.");
     const shard=join(this.objectDirectory,attachment.sha256.slice(0,2)), path=join(shard,attachment.sha256);

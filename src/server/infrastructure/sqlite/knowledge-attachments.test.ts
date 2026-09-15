@@ -24,6 +24,21 @@ describe("knowledge attachments", () => {
     expect(f.service.download(f.project.id,saved.id,f.owner)).toEqual({attachment:saved,data,disposition:"attachment"});
     expect(f.service.upload(f.project.id,"task","task-1",{filename:"proof.txt",mediaType:"text/plain",data,idempotencyKey:"upload"},f.owner)).toEqual({value:saved,replayed:true});
   });
+  it("reads archived attachments while denying writes and callers without the read grant", () => {
+    const f = setup(), data = Buffer.from("evidence");
+    const input = { filename: "proof.txt", mediaType: "text/plain", data, idempotencyKey: "upload" };
+    const saved = f.service.upload(f.project.id, "task", "task-1", input, f.owner).value;
+    const api = new KnowledgeService(f.store, f.identity, undefined, undefined, undefined, f.service);
+    api.archiveProject(f.project.id, f.project.revision, { idempotencyKey: "archive" }, f.owner);
+    expect(f.service.list(f.project.id, "task", "task-1", f.owner).items).toEqual([saved]);
+    expect(f.service.download(f.project.id, saved.id, f.owner).data).toEqual(data);
+    expect(() => f.service.upload(f.project.id, "task", "task-1", input, f.owner)).toThrowError(expect.objectContaining({ code: "knowledge_forbidden" }));
+    expect(() => f.service.upload(f.project.id, "task", "task-1", { ...input, idempotencyKey: "new-upload" }, f.owner)).toThrowError(expect.objectContaining({ code: "knowledge_forbidden" }));
+    f.identity.revokeKnowledgeGrant(f.owner.principalId, f.project.id, f.owner);
+    expect(() => f.service.list(f.project.id, "task", "task-1", f.owner)).toThrowError(expect.objectContaining({ code: "knowledge_forbidden" }));
+    expect(() => f.service.download(f.project.id, saved.id, f.owner)).toThrowError(expect.objectContaining({ code: "knowledge_forbidden" }));
+  });
+
   it("rejects unsafe names, mismatched hashes and bounded storage", () => {
     const f=setup(); const input={mediaType:"text/plain",data:Buffer.from("evidence")};
     expect(()=>f.service.upload(f.project.id,"task","task-1",{...input,filename:"../proof",idempotencyKey:"a"},f.owner)).toThrowError(expect.objectContaining({code:"invalid_request"}));

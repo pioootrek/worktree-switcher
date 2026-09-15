@@ -51,6 +51,22 @@ describe("K6a Hub import planning", () => {
     expect(first).toMatchObject({mappingVersion:2}); expect(first.counts).toMatchObject({ tasks: 1, embeddedNotes: 1, done: 1, notes: 1, attachments: 3, schemas: 4, derived: 1, unresolvedRelations: 1, missing: 0 }); expect(first.mappings.find(item => item.sourcePath.endsWith("evidence/note.json"))).toMatchObject({ sourceKind: "attachment" }); expect(first.planHash).toBe(second.planHash);
   });
 
+  it("blocks orphan attachments while retaining nested files under an imported note", () => {
+    const source = repository(), trusted = validator();
+    const orphanRoot = join(source.root, "docs", "backlog", "notes", "NOTE-orphan");
+    mkdirSync(join(orphanRoot, "evidence"), { recursive: true });
+    writeFileSync(join(orphanRoot, "proof.txt"), "proof");
+    writeFileSync(join(orphanRoot, "evidence", "note.json"), "{}");
+    source.commit = commit(source.root, "orphan attachments");
+    const report = plan(source, trusted);
+    expect(report.validator.valid).toBe(true);
+    expect(report.missing.filter(item => item.reason === "attachment_parent_missing")).toEqual([
+      { sourcePath: "docs/backlog/notes/NOTE-orphan/evidence/note.json", reference: "docs/backlog/notes/NOTE-orphan/note.json", blocking: true, reason: "attachment_parent_missing" },
+      { sourcePath: "docs/backlog/notes/NOTE-orphan/proof.txt", reference: "docs/backlog/notes/NOTE-orphan/note.json", blocking: true, reason: "attachment_parent_missing" },
+    ]);
+    expect(report.mappings.some(item => item.targetKind === "attachment" && item.sourcePath.includes("NOTE-20260913-synthetic-memory/evidence/"))).toBe(true);
+  });
+
   it("resolves done IDs and item_id aliases independently of file order and reports ambiguous completion aliases",()=>{
     const source=repository(),trusted=validator(),taskPath=join(source.root,"docs","backlog","feature","FEAT-20260913-synthetic-open.json"),task=JSON.parse(readFileSync(taskPath,"utf8"));task.links.related_ids=["DONE-20260913-synthetic-finished","FEAT-20260912-synthetic-finished"];writeFileSync(taskPath,JSON.stringify(task));source.commit=commit(source.root,"archived aliases");
     const resolved=plan(source,trusted);expect(resolved.unresolvedRelations).toEqual([]);
