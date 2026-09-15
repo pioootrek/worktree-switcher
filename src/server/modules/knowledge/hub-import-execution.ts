@@ -30,7 +30,7 @@ export interface HubImportBatch {
 export interface HubImportExecutionStore {
   beginHubImport(input: Omit<HubImportBatch, "status" | "cursor" | "createdAt" | "updatedAt" | "publishedAt" | "error">, now: string): HubImportBatch;
   getHubImport(batchId: string): HubImportBatch | null;
-  resetHubImport(batchId: string, now: string): HubImportBatch;
+  resetHubImport(batchId: string, expectedTargetRevision: number | null, now: string): HubImportBatch;
   stageHubImportChunk(batchId: string, expectedCursor: number, mappings: HubImportMapping[], now: string): HubImportBatch;
   publishHubImport(batchId: string, now: string, attachmentDirectory?: string): HubImportBatch;
 }
@@ -98,11 +98,16 @@ export function executeHubImport(
     totalItems: input.plan.mappings.length,
   }, now);
   if (batch.planId !== input.plan.planId || batch.planHash !== input.plan.planHash || batch.sourceId !== input.plan.source.sourceId || batch.sourceRepository !== input.plan.source.repository || batch.sourceCommit !== input.plan.source.commit
-    || batch.targetProjectId !== targetProjectId || batch.targetProjectName !== input.targetProjectName.trim() || batch.expectedTargetRevision !== (input.expectedTargetRevision ?? null) || batch.actorPrincipalId !== actor.principalId || batch.totalItems !== input.plan.mappings.length) {
+    || batch.targetProjectId !== targetProjectId || batch.targetProjectName !== input.targetProjectName.trim() || batch.actorPrincipalId !== actor.principalId || batch.totalItems !== input.plan.mappings.length) {
     throw new KnowledgeError("revision_conflict", "Stored import batch does not match the supplied plan.");
   }
-  if (batch.status === "published") return batch;
-  if (batch.status === "failed") batch=store.resetHubImport(batch.id,clock());
+  const expectedTargetRevision=input.expectedTargetRevision ?? null;
+  if (batch.status === "published") {
+    if(batch.expectedTargetRevision!==expectedTargetRevision) throw new KnowledgeError("revision_conflict", "Stored import batch does not match the supplied plan.");
+    return batch;
+  }
+  if (batch.status === "failed") batch=store.resetHubImport(batch.id,expectedTargetRevision,clock());
+  else if(batch.expectedTargetRevision!==expectedTargetRevision) throw new KnowledgeError("revision_conflict", "Stored import batch does not match the supplied plan.");
   if (batch.status !== "staging") throw new KnowledgeError("invalid_request", "Import batch cannot be resumed.");
   const size = Math.max(1, Math.min(input.chunkSize ?? 100, 500));
   const mappings = input.plan.mappings.slice(batch.cursor, batch.cursor + size).map(mapping=>{

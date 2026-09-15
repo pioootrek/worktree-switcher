@@ -176,6 +176,25 @@ describe("K6b Hub import execution",()=>{
     rmSync(join(directory,hash.slice(0,2)));const published=executeHubImport(f.store,f.identity,f.owner,input,()=>NOW,value=>value,()=>bytes);expect(published).toMatchObject({status:"published",cursor:2,error:null});expect(existsSync(join(directory,hash.slice(0,2),hash))).toBe(true);f.store.close();
   });
 
+  it("resets a failed batch with the newly accepted target revision",()=>{
+    const f=fixture(),initial=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"Before"})]);
+    execute(f.store,f.identity,f.owner,{plan:initial,targetProjectId:"revision-retry",targetProjectName:"Revision retry"});
+    const changed=atCommit(plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"After"}),mapping("docs/backlog/feature/two.json","task","task",{id:"two",title:"Two"})]),"f".repeat(40));
+    const input={plan:changed,targetProjectId:"revision-retry",targetProjectName:"Revision retry",expectedTargetRevision:1,chunkSize:1,batchId:"revision-retry-batch"};
+    expect(execute(f.store,f.identity,f.owner,input)).toMatchObject({status:"staging",cursor:1});
+    let project=f.store.getKnowledgeProject("revision-retry")!;
+    f.store.updateKnowledgeProject({...project,status:"archived",revision:2,updatedAt:NOW},1,{actor:f.owner,projectId:project.id,idempotencyKey:"archive-for-retry",requestHash:"c".repeat(64)});
+    project=f.store.getKnowledgeProject("revision-retry")!;
+    f.store.updateKnowledgeProject({...project,status:"active",revision:3,updatedAt:NOW},2,{actor:f.owner,projectId:project.id,idempotencyKey:"restore-for-retry",requestHash:"d".repeat(64)});
+    expect(()=>execute(f.store,f.identity,f.owner,input)).toThrowError(expect.objectContaining({code:"revision_conflict"}));
+    expect(f.store.getHubImport("revision-retry-batch")).toMatchObject({status:"failed",expectedTargetRevision:1});
+    expect(()=>execute(f.store,f.identity,f.owner,{...input,expectedTargetRevision:2})).toThrowError(expect.objectContaining({code:"revision_conflict"}));
+    expect(f.store.getHubImport("revision-retry-batch")).toMatchObject({status:"failed",expectedTargetRevision:1});
+    const retry={...input,expectedTargetRevision:3,chunkSize:2};
+    expect(execute(f.store,f.identity,f.owner,retry)).toMatchObject({status:"published",expectedTargetRevision:3});
+    expect(f.store.getKnowledgeProject("revision-retry")?.revision).toBe(4);expect(f.store.listTasks("revision-retry",25,0).items).toHaveLength(2);f.store.close();
+  });
+
   it("removes newly installed attachment objects when database publication rolls back",()=>{
     const f=fixture(),bytes=Buffer.from("rollback proof"),hash=createHash("sha256").update(bytes).digest("hex"),note=mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"NOTE-one",title:"Note",body:"Body"});
     const attachment:HubImportMapping={sourcePath:"docs/backlog/notes/NOTE-one/proof.txt",sourceKind:"attachment",targetKind:"attachment",legacyId:null,disposition:"mapped",sourceSha256:hash,size:bytes.byteLength,mappedFields:[],sourceOnlyFields:[]},orphan=mapping("docs/backlog/feature/missing.json#notes/0","task_note","historical_comment",{id:"missing:note:0",text:"Orphan"});orphan.legacyId="missing:note:0";
