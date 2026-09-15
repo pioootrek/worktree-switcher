@@ -130,6 +130,14 @@ describe("K6b Hub import execution",()=>{
     expect(f.store.listTasks("done-only",25,0).items).toMatchObject([{description:"After",status:"done",revision:2}]);f.store.close();
   });
 
+  it("completes a task imported by an earlier batch without duplicating it",()=>{
+    const f=fixture(),open=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One",problem:["Work"]})]);
+    execute(f.store,f.identity,f.owner,{plan:open,targetProjectId:"lifecycle",targetProjectName:"Lifecycle"});
+    const completed=atCommit(plan([mapping("docs/backlog/done/DONE-one.json","done","task_completion",{id:"DONE-one",item_id:"one",title:"One",summary:"Shipped"})]),"f".repeat(40));
+    execute(f.store,f.identity,f.owner,{plan:completed,targetProjectId:"lifecycle",targetProjectName:"Lifecycle",expectedTargetRevision:1});
+    expect(f.store.listTasks("lifecycle",25,0).items).toMatchObject([{title:"One",status:"done",revision:2}]);expect(f.store.listTasks("lifecycle",25,0).items).toHaveLength(1);f.store.close();
+  });
+
   it("imports the same Hub source into two projects",()=>{
     const f=fixture(),source=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One"})]);
     execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:"first-target",targetProjectName:"First"});
