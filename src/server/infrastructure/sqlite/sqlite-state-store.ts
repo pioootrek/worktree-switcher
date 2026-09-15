@@ -1,3 +1,4 @@
+import type { KnowledgeTaskPage } from "@/shared/contracts/knowledge";
 import type { KnowledgeMemory, KnowledgeSearchHit, KnowledgeSearchOptions } from "@/shared/contracts/knowledge-memory";
 import type { KnowledgeAttachment } from "@/shared/contracts/knowledge-attachments";
 import type { KnowledgeFilters, KnowledgeProjectSummary } from "@/shared/contracts/knowledge";
@@ -718,7 +719,7 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
     return this.knowledge.getTask(projectId, id);
   }
 
-  listTasks(projectId: string, limit: number, offset: number, filters?: KnowledgeFilters): KnowledgePage<KnowledgeTask> {
+  listTasks(projectId: string, limit: number, offset: number, filters?: KnowledgeFilters): KnowledgeTaskPage<KnowledgeTask> {
     return this.knowledge.listTasks(projectId, limit, offset, filters);
   }
 

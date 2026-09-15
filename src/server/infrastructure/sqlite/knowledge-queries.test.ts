@@ -35,6 +35,24 @@ afterEach(() => {
 });
 
 describe("knowledge service SQLite flow", () => {
+  it("filters active tasks before pagination and counts the full authorized search", () => {
+    const { store, service, actor } = setup();
+    for (let i = 0; i < 30; i++) {
+      const task = service.createTask("project-1", { title: `Archived work ${i}`, description: "Finished" }, { idempotencyKey: `create-${i}` }, actor).value;
+      service.updateTask("project-1", task.id, { title: task.title, description: task.description, priority: "now", status: "done", expectedRevision: 1 }, { idempotencyKey: `finish-${i}` }, actor);
+    }
+    service.createTask("project-1", { title: "Active work", description: "Next step", priority: "next" }, { idempotencyKey: "active" }, actor);
+    const page = service.listTasks("project-1", actor, { activeOnly: true, limit: 1 });
+    expect(page.items.map(task => task.title)).toEqual(["Active work"]);
+    expect(page.nextOffset).toBeNull();
+    expect(page.total).toBe(1);
+    expect(page.counts).toEqual({ active: 1, now: 0, next: 1, blocked: 0, done: 30, all: 31 });
+    expect(service.listTasks("project-1", actor, { query: "aCTive", activeOnly: true }).counts.all).toBe(1);
+    expect(service.listTasks("project-1", actor, { status: "done", limit: 1, offset: 25 })).toMatchObject({ total: 30, nextOffset: 26 });
+    expect(service.execute({ operation: "tasks", input: { projectId: "project-1", activeOnly: true } }, actor)).toMatchObject({ total: 1 });
+    expect(() => service.execute({ operation: "tasks", input: { projectId: "private", activeOnly: true } }, actor)).toThrowError(expect.objectContaining({ code: "knowledge_forbidden" }));
+    store.close();
+  });
   it("persists a thread, reply and atomically linked task across restart", () => {
     const { path, store, service, actor } = setup(["thread-1", "reply-1", "task-1", "relation-1"]);
     const thread = service.createThread("project-1", { title: "Finding", body: "Evidence" }, { idempotencyKey: "thread-key" }, actor).value;

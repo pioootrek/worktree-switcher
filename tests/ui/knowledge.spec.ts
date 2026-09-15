@@ -20,7 +20,13 @@ async function mountKnowledge(page: Page) {
     const pageResult = (items: unknown[]) => ({ items, nextOffset: null });
     if (operation === "projects") return route.fulfill({ json: pageResult([project]) });
     if (operation === "project") return route.fulfill({ json: project });
-    if (operation === "tasks" || operation === "threads") return route.fulfill({ json: pageResult(records.filter(record => (operation === "tasks" ? "description" in record : "body" in record) && (!input.query || record.title.includes(input.query)) && (!input.status || record.status === input.status) && (!input.priority || record.priority === input.priority))) });
+    if (operation === "tasks" || operation === "threads") {
+      const matching = records.filter(record => (operation === "tasks" ? "description" in record : "body" in record) && (!input.query || record.title.toLowerCase().includes(input.query.toLowerCase())));
+      const active = matching.filter(record => record.status !== "done" && record.status !== "archived");
+      const filtered = matching.filter(record => (!input.activeOnly || (record.status !== "done" && record.status !== "archived")) && (!input.status || record.status === input.status) && (!input.priority || record.priority === input.priority));
+      const offset = input.offset ?? 0, limit = input.limit ?? 25;
+      return route.fulfill({ json: { items: filtered.slice(offset, offset + limit), nextOffset: filtered.length > offset + limit ? offset + limit : null, ...(operation === "tasks" ? { total: filtered.length, counts: { active: active.length, now: active.filter(r => r.priority === "now").length, next: active.filter(r => r.priority === "next").length, blocked: active.filter(r => r.status === "blocked").length, done: matching.filter(r => r.status === "done").length, all: matching.length } } : {}) } });
+    }
     if (operation === "task" || operation === "thread") return route.fulfill({ json: records.find(record => record.id === (input.taskId ?? input.threadId)) });
     if (operation === "relations") return route.fulfill({ json: pageResult([]) });
     if (operation === "replies") return route.fulfill({ json: pageResult(replies.filter(reply => reply.threadId === input.threadId)) });
@@ -55,7 +61,7 @@ async function mountKnowledge(page: Page) {
 test("knowledge without runtime: discussion, reply, task, filters and static deep link", async ({ page }) => {
   const f = await mountKnowledge(page);
   await page.getByRole("tab", { name: "Discussions", exact: true }).click();
-  await page.getByRole("button", { name: "Quick save", exact: true }).click();
+  await page.getByRole("button", { name: "Start discussion", exact: true }).click();
   await page.getByLabel("Title", { exact: true }).fill("Finding"); await page.getByLabel("Body", { exact: true }).fill("Evidence");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Finding", exact: true })).toBeVisible();
@@ -77,7 +83,7 @@ test("knowledge without runtime: discussion, reply, task, filters and static dee
 
 test("conflict and failed save keep drafts after reload; knowledge events avoid dashboard refresh", async ({ page }) => {
   const f = await mountKnowledge(page);
-  await page.getByRole("button", { name: "Quick save", exact: true }).click();
+  await page.getByRole("button", { name: "Add task", exact: true }).click();
   await page.getByLabel("Title", { exact: true }).fill("Task"); await page.getByLabel("Body", { exact: true }).fill("Original");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await page.getByRole("button", { name: "Edit task", exact: true }).click();
@@ -113,7 +119,7 @@ test("Polish and mobile knowledge navigation has labeled fields and no overflow"
   await expect(page.getByLabel("Projekt wiedzy", { exact: true })).toBeVisible();
   expect((await page.getByLabel("Projekt wiedzy", { exact: true }).boundingBox())!.width).toBeGreaterThan(280);
   expect((await page.getByLabel("Szukaj w tytułach", { exact: true }).boundingBox())!.width).toBeGreaterThan(280);
-  await page.getByRole("button", { name: "Szybki zapis", exact: true }).click();
+  await page.getByRole("button", { name: "Dodaj zadanie", exact: true }).click();
   await expect(page.getByLabel("Tytuł", { exact: true })).toBeFocused();
   await page.getByLabel("Tytuł", { exact: true }).fill("Zadanie"); await page.keyboard.press("Tab");
   await expect(page.getByLabel("Treść", { exact: true })).toBeFocused();
@@ -152,7 +158,7 @@ test("changing credentials clears the previous principal's visible knowledge bef
 
 test("a committed save with a lost response keeps its retry key through edits and reload", async ({ page }) => {
   const f = await mountKnowledge(page);
-  await page.getByRole("button", { name: "Quick save", exact: true }).click();
+  await page.getByRole("button", { name: "Add task", exact: true }).click();
   await page.getByLabel("Title", { exact: true }).fill("Original title");
   await page.getByLabel("Body", { exact: true }).fill("Evidence");
   f.loseNextResponse();
@@ -176,7 +182,7 @@ test("a committed save with a lost response keeps its retry key through edits an
 for (const target of ["identity", "projects"] as const) {
   test(`transient ${target} errors preserve the session and draft and offer retry after reload`, async ({ page }) => {
     const f = await mountKnowledge(page);
-    await page.getByRole("button", { name: "Quick save", exact: true }).click();
+    await page.getByRole("button", { name: "Add task", exact: true }).click();
     await page.getByLabel("Title", { exact: true }).fill("Unsaved draft");
     let fail = true;
     await page.route(target === "identity" ? "**/api/identity" : "**/api/knowledge", async route => {
@@ -320,7 +326,7 @@ async function mountMemory(page: Page) {
     if (loseResponse) { loseResponse = false; return route.abort("failed"); }
     return route.fulfill({ json: { value, replayed: false } });
   });
-  await page.getByRole("button", { name: "Quick save", exact: true }).click();
+  await page.getByRole("button", { name: "Add task", exact: true }).click();
   await page.getByLabel("Title", { exact: true }).fill("K4 task");
   await page.getByLabel("Body", { exact: true }).fill("Preserve decisions between sessions");
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -415,7 +421,7 @@ test("context pagination returns to the actual preceding page after a byte-limit
   await page.getByRole("tab", { name: "Backlog", exact: true }).click();
   await page.getByRole("link", { name: "K4 task", exact: true }).click();
   await page.getByRole("button", { name: "Next session context", exact: true }).click();
-  const section = page.getByRole("button", { name: "Next session context", exact: true }).locator("..");
+  const section = page.getByRole("region", { name: "Next session context", exact: true });
   await expect(section.getByText("Context page 0", { exact: true })).toBeVisible();
   await section.getByRole("button", { name: "Next page", exact: true }).click();
   await expect(section.getByText("Context page 7", { exact: true })).toBeVisible();
@@ -494,6 +500,7 @@ test("memory selection and browser Back preserve filters and a later results pag
   await expect(page.getByRole("heading", { name: "Private A", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Edit memory", exact: true }).click();
   await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Private A");
+  await page.getByRole("button", { name: "Close and keep draft", exact: true }).click();
   await page.getByRole("link", { name: "Private B", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Private B", exact: true })).toBeVisible();
   await page.goBack();
@@ -507,3 +514,135 @@ test("memory selection and browser Back preserve filters and a later results pag
   await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Private A");
   expect(f.errors).toEqual([]);
 });
+
+test("task views count the whole search, preserve pagination on selection and use a mobile detail screen", async ({ page }) => {
+  const f = await mountKnowledge(page);
+  for (let i = 0; i < 32; i++) f.records.push({ id: `active-${i}`, projectId: "knowledge-only", title: `Active task ${i}`, description: `Context ${i}`, status: "open", priority: "next", revision: 1, createdBy: "owner" });
+  f.records.push({ id: "done-1", projectId: "knowledge-only", title: "Finished task", description: "Archived outcome", status: "done", priority: "now", revision: 1, createdBy: "owner" });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  const views = page.getByRole("navigation", { name: "Task views" });
+  await expect(views.getByRole("button", { name: "Active 32", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("link", { name: "Finished task", exact: true })).toHaveCount(0);
+  const list = page.locator("[data-knowledge-list]");
+  await list.getByRole("button", { name: "Next page", exact: true }).click();
+  await page.getByRole("link", { name: "Active task 30", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Active task 30", exact: true })).toBeVisible();
+  await expect(list.getByText("Page 2", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Active task 30", exact: true })).toHaveAttribute("aria-current", "true");
+  await views.getByRole("button", { name: "Done 1", exact: true }).click();
+  await expect(page.getByRole("link", { name: "Finished task", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Finished task", exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(list).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Finished task", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Back to list", exact: true }).click();
+  await expect(list).toBeVisible();
+  await expect(views.getByRole("button", { name: "Done 1", exact: true })).toHaveAttribute("aria-pressed", "true");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(f.errors).toEqual([]);
+});
+
+test("the desktop list scrolls inside the workspace while detail stays visible", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const f = await mountKnowledge(page);
+  for (let i = 0; i < 25; i++) f.records.push({ id: `task-${i}`, projectId: "knowledge-only", title: `Long working task ${i}`, description: "Useful context", status: "open", priority: "now", revision: 1, createdBy: "owner" });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.getByRole("link", { name: "Long working task 0", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Long working task 0", exact: true })).toBeVisible();
+  const scroll = page.locator("[data-knowledge-list-scroll]");
+  expect(await scroll.evaluate(node => node.scrollHeight > node.clientHeight)).toBe(true);
+  await scroll.evaluate(node => { node.scrollTop = node.scrollHeight; });
+  await expect(page.getByRole("heading", { name: "Long working task 0", exact: true })).toBeInViewport();
+  expect(await page.evaluate(() => document.querySelector("[data-knowledge-workspace]")!.getBoundingClientRect().bottom <= innerHeight)).toBe(true);
+  expect(f.errors).toEqual([]);
+});
+
+test("agent context remains copyable when clipboard access is denied", async ({ page }) => {
+  const f = await mountMemory(page);
+  await page.addInitScript(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async () => { throw new Error("Denied"); } } }));
+  await page.reload();
+  await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+  await page.getByRole("link", { name: "K4 task", exact: true }).click();
+  const exported = page.waitForRequest(request => request.url().endsWith("/api/knowledge") && request.postDataJSON()?.operation === "export_context");
+  await page.getByRole("button", { name: "Copy context for agent", exact: true }).click();
+  await expect(page.getByLabel("Context to copy", { exact: true })).not.toHaveValue("");
+  await expect(page.getByText("The export contains this context page", { exact: false })).toBeVisible();
+  expect((await exported).postDataJSON().input.format).toBe("markdown");
+  expect(f.errors).toEqual([]);
+});
+
+test("an entry exposes authorized attachments and downloads their bytes", async ({ page }) => {
+  const f = await mountKnowledge(page);
+  f.records.push({ id: "attached", projectId: "knowledge-only", title: "With evidence", description: "Inspect the file", status: "open", priority: "now", revision: 1, createdBy: "owner" });
+  const requests: string[] = [];
+  await page.route("**/api/knowledge", route => {
+    const { operation } = route.request().postDataJSON();
+    const attachment = { id: "file-1", filename: "evidence.txt", size: 8 };
+    if (operation === "attachments") return route.fulfill({ json: { items: [attachment], nextOffset: null } });
+    if (operation === "attachment") { requests.push(operation); return route.fulfill({ json: { attachment, dataBase64: "ZXZpZGVuY2U=" } }); }
+    return route.fallback();
+  });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.getByRole("link", { name: "With evidence", exact: true }).click();
+  await page.getByRole("button", { name: "Attachments", exact: true }).click();
+  const pending = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download: evidence.txt", exact: true }).click();
+  const download = await pending;
+  expect(download.suggestedFilename()).toBe("evidence.txt");
+  const { readFile } = await import("node:fs/promises");
+  expect(await readFile((await download.path())!, "utf8")).toBe("evidence");
+  expect(requests).toEqual(["attachment"]);
+  expect(f.errors).toEqual([]);
+});
+
+
+test("closing editors returns keyboard focus to the action that opened them", async ({ page }) => {
+  await mountMemory(page);
+  await addMemory(page, "Keyboard note");
+  const editMemory = page.getByRole("button", { name: "Edit memory", exact: true });
+  await editMemory.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(editMemory).toBeFocused();
+  await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+  await page.getByRole("link", { name: "K4 task", exact: true }).click();
+  const editTask = page.getByRole("button", { name: "Edit task", exact: true });
+  await editTask.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(editTask).toBeFocused();
+});
+
+
+for (const mode of ["edit", "reply", "from_thread"] as const) {
+  test(`a failed background read in ${mode} exposes retry and restores the record draft`, async ({ page }) => {
+    const f = await mountKnowledge(page);
+    const task = mode === "edit";
+    f.records.push({ id: "existing", projectId: "knowledge-only", title: "Existing record", ...(task ? { description: "Original", status: "open", priority: "next" } : { body: "Original" }), revision: 1, createdBy: "owner" });
+    if (!task) await page.getByRole("tab", { name: "Discussions", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("link", { name: "Existing record", exact: true }).click();
+    await page.getByRole("button", { name: task ? "Edit task" : mode === "reply" ? "Reply" : "Create task from thread", exact: true }).click();
+    await page.getByLabel("Body", { exact: true }).fill("Unsaved record draft");
+    let fail = true;
+    await page.route("**/api/knowledge", route => {
+      if (fail && route.request().postDataJSON().operation === (task ? "task" : "thread")) return route.fulfill({ status: 503, json: { error: "Unavailable" } });
+      return route.fallback();
+    });
+    await page.evaluate(() => (window as unknown as { fixtureEvents: { emit: (type: string, value: unknown) => void } }).fixtureEvents.emit("knowledge-changed", { projectIds: ["knowledge-only"] }));
+    await expect(page.getByRole("alert").filter({ hasText: "Could not read knowledge." })).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByLabel("Knowledge credential", { exact: true })).toHaveCount(0);
+    fail = false;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page.getByLabel("Body", { exact: true })).toHaveValue("Unsaved record draft");
+    await expect(page.getByRole("alert").filter({ hasText: "Could not read knowledge." })).toHaveCount(0);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
+    const saved = f.calls.findLast(call => call.operation === (task ? "update_task" : mode === "reply" ? "create_reply" : "task_from_thread"));
+    expect(saved?.input[task ? "taskId" : "threadId"]).toBe("existing");
+    expect(saved?.input[mode === "reply" ? "body" : "description"]).toBe("Unsaved record draft");
+    expect(f.errors).toEqual([]);
+  });
+}

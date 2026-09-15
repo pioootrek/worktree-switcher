@@ -94,9 +94,12 @@ export interface KnowledgePageOptions {
 
 export interface KnowledgeFilters {
   query?: string;
+  activeOnly?: boolean;
   status?: KnowledgeTaskStatus;
   priority?: KnowledgeTaskPriority;
 }
+export interface KnowledgeTaskCounts { active: number; now: number; next: number; blocked: number; done: number; all: number }
+export interface KnowledgeTaskPage<T = KnowledgeTaskSummary> extends KnowledgePage<T> { counts: KnowledgeTaskCounts; total: number }
 export type KnowledgeThreadSummary = Omit<KnowledgeThread, "body">;
 export type KnowledgeTaskSummary = Omit<KnowledgeTask, "description">;
 export interface KnowledgeProjectSummary extends KnowledgeProject { writable: boolean }
@@ -122,7 +125,7 @@ export const knowledgeSchemas = {
   reply: z.strictObject({ ...project, replyId: id }),
   thread: z.strictObject({ ...project, threadId: id }),
   replies: z.strictObject({ ...project, threadId: id, ...page }),
-  tasks: z.strictObject({ ...project, ...page, query, status: knowledgeStatus.optional(), priority: knowledgePriority.optional() }),
+  tasks: z.strictObject({ ...project, ...page, query, activeOnly: z.boolean().optional(), status: knowledgeStatus.optional(), priority: knowledgePriority.optional() }),
   task: z.strictObject({ ...project, taskId: id }),
   relations: z.strictObject({ ...record, ...page }),
   history: z.strictObject({ ...record, recordKind: z.enum(["thread", "reply", "task", "memory", "project", "relation"]), ...page }),
