@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Copy } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { fieldClass } from "./knowledge-editor";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,8 @@ export function TaskContext({ token, projectId, taskId, changeVersion }: { token
   const [previousOffsets, setPreviousOffsets] = useState<number[]>([]);
   const [version, setVersion] = useState(0);
   const [error, setError] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "busy" | "copied">("idle");
+  const [copyFallback, setCopyFallback] = useState("");
   const [exported, setExported] = useState<{ fingerprint: string; offset: number; limit: number } | null>(null);
   useEffect(() => {
     if (!open) return;
@@ -36,9 +39,22 @@ export function TaskContext({ token, projectId, taskId, changeVersion }: { token
       setExported({ fingerprint: value.fingerprint, offset, limit }); setError(false); setVersion(v => v + 1);
     } catch { setError(true); }
   };
-  return <section className="space-y-3 border-t border-border pt-4">
-    <Button variant="outline" onClick={() => { setOpen(true); setVersion(v => v + 1); }}>{t("knowledge.taskContext")}</Button>
-    {open && <div className="max-w-xs space-y-2"><Label htmlFor={`context-page-size-${taskId}`}>{t("knowledge.contextPageSize")}</Label><select id={`context-page-size-${taskId}`} className={fieldClass} value={limit} onChange={event => { setLimit(Number(event.target.value)); setOffset(0); setPreviousOffsets([]); setContext(null); }}>{[1, 5, 10, 25].map(size => <option key={size} value={size}>{size}</option>)}</select></div>}
+  const copyForAgent = async () => {
+    setCopyState("busy"); setCopyFallback("");
+    try {
+      const value = await knowledgeRequest<KnowledgeExport>(token, "export_context", { projectId, taskId, offset, limit, format: "markdown" });
+      try { await navigator.clipboard.writeText(value.content); setCopyState("copied"); }
+      catch { setCopyFallback(value.content); setCopyState("idle"); }
+      setExported({ fingerprint: value.fingerprint, offset, limit }); setError(false); setOpen(true); setVersion(v => v + 1);
+    } catch { setError(true); setCopyState("idle"); }
+  };
+  return <section aria-label={t("knowledge.taskContext")} className="space-y-3 border-t border-border pt-4">
+    <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => { setOpen(true); setVersion(v => v + 1); }}>{t("knowledge.taskContext")}</Button>
+      <Button variant="secondary" disabled={copyState === "busy"} onClick={() => void copyForAgent()}><Copy aria-hidden className="size-4" />{t("knowledge.copyForAgent")}</Button></div>
+    {copyState === "copied" && <p role="status" className="text-sm">{t("knowledge.contextCopied")}</p>}
+    {copyFallback && <div className="space-y-2"><Label htmlFor={`copy-context-${taskId}`}>{t("knowledge.copyManually")}</Label><textarea id={`copy-context-${taskId}`} readOnly className={`${fieldClass} min-h-40`} value={copyFallback} onFocus={event => event.target.select()} /></div>}
+    {(copyState === "copied" || copyFallback) && <p className="text-xs text-muted-foreground">{t("knowledge.copyScope")}</p>}
+    {open && <div className="max-w-xs space-y-2"><Label htmlFor={`context-page-size-${taskId}`}>{t("knowledge.contextPageSize")}</Label><select id={`context-page-size-${taskId}`} className={fieldClass} value={limit} onChange={event => { setLimit(Number(event.target.value)); setOffset(0); setPreviousOffsets([]); setContext(null); setCopyState("idle"); setCopyFallback(""); }}>{[1, 5, 10, 25].map(size => <option key={size} value={size}>{size}</option>)}</select></div>}
     {error && <p role="alert">{t("knowledge.contextFailed")}</p>}
     {open && context && <>
       <p className="text-sm">{t("knowledge.contextHelp")}</p>
@@ -61,8 +77,8 @@ export function TaskContext({ token, projectId, taskId, changeVersion }: { token
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" onClick={() => void download("json")}>{t("knowledge.exportJson")}</Button>
         <Button variant="outline" onClick={() => void download("markdown")}>{t("knowledge.exportMarkdown")}</Button>
-        <Button variant="outline" disabled={!previousOffsets.length} onClick={() => { setOffset(previousOffsets.at(-1)!); setPreviousOffsets(previousOffsets.slice(0, -1)); setContext(null); }}>{t("knowledge.previous")}</Button>
-        <Button variant="outline" disabled={context.nextOffset === null} onClick={() => { setPreviousOffsets([...previousOffsets, offset]); setOffset(context.nextOffset!); setContext(null); }}>{t("knowledge.nextPage")}</Button>
+        <Button variant="outline" disabled={!previousOffsets.length} onClick={() => { setOffset(previousOffsets.at(-1)!); setPreviousOffsets(previousOffsets.slice(0, -1)); setContext(null); setCopyState("idle"); setCopyFallback(""); }}>{t("knowledge.previous")}</Button>
+        <Button variant="outline" disabled={context.nextOffset === null} onClick={() => { setPreviousOffsets([...previousOffsets, offset]); setOffset(context.nextOffset!); setContext(null); setCopyState("idle"); setCopyFallback(""); }}>{t("knowledge.nextPage")}</Button>
       </div>
     </>}
   </section>;

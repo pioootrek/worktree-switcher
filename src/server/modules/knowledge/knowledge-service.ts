@@ -1,3 +1,4 @@
+import type { KnowledgeTaskPage } from "@/shared/contracts/knowledge";
 import { knowledgeSchemas, type KnowledgeRequest, type KnowledgeFilters } from "@/shared/contracts/knowledge";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -161,7 +162,7 @@ export class KnowledgeService {
     return this.store.listReplies(projectId, threadId, page.limit, page.offset);
   }
 
-  listTasks(projectId: string, actor: AuthenticatedPrincipal, options: KnowledgePageOptions & KnowledgeFilters = {}): KnowledgePage<KnowledgeTask> {
+  listTasks(projectId: string, actor: AuthenticatedPrincipal, options: KnowledgePageOptions & KnowledgeFilters = {}): KnowledgeTaskPage<KnowledgeTask> {
     this.identity.authorizeKnowledge(actor, projectId, "knowledge:read");
     const page = this.page(options);
     return this.store.listTasks(projectId, page.limit, page.offset, options);

@@ -1,3 +1,4 @@
+import type { KnowledgeTaskPage } from "@/shared/contracts/knowledge";
 import type { KnowledgeMemory, KnowledgeSearchHit, KnowledgeSearchOptions } from "@/shared/contracts/knowledge-memory";
 import type { KnowledgeFilters, KnowledgeProjectSummary } from "@/shared/contracts/knowledge";
 import Database from "better-sqlite3";
@@ -174,8 +175,19 @@ export class KnowledgeQueries implements KnowledgeStore {
     const row = this.database.prepare("SELECT * FROM knowledge_tasks WHERE project_id = ? AND id = ?").get(projectId, id) as TaskRow | undefined;
     return row ? mapTask(row) : null;
   }
-  listTasks(projectId: string, limit: number, offset: number, filters: KnowledgeFilters = {}): KnowledgePage<KnowledgeTask> {
-    return this.page((this.database.prepare("SELECT * FROM knowledge_tasks WHERE project_id = ? AND instr(knowledge_fold(title), knowledge_fold(?)) > 0 AND (? IS NULL OR status = ?) AND (? IS NULL OR priority = ?) ORDER BY updated_at DESC, id LIMIT ? OFFSET ?").all(projectId, filters.query ?? "", filters.status ?? null, filters.status ?? null, filters.priority ?? null, filters.priority ?? null, limit + 1, offset) as TaskRow[]).map(mapTask), limit, offset);
+  listTasks(projectId: string, limit: number, offset: number, filters: KnowledgeFilters = {}): KnowledgeTaskPage<KnowledgeTask> {
+    const groups = this.database.prepare("SELECT status, priority, count(*) AS count FROM knowledge_tasks WHERE project_id = ? AND instr(knowledge_fold(title), knowledge_fold(?)) > 0 GROUP BY status, priority").all(projectId, filters.query ?? "") as Array<{ status: KnowledgeTask["status"]; priority: KnowledgeTask["priority"]; count: number }>;
+    const counts = { active: 0, now: 0, next: 0, blocked: 0, done: 0, all: 0 };
+    let total = 0;
+    for (const group of groups) {
+      const active = group.status !== "done" && group.status !== "archived";
+      counts.all += group.count;
+      if (active) { counts.active += group.count; if (group.priority === "now" || group.priority === "next") counts[group.priority] += group.count; }
+      if (group.status === "blocked" || group.status === "done") counts[group.status] += group.count;
+      if ((!filters.activeOnly || active) && (!filters.status || filters.status === group.status) && (!filters.priority || filters.priority === group.priority)) total += group.count;
+    }
+    const rows = (this.database.prepare("SELECT * FROM knowledge_tasks WHERE project_id = ? AND instr(knowledge_fold(title), knowledge_fold(?)) > 0 AND (? = 0 OR status IN ('open','in_progress','blocked')) AND (? IS NULL OR status = ?) AND (? IS NULL OR priority = ?) ORDER BY updated_at DESC, id LIMIT ? OFFSET ?").all(projectId, filters.query ?? "", filters.activeOnly ? 1 : 0, filters.status ?? null, filters.status ?? null, filters.priority ?? null, filters.priority ?? null, limit + 1, offset) as TaskRow[]).map(mapTask);
+    return { ...this.page(rows, limit, offset), counts, total };
   }
   listHistory(projectId: string, recordKind: KnowledgeHistoryEntry["recordKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeHistoryEntry> {
     const rows = (this.database.prepare("SELECT * FROM knowledge_history WHERE project_id = ? AND record_kind = ? AND record_id = ? ORDER BY id LIMIT ? OFFSET ?").all(projectId, recordKind, recordId, limit + 1, offset) as HistoryRow[]).map((row) => ({ id: row.id, projectId: row.project_id, recordKind: row.record_kind, recordId: row.record_id, operation: row.operation, previousJson: row.previous_json, principalId: row.principal_id, authenticationMethod: row.authentication_method, revision: row.revision, createdAt: row.created_at }));

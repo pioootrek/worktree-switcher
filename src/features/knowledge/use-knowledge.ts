@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { KnowledgeFilters, KnowledgeRelation, KnowledgePage, KnowledgeProjectSummary, KnowledgeReply, KnowledgeTask, KnowledgeTaskSummary, KnowledgeThread, KnowledgeThreadSummary } from "@/shared/contracts/knowledge";
+import type { KnowledgeTaskCounts, KnowledgeTaskPage, KnowledgeFilters, KnowledgeRelation, KnowledgePage, KnowledgeProjectSummary, KnowledgeReply, KnowledgeTask, KnowledgeTaskSummary, KnowledgeThread, KnowledgeThreadSummary } from "@/shared/contracts/knowledge";
 import { isKnowledgeAccessError, knowledgeIdentity, knowledgeRequest, type KnowledgeIdentity } from "./knowledge-client";
 
 export type KnowledgeTab = "backlog" | "discussions" | "memory";
@@ -15,9 +15,11 @@ export function useKnowledge(token: string, change: { version: number; projectId
   const [projectOffset, setProjectOffset] = useState(0);
   const [selection, setSelection] = useState<KnowledgeSelection>({ projectId: "", tab: "backlog", recordId: "" });
   const [ready, setReady] = useState(false);
-  const [filters, setFilters] = useState<KnowledgeFilters>({});
+  const [filters, setFilters] = useState<KnowledgeFilters>({ activeOnly: true });
   const [offset, setOffset] = useState(0);
   const [rows, setRows] = useState(emptyPage<KnowledgeTaskSummary | KnowledgeThreadSummary>);
+  const [counts, setCounts] = useState<KnowledgeTaskCounts | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
   const [detail, setDetail] = useState<KnowledgeTask | KnowledgeThread | null>(null);
   const [replies, setReplies] = useState(emptyPage<KnowledgeReply>);
   const [relations, setRelations] = useState(emptyPage<KnowledgeRelation>);
@@ -35,9 +37,9 @@ export function useKnowledge(token: string, change: { version: number; projectId
     const previous = selectionRef.current;
     if (next.projectId === previous.projectId && next.tab === previous.tab && next.recordId === previous.recordId) return;
     selectionRef.current = next;
-    setSelection(next); setOffset(0); setReplyOffset(0); setRelationOffset(0);
-    setRelations(emptyPage()); setDetail(null); setRows(emptyPage()); setReplies(emptyPage()); setError(false);
-    if (next.projectId !== previous.projectId || next.tab !== previous.tab) setFilters({});
+    setSelection(next); setReplyOffset(0); setRelationOffset(0);
+    setRelations(emptyPage()); setDetail(null); setReplies(emptyPage()); setError(false);
+    if (next.projectId !== previous.projectId || next.tab !== previous.tab) { setFilters({ activeOnly: true }); setOffset(0); setRows(emptyPage()); setCounts(null); setTotal(null); }
     if (next.projectId !== previous.projectId) setProject(null);
   }, []);
 
@@ -108,12 +110,14 @@ export function useKnowledge(token: string, change: { version: number; projectId
         ]);
         if (abort.signal.aborted || selectionRef.current !== selection) return;
         setRelations(relationPage); setProject(selectedProject); setRows(page); setDetail(record); setReplies(responsePage); setError(false);
+        setCounts("counts" in page ? (page as KnowledgeTaskPage).counts : null);
+        setTotal("total" in page ? (page as KnowledgeTaskPage).total : null);
       } catch {
-        if (!abort.signal.aborted && selectionRef.current === selection) { setRelations(emptyPage()); setProject(null); setRows(emptyPage()); setDetail(null); setReplies(emptyPage()); setError(true); }
+        if (!abort.signal.aborted && selectionRef.current === selection) { setRelations(emptyPage()); setProject(null); setRows(emptyPage()); setDetail(null); setReplies(emptyPage()); setCounts(null); setTotal(null); setError(true); }
       } finally { if (!abort.signal.aborted && selectionRef.current === selection) { clearTimeout(timer); setLoading(false); } }
     })();
     return () => { clearTimeout(timer); abort.abort(); };
   }, [token, identity, selection, filters, offset, replyOffset, relationOffset, revision]);
 
-  return { refreshVersion: revision, relations, relationOffset, setRelationOffset, identity, project, projects, projectOffset, setProjectOffset, selection, select, filters, setFilters: (value: KnowledgeFilters) => { setFilters(value); setOffset(0); }, offset, setOffset, detail, rows, replies, replyOffset, setReplyOffset, loading, error: error || discoveryError, sessionError, reload };
+  return { counts, total, refreshVersion: revision, relations, relationOffset, setRelationOffset, identity, project, projects, projectOffset, setProjectOffset, selection, select, filters, setFilters: (value: KnowledgeFilters) => { setFilters(value); setOffset(0); setRows(emptyPage()); setCounts(null); setTotal(null); }, offset, setOffset, detail, rows, replies, replyOffset, setReplyOffset, loading, error: error || discoveryError, sessionError, reload };
 }

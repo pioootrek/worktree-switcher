@@ -72,7 +72,7 @@ export function KnowledgeEditor({ token, principalId, projectId, mode, record, o
   };
   const conflict = draft.error?.code === "revision_conflict";
   return <form className="space-y-4 rounded-xl border border-border p-4" onSubmit={event => { event.preventDefault(); void submit(); }}>
-    <h3 className="text-lg font-semibold">{t(mode === "reply" ? "knowledge.reply" : mode === "edit" ? "knowledge.edit" : mode === "from_thread" ? "knowledge.fromThread" : "knowledge.quickSave")}</h3>
+    <h3 className="text-lg font-semibold">{t(mode === "reply" ? "knowledge.reply" : mode === "edit" ? "knowledge.edit" : mode === "from_thread" ? "knowledge.fromThread" : mode === "thread" ? "knowledge.addDiscussion" : "knowledge.addTask")}</h3>
     {draft.error && <Alert variant="destructive"><AlertDescription>{t(conflict ? "knowledge.conflict" : draft.error.code === "idempotency_conflict" ? "knowledge.retryConflict" : draft.error.code === "credential_invalid" || draft.error.code === "invalid_credential" ? "knowledge.sessionExpired" : "knowledge.saveFailed")}</AlertDescription></Alert>}
     {conflict && record && <div className="space-y-2">
       <p>{t("knowledge.savedVersion", { revision: record.revision })}</p>

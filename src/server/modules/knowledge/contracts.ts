@@ -1,3 +1,4 @@
+import type { KnowledgeTaskPage } from "@/shared/contracts/knowledge";
 import type { KnowledgeMemory, KnowledgeSearchHit, KnowledgeSearchOptions } from "@/shared/contracts/knowledge-memory";
 import type { AuthenticatedPrincipal, KnowledgeProject, KnowledgeProjectRuntimeLink } from "@/server/modules/identity";
 
@@ -63,7 +64,7 @@ export interface KnowledgeStore {
   listReplies(projectId: string, threadId: string, limit: number, offset: number): KnowledgePage<KnowledgeReply>;
   listRelations(projectId: string, recordKind: KnowledgeRecordKind, recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeRelation>;
   getTask(projectId: string, id: string): KnowledgeTask | null;
-  listTasks(projectId: string, limit: number, offset: number, filters?: KnowledgeFilters): KnowledgePage<KnowledgeTask>;
+  listTasks(projectId: string, limit: number, offset: number, filters?: KnowledgeFilters): KnowledgeTaskPage<KnowledgeTask>;
   listHistory(projectId: string, recordKind: KnowledgeHistoryEntry["recordKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeHistoryEntry>;
   createThread(thread: KnowledgeThread, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeThread>;
   createReply(reply: KnowledgeReply, context: KnowledgeMutationContext): KnowledgeMutationResult<KnowledgeReply>;
