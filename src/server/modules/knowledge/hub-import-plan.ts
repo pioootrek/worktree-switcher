@@ -58,6 +58,12 @@ export interface HubImportPlan {
   guarantees: { dataWritten: false; sourceReadFromCommit: true; importedRepositoryScriptsExecuted: false };
 }
 
+export function calculateHubImportPlanHash(plan: HubImportPlan): string {
+  const { planId: _planId, planHash: _planHash, ...base } = plan;
+  void _planId; void _planHash;
+  return sha(canonical({ ...base, source: { ...base.source, repository: "<source>" }, validator: { ...base.validator, repository: "<validator>", diagnostics: [] } }));
+}
+
 interface SourceFile { path: string; bytes: Buffer }
 const sha = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
 function canonical(value: unknown): string {
@@ -242,7 +248,7 @@ export function planHubImportAgainstValidator(options: HubImportPlanOptions, exp
     mappings, missing, conflicts, unresolvedRelations,
     guarantees: { dataWritten: false as const, sourceReadFromCommit: true as const, importedRepositoryScriptsExecuted: false as const },
   };
-  const hashInput = { ...base, source: { ...base.source, repository: "<source>" }, validator: { ...base.validator, repository: "<validator>", diagnostics: [] } };
-  const planHash = sha(canonical(hashInput));
+  const provisional = { ...base, planId: "", planHash: "" };
+  const planHash = calculateHubImportPlanHash(provisional);
   return { ...base, planId: `hub:${options.sourceId}:${resolvedCommit}:${planHash.slice(0, 16)}`, planHash };
 }

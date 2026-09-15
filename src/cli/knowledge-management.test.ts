@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { KnowledgeError, type HubImportPlan } from "../server/modules/knowledge";
-import { parseKnowledgeCommandArgs, runHubImportPlanCommand } from "./knowledge-management";
+import { parseKnowledgeCommandArgs, runHubImportExecuteCommand, runHubImportPlanCommand } from "./knowledge-management";
 
 describe("knowledge CLI global paths", () => {
   it("extracts path flags around an operation without changing its JSON input", () => {
@@ -32,5 +32,11 @@ describe("knowledge plan-import CLI", () => {
     runHubImportPlanCommand(["plan-import", "--repository", "/repo", "--commit", "a".repeat(40), "--source-id", "source", "--validator-repository", "/hub"], write, planner);
     expect(planner).toHaveBeenCalledWith({ repository: "/repo", commit: "a".repeat(40), sourceId: "source", validatorRepository: "/hub" }); expect(JSON.parse(write.mock.calls[0]![0])).toEqual(report);
     expect(() => runHubImportPlanCommand(["plan-import", "--repository", "/repo", "--commit", "a".repeat(40), "--source-id", "source", "--validator-repository", "/hub"], vi.fn(), () => { throw new KnowledgeError("limit_exceeded", "too large"); })).toThrow("limit_exceeded: too large");
+  });
+});
+
+describe("knowledge execute-import CLI",()=>{
+  it("rejects unknown flags before opening the controller database",()=>{
+    expect(()=>runHubImportExecuteCommand(["execute-import","--unknown","x"],{} as never)).toThrow("Usage: knowledge execute-import");
   });
 });

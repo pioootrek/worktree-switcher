@@ -1,0 +1,139 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import { IdentityService } from "@/server/modules/identity";
+import { calculateHubImportPlanHash, executeHubImport, exportKnowledgeProject, importKnowledgeProject, type HubImportMapping, type HubImportPlan } from "@/server/modules/knowledge";
+import { SqliteStateStore } from "./sqlite-state-store";
+
+const roots:string[]=[];
+afterEach(()=>roots.splice(0).forEach(root=>rmSync(root,{recursive:true,force:true})));
+const NOW="2026-09-15T10:00:00.000Z";
+function mapping(path:string,kind:HubImportMapping["sourceKind"],target:HubImportMapping["targetKind"],payload:Record<string,unknown>):HubImportMapping {
+  return {sourcePath:path,sourceKind:kind,targetKind:target,legacyId:String(payload.id??path),disposition:"mapped",sourceSha256:"a".repeat(64),size:10,mappedFields:Object.keys(payload),sourceOnlyFields:[],originalPayload:payload};
+}
+function plan(mappings:HubImportMapping[]):HubImportPlan{const value:HubImportPlan={formatVersion:1,planId:"",planHash:"",source:{sourceId:"fixture",repository:"/source",commit:"d".repeat(40),backlogPath:"docs/backlog"},validator:{repository:"/validator",commit:"e".repeat(40),command:["validate"],valid:true,diagnostics:[]},counts:{files:mappings.length,bytes:20,tasks:1,embeddedNotes:0,done:0,notes:1,attachments:0,documents:0,configurations:0,schemas:0,derived:0,unclassified:0,mapped:mappings.length,sourceOnly:0,skipped:0,missing:0,conflicts:0,unresolvedRelations:0},mappings,missing:[],conflicts:[],unresolvedRelations:[],guarantees:{dataWritten:false,sourceReadFromCommit:true,importedRepositoryScriptsExecuted:false}};value.planHash=calculateHubImportPlanHash(value);value.planId=`hub:fixture:${"d".repeat(40)}:${value.planHash.slice(0,16)}`;return value;}
+function atCommit(value:HubImportPlan,commit:string):HubImportPlan{const result={...value,source:{...value.source,commit},planId:"",planHash:""};result.planHash=calculateHubImportPlanHash(result);result.planId=`hub:fixture:${commit}:${result.planHash.slice(0,16)}`;return result;}
+function fixture(){const root=mkdtempSync(join(tmpdir(),"hub-import-execution-"));roots.push(root);let n=0;const ids=["00000000-0000-4000-8000-000000000001","00000000-0000-4000-8000-000000000002"];const store=new SqliteStateStore(join(root,"state.sqlite3")),identity=new IdentityService(store,()=>NOW,()=>ids[n++]!,()=>"a".repeat(64)),owner=identity.authenticateBearer(identity.bootstrapOwnerSession().token);return {root,store,identity,owner};}
+const execute=(store:SqliteStateStore,identity:IdentityService,owner:ReturnType<IdentityService["authenticateBearer"]>,input:Parameters<typeof executeHubImport>[3])=>executeHubImport(store,identity,owner,input,()=>NOW,plan=>plan);
+
+describe("K6b Hub import execution",()=>{
+  it("keeps chunks invisible, resumes from its durable cursor, and publishes once",()=>{
+    const f=fixture(),source=plan([
+      mapping("docs/backlog/feature/one.json","task","task",{id:"FEAT-one",title:"One",problem:["Do it"],status:"in-progress",priority:"now"}),
+      mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"NOTE-one",title:"Decision",body:{answer:42},tags:["import"]}),
+    ]),input={plan:source,targetProjectId:"imported",targetProjectName:"Imported",chunkSize:1};
+    const first=execute(f.store,f.identity,f.owner,input);
+    expect(first).toMatchObject({status:"staging",cursor:1,totalItems:2});
+    expect(f.store.getKnowledgeProject("imported")).toBeNull();
+    const published=execute(f.store,f.identity,f.owner,input);
+    expect(published).toMatchObject({status:"published",cursor:2});
+    expect(f.store.listTasks("imported",25,0).items).toMatchObject([{title:"One",status:"in_progress",priority:"now"}]);
+    expect(f.store.listMemories("imported",25,0,"",true).items).toMatchObject([{title:"Decision",status:"active",legacyId:"NOTE-one",approval:null}]);
+    expect(execute(f.store,f.identity,f.owner,input)).toEqual(published);
+    expect(f.store.listTasks("imported",25,0).items).toHaveLength(1); f.store.close();
+  });
+
+  it("rolls the entire publication back if a staged mapping cannot be linked",()=>{
+    const f=fixture(),item=mapping("docs/backlog/feature/missing.json#notes/0","task_note","historical_comment",{id:"missing:note:0",text:"Orphan"});item.legacyId="missing:note:0";const source=plan([item]),input={plan:source,targetProjectId:"failed-import",targetProjectName:"Failed"};
+    expect(()=>execute(f.store,f.identity,f.owner,input)).toThrow();
+    expect(f.store.getKnowledgeProject("failed-import")).toBeNull();
+    expect(f.store.getHubImport("hub-import:"+"irrelevant")).toBeNull(); f.store.close();
+  });
+
+  it("rejects a changed plan when resuming an existing batch",()=>{
+    const f=fixture(),original=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One"}),mapping("docs/backlog/feature/two.json","task","task",{id:"two",title:"Two"})]);
+    const input={plan:original,targetProjectId:"target",targetProjectName:"Target",chunkSize:1,batchId:"batch"}; execute(f.store,f.identity,f.owner,input);
+    const changed={...original,planHash:"f".repeat(64)};
+    expect(()=>execute(f.store,f.identity,f.owner,{...input,plan:changed})).toThrowError(expect.objectContaining({code:"revision_conflict"})); f.store.close();
+  });
+
+  it("rejects a changed target when resuming instead of publishing the stored target",()=>{
+    const f=fixture(),source=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One"}),mapping("docs/backlog/feature/two.json","task","task",{id:"two",title:"Two"})]);
+    execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:"A",targetProjectName:"A",batchId:"same",chunkSize:1});
+    expect(()=>execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:"B",targetProjectName:"B",batchId:"same",chunkSize:1})).toThrowError(expect.objectContaining({code:"revision_conflict"}));
+    expect(f.store.getKnowledgeProject("A")).toBeNull(); expect(f.store.getKnowledgeProject("B")).toBeNull(); f.store.close();
+  });
+
+  it("revalidates the exact source instead of trusting a self-consistent report",()=>{
+    const f=fixture(),source=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One"})]);
+    expect(()=>executeHubImport(f.store,f.identity,f.owner,{plan:source,targetProjectId:"target",targetProjectName:"Target"},()=>NOW)).toThrowError(expect.objectContaining({code:"invalid_request"}));
+    expect(f.store.getKnowledgeProject("target")).toBeNull(); f.store.close();
+  });
+
+  it("round-trips imported memories and their original provenance",()=>{
+    const source=fixture(),report=plan([mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"NOTE-one",title:"Decision",body:"Keep source",status:"archived",custom:{answer:42}})]);
+    execute(source.store,source.identity,source.owner,{plan:report,targetProjectId:"portable",targetProjectName:"Portable"});
+    const before=source.store.exportKnowledgeProject("portable")!,directory=join(source.root,"export");
+    exportKnowledgeProject(source.store,source.identity,"portable",directory,join(source.root,"attachments"),source.owner,{applicationVersion:"test",clock:()=>NOW}); source.store.close();
+    const target=fixture(); importKnowledgeProject(target.store,target.identity,directory,join(target.root,"attachments"),target.owner);
+    expect(target.store.exportKnowledgeProject("portable")?.importSources).toEqual(before.importSources);
+    expect(target.store.listMemories("portable",25,0,"",true).items[0]).toMatchObject({status:"archived",sources:[{kind:"repository",sourceId:"fixture",repository:"/source",commit:"d".repeat(40),path:"docs/backlog/notes/NOTE-one/note.json"}]}); target.store.close();
+  });
+
+  it.each([["attachment","attachment"]] as const)("blocks unsupported %s mappings",(sourceKind,targetKind)=>{
+    const f=fixture(),source=plan([mapping(`docs/backlog/${sourceKind}.json`,sourceKind,targetKind,{id:sourceKind,title:sourceKind})]);
+    expect(()=>execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:"target",targetProjectName:"Target"})).toThrowError(expect.objectContaining({code:"invalid_request"}));
+    expect(f.store.getKnowledgeProject("target")).toBeNull(); f.store.close();
+  });
+
+  it("publishes historical comments, completions, and resolved task relations",()=>{
+    const f=fixture(),first=mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One",links:{related_ids:["two"]}}),second=mapping("docs/backlog/feature/two.json","task","task",{id:"two",title:"Two"});
+    const comment=mapping("docs/backlog/feature/one.json#notes/0","task_note","historical_comment",{id:"one:note:0",text:"Historical context",author:"human:reviewer"});comment.legacyId="one:note:0";
+    const done=mapping("docs/backlog/done/DONE-one.json","done","task_completion",{id:"DONE-one",item_id:"one",title:"One completed",summary:"Shipped"});
+    const report=plan([first,comment,second,done]);execute(f.store,f.identity,f.owner,{plan:report,targetProjectId:"complete",targetProjectName:"Complete"});
+    const tasks=f.store.listTasks("complete",25,0).items;expect(tasks.find(task=>task.title==="One")?.status).toBe("done");expect(tasks).toHaveLength(2);
+    const thread=f.store.listThreads("complete",25,0).items[0]!;expect(f.store.listReplies("complete",thread.id,25,0).items[0]?.body).toBe("Historical context");
+    expect(f.store.listRelations("complete","task",tasks.find(task=>task.title==="One")!.id,25,0).items.some(relation=>relation.type==="relates_to")).toBe(true);f.store.close();
+  });
+
+  it("reimports changed source into an existing project only at its expected revision",()=>{
+    const f=fixture(),initial=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"Before",problem:["Initial"]})]);
+    execute(f.store,f.identity,f.owner,{plan:initial,targetProjectId:"incremental",targetProjectName:"Incremental"});
+    const changed=atCommit(plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"After",problem:["Changed"]})]),"f".repeat(40));
+    execute(f.store,f.identity,f.owner,{plan:changed,targetProjectId:"incremental",targetProjectName:"Incremental",expectedTargetRevision:1});
+    expect(f.store.getKnowledgeProject("incremental")?.revision).toBe(2);expect(f.store.listTasks("incremental",25,0).items).toMatchObject([{title:"After",description:"Changed",revision:2}]);
+    const stale=atCommit(changed,"a".repeat(40));expect(()=>execute(f.store,f.identity,f.owner,{plan:stale,targetProjectId:"incremental",targetProjectName:"Incremental",expectedTargetRevision:1})).toThrowError(expect.objectContaining({code:"revision_conflict"}));f.store.close();
+  });
+
+  it.each(["task","memory"] as const)("blocks reimport when an imported %s was changed locally",kind=>{
+    const f=fixture(),item=kind==="task"
+      ? mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"Before",problem:["Initial"]})
+      : mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"NOTE-one",title:"Before",body:"Initial"});
+    execute(f.store,f.identity,f.owner,{plan:plan([item]),targetProjectId:"protected",targetProjectName:"Protected"});
+    const context={actor:f.owner,projectId:"protected",idempotencyKey:`local-${kind}`,requestHash:"b".repeat(64)};
+    if(kind==="task"){
+      const task=f.store.listTasks("protected",25,0).items[0]!;
+      f.store.updateTask({...task,description:"Local task change",revision:task.revision+1,updatedAt:NOW},task.revision,context);
+    }else{
+      const memory=f.store.listMemories("protected",25,0,"",true).items[0]!;
+      f.store.saveMemory({...memory,body:"Local memory change",revision:memory.revision+1,updatedAt:NOW},memory.revision,"updated",context);
+    }
+    const changed=atCommit(plan([kind==="task"
+      ? mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"From source",problem:["Changed"]})
+      : mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"NOTE-one",title:"From source",body:"Changed"})]),"f".repeat(40));
+    expect(()=>execute(f.store,f.identity,f.owner,{plan:changed,targetProjectId:"protected",targetProjectName:"Protected",expectedTargetRevision:1})).toThrowError(expect.objectContaining({code:"revision_conflict"}));
+    expect(f.store.getKnowledgeProject("protected")?.revision).toBe(1);
+    if(kind==="task") expect(f.store.listTasks("protected",25,0).items[0]?.description).toBe("Local task change");
+    else expect(f.store.listMemories("protected",25,0,"",true).items[0]?.body).toBe("Local memory change");
+    f.store.close();
+  });
+
+  it("verifies and installs attachment bytes for their imported note",()=>{
+    const f=fixture(),bytes=Buffer.from("attachment proof"),hash=createHash("sha256").update(bytes).digest("hex"),note=mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"NOTE-one",title:"Note",body:"Body"});
+    const attachment:HubImportMapping={sourcePath:"docs/backlog/notes/NOTE-one/proof.txt",sourceKind:"attachment",targetKind:"attachment",legacyId:null,disposition:"mapped",sourceSha256:hash,size:bytes.byteLength,mappedFields:[],sourceOnlyFields:[]},report=plan([note,attachment]),directory=join(f.root,"attachments");
+    executeHubImport(f.store,f.identity,f.owner,{plan:report,targetProjectId:"files",targetProjectName:"Files",attachmentDirectory:directory},()=>NOW,value=>value,()=>bytes);
+    const memory=f.store.listMemories("files",25,0,"",true).items[0]!;expect(f.store.listAttachments("files","memory",memory.id,25,0).items).toMatchObject([{filename:"proof.txt",sha256:hash,size:bytes.byteLength}]);
+    expect(readFileSync(join(directory,hash.slice(0,2),hash))).toEqual(bytes);f.store.close();
+  });
+
+  it("removes newly installed attachment objects when database publication rolls back",()=>{
+    const f=fixture(),bytes=Buffer.from("rollback proof"),hash=createHash("sha256").update(bytes).digest("hex"),note=mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"NOTE-one",title:"Note",body:"Body"});
+    const attachment:HubImportMapping={sourcePath:"docs/backlog/notes/NOTE-one/proof.txt",sourceKind:"attachment",targetKind:"attachment",legacyId:null,disposition:"mapped",sourceSha256:hash,size:bytes.byteLength,mappedFields:[],sourceOnlyFields:[]},orphan=mapping("docs/backlog/feature/missing.json#notes/0","task_note","historical_comment",{id:"missing:note:0",text:"Orphan"});orphan.legacyId="missing:note:0";
+    const report=plan([note,attachment,orphan]),directory=join(f.root,"attachments");expect(()=>executeHubImport(f.store,f.identity,f.owner,{plan:report,targetProjectId:"rollback-files",targetProjectName:"Rollback",attachmentDirectory:directory},()=>NOW,value=>value,()=>bytes)).toThrow();
+    expect(f.store.getKnowledgeProject("rollback-files")).toBeNull();expect(existsSync(join(directory,hash.slice(0,2),hash))).toBe(false);f.store.close();
+  });
+});

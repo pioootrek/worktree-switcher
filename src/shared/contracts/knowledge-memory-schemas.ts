@@ -6,6 +6,7 @@ const page = { limit: z.number().int().min(1).max(100).optional(), offset: z.num
 export const knowledgeSourceSchema = z.union([
   z.strictObject({ kind: z.enum(["thread", "reply", "task", "memory"]), id, revision }),
   z.strictObject({ kind: z.literal("external"), label: z.string().trim().min(1).max(200), url: z.string().url().max(2048).refine(value => /^https?:\/\//i.test(value)) }),
+  z.strictObject({ kind:z.literal("repository"), sourceId:id, repository:z.string().trim().min(1).max(4096), commit:z.string().regex(/^[a-f0-9]{40}$/), path:z.string().trim().min(1).max(4096) }),
 ]);
 const memory = {
   title: z.string().trim().min(1).max(200), body: z.string().trim().min(1).max(65536),

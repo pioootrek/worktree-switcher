@@ -25,12 +25,12 @@ import type {
   Principal,
   PrincipalCredential,
 } from "@/server/modules/identity";
-import type { KnowledgeHistoryEntry, KnowledgeMutationContext, KnowledgeMutationResult, KnowledgePage, KnowledgeProjectSnapshot, KnowledgeRelation, KnowledgeReply, KnowledgeRuntimeLinkResult, KnowledgeStore, KnowledgeTask, KnowledgeThread } from "@/server/modules/knowledge";
+import type { HubImportBatch, HubImportExecutionStore, HubImportMapping, KnowledgeHistoryEntry, KnowledgeMutationContext, KnowledgeMutationResult, KnowledgePage, KnowledgeProjectSnapshot, KnowledgeRelation, KnowledgeReply, KnowledgeRuntimeLinkResult, KnowledgeStore, KnowledgeTask, KnowledgeThread } from "@/server/modules/knowledge";
 import { KnowledgeError } from "@/server/modules/knowledge";
 import Database from "better-sqlite3";
-import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, resolve, sep } from "node:path";
 import { initializeSchema } from "./migrations";
 import { IdentityQueries } from "./identity-queries";
 import { KnowledgeQueries } from "./knowledge-queries";
@@ -40,7 +40,7 @@ import { RemoteVerificationQueries } from "./remote-verification-queries";
 import { StorageQueries } from "./storage-queries";
 import { TestRunQueries } from "./test-run-queries";
 
-export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeStore, RemoteVerificationStore, RemoteVerificationAttemptStore, RemoteVerificationProvisioningStore {
+export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeStore, HubImportExecutionStore, RemoteVerificationStore, RemoteVerificationAttemptStore, RemoteVerificationProvisioningStore {
   private readonly database: Database.Database;
   private readonly testRuns: TestRunQueries;
   private readonly storage: StorageQueries;
@@ -65,6 +65,136 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
   backup(destination: string): Promise<void> { return this.database.backup(destination).then(() => undefined); }
   schemaVersion(): number { return (this.database.prepare("SELECT max(version) version FROM schema_migrations").get() as { version: number }).version; }
 
+  private mapHubImportBatch(row: Record<string, unknown>): HubImportBatch {
+    return {
+      id: String(row.id), planId: String(row.plan_id), planHash: String(row.plan_hash), sourceId: String(row.source_id), sourceRepository: String(row.source_repository),
+      sourceCommit: String(row.source_commit), targetProjectId: String(row.target_project_id), targetProjectName: String(row.target_project_name),
+      expectedTargetRevision: row.expected_target_revision === null ? null : Number(row.expected_target_revision),
+      actorPrincipalId: String(row.actor_principal_id), status: row.status as HubImportBatch["status"], cursor: Number(row.cursor),
+      totalItems: Number(row.total_items), createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+      publishedAt: row.published_at === null ? null : String(row.published_at), error: row.error === null ? null : String(row.error),
+    };
+  }
+
+  beginHubImport(input: Omit<HubImportBatch, "status" | "cursor" | "createdAt" | "updatedAt" | "publishedAt" | "error">, now: string): HubImportBatch {
+    return this.database.transaction(() => {
+      const existing = this.database.prepare("SELECT * FROM knowledge_import_batches WHERE id = ? OR (source_id = ? AND source_commit = ? AND plan_hash = ? AND target_project_id = ?)")
+        .get(input.id, input.sourceId, input.sourceCommit, input.planHash, input.targetProjectId) as Record<string, unknown> | undefined;
+      if (existing) return this.mapHubImportBatch(existing);
+      const target=this.database.prepare("SELECT name,revision FROM knowledge_projects WHERE id = ?").get(input.targetProjectId) as {name:string;revision:number}|undefined;
+      if(input.expectedTargetRevision===null ? Boolean(target) : !target||target.revision!==input.expectedTargetRevision||target.name!==input.targetProjectName) throw new KnowledgeError("revision_conflict", "Import target revision or identity changed.");
+      this.database.prepare(`INSERT INTO knowledge_import_batches
+        (id,plan_id,plan_hash,source_id,source_repository,source_commit,target_project_id,target_project_name,expected_target_revision,actor_principal_id,status,cursor,total_items,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?, 'staging',0,?,?,?)`).run(input.id,input.planId,input.planHash,input.sourceId,input.sourceRepository,input.sourceCommit,input.targetProjectId,input.targetProjectName,input.expectedTargetRevision,input.actorPrincipalId,input.totalItems,now,now);
+      return this.getHubImport(input.id)!;
+    }).immediate();
+  }
+
+  getHubImport(batchId: string): HubImportBatch | null {
+    const row = this.database.prepare("SELECT * FROM knowledge_import_batches WHERE id = ?").get(batchId) as Record<string, unknown> | undefined;
+    return row ? this.mapHubImportBatch(row) : null;
+  }
+
+  stageHubImportChunk(batchId: string, expectedCursor: number, mappings: HubImportMapping[], now: string): HubImportBatch {
+    return this.database.transaction(() => {
+      const batch=this.getHubImport(batchId); if(!batch||batch.status!=="staging"||batch.cursor!==expectedCursor) throw new KnowledgeError("revision_conflict","Import cursor changed.");
+      if(expectedCursor+mappings.length>batch.totalItems) throw new KnowledgeError("invalid_request","Import chunk exceeds its plan.");
+      const statement=this.database.prepare("INSERT INTO knowledge_import_staging(batch_id,ordinal,mapping_json) VALUES (?,?,?)");
+      mappings.forEach((mapping,index)=>statement.run(batchId,expectedCursor+index,JSON.stringify(mapping)));
+      this.database.prepare("UPDATE knowledge_import_batches SET cursor = ?, updated_at = ? WHERE id = ?").run(expectedCursor+mappings.length,now,batchId);
+      return this.getHubImport(batchId)!;
+    }).immediate();
+  }
+
+  publishHubImport(batchId: string, now: string, attachmentDirectory?: string): HubImportBatch {
+    const installed:string[]=[];
+    try{return this.database.transaction(() => {
+      const batch=this.getHubImport(batchId); if(!batch) throw new KnowledgeError("not_found","Import batch not found.");
+      if(batch.status==="published") return batch;
+      if(batch.status!=="staging"||batch.cursor!==batch.totalItems) throw new KnowledgeError("revision_conflict","Import batch is incomplete.");
+      const target=this.database.prepare("SELECT name,revision FROM knowledge_projects WHERE id = ?").get(batch.targetProjectId) as {name:string;revision:number}|undefined;
+      if(batch.expectedTargetRevision===null ? Boolean(target) : !target||target.revision!==batch.expectedTargetRevision||target.name!==batch.targetProjectName) throw new KnowledgeError("revision_conflict","Import target changed before publication.");
+      const staged=this.database.prepare("SELECT ordinal,mapping_json FROM knowledge_import_staging WHERE batch_id = ? ORDER BY ordinal").all(batchId) as Array<{ordinal:number;mapping_json:string}>;
+      if(staged.length!==batch.totalItems||staged.some((row,index)=>row.ordinal!==index)) throw new KnowledgeError("invalid_request","Import staging is incomplete.");
+      const mappings=staged.map(row=>JSON.parse(row.mapping_json) as HubImportMapping);
+      if(batch.expectedTargetRevision===null){this.database.prepare("INSERT INTO knowledge_projects(id,name,status,revision,created_at,updated_at) VALUES (?,?,'active',1,?,?)").run(batch.targetProjectId,batch.targetProjectName,now,now);
+        this.database.prepare("INSERT INTO knowledge_project_grants(principal_id,project_id,permissions_json,revoked_at) VALUES (?,?,?,NULL)").run(batch.actorPrincipalId,batch.targetProjectId,JSON.stringify(["attachments:read","attachments:write","knowledge:approve","knowledge:export","knowledge:import","knowledge:read","knowledge:write"]));
+      }else this.database.prepare("UPDATE knowledge_projects SET revision=revision+1,updated_at=? WHERE id=? AND revision=?").run(now,batch.targetProjectId,batch.expectedTargetRevision);
+      const stable=(kind:string,mapping:HubImportMapping)=>createHash("sha256").update(`${batch.targetProjectId}\0${batch.sourceId}\0${mapping.sourcePath}\0${kind}`).digest("hex").slice(0,32);
+      const assertImportTargetUnmodified=(mapping:HubImportMapping,targetKind:"task"|"memory",targetId:string)=>{
+        const sourceId=stable("source",mapping),table=targetKind==="task"?"knowledge_tasks":"knowledge_memories";
+        const current=this.database.prepare(`SELECT revision FROM ${table} WHERE id = ? AND project_id = ?`).get(targetId,batch.targetProjectId) as {revision:number}|undefined;
+        const previous=this.database.prepare("SELECT target_kind,target_id,target_revision FROM knowledge_import_sources WHERE id = ? AND project_id = ?").get(sourceId,batch.targetProjectId) as {target_kind:string|null;target_id:string|null;target_revision:number|null}|undefined;
+        if(!current) return;
+        if(!previous||previous.target_kind!==targetKind||previous.target_id!==targetId||previous.target_revision!==current.revision) throw new KnowledgeError("revision_conflict",`Locally changed imported ${targetKind} blocks publication: ${mapping.sourcePath}`);
+      };
+      const text=(value:unknown,fallback:string)=>typeof value==="string"&&value.trim()?value.trim():fallback;
+      const list=(value:unknown)=>Array.isArray(value)?value.filter(item=>typeof item==="string").join("\n"):"";
+      const taskTargets=new Map<string,string>();
+      for(const mapping of mappings) if(mapping.targetKind==="task"&&mapping.legacyId) taskTargets.set(mapping.legacyId,stable("task",mapping));
+      const threadTargets=new Map<string,string>();
+      for(const mapping of mappings){
+        const payload=(mapping.originalPayload&&typeof mapping.originalPayload==="object"&&!Array.isArray(mapping.originalPayload)?mapping.originalPayload:{}) as Record<string,unknown>;
+        let targetId:string|null=null;
+        if(mapping.targetKind==="task"){
+          targetId=stable("task",mapping); const rawStatus=text(payload.status,"open").replace("-","_"); const status=["open","in_progress","blocked","done","archived"].includes(rawStatus)?rawStatus:"open";
+          const priority=["now","next","later"].includes(text(payload.priority,"later"))?text(payload.priority,"later"):"later";
+          const description=[list(payload.problem),list(payload.scope),list(payload.validation)].filter(Boolean).join("\n\n")||`Imported from ${mapping.sourcePath}`;
+          assertImportTargetUnmodified(mapping,"task",targetId);
+          this.database.prepare("INSERT INTO knowledge_tasks(id,project_id,title,description,status,priority,revision,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,1,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,status=excluded.status,priority=excluded.priority,revision=knowledge_tasks.revision+1,updated_at=excluded.updated_at")
+            .run(targetId,batch.targetProjectId,text(payload.title,mapping.legacyId??mapping.sourcePath),description,status,priority,batch.actorPrincipalId,now,now);
+        } else if(mapping.targetKind==="memory"){
+          targetId=stable("memory",mapping); const body=typeof payload.body==="string"?payload.body:JSON.stringify(payload.body??payload);
+          const memoryStatus=payload.status==="archived"?"archived":"active";
+          assertImportTargetUnmodified(mapping,"memory",targetId);
+          this.database.prepare("INSERT INTO knowledge_memories(id,project_id,title,body,category,tags_json,legacy_id,sources_json,status,superseded_by_json,approval_json,revision,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,NULL,NULL,1,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,body=excluded.body,category=excluded.category,tags_json=excluded.tags_json,legacy_id=excluded.legacy_id,sources_json=excluded.sources_json,status=excluded.status,approval_json=NULL,revision=knowledge_memories.revision+1,updated_at=excluded.updated_at")
+            .run(targetId,batch.targetProjectId,text(payload.title,mapping.legacyId??mapping.sourcePath),body||"Imported empty note","note",JSON.stringify(Array.isArray(payload.tags)?payload.tags:[]),mapping.legacyId,JSON.stringify([{kind:"repository",sourceId:batch.sourceId,repository:batch.sourceRepository,commit:batch.sourceCommit,path:mapping.sourcePath}]),memoryStatus,batch.actorPrincipalId,now,now);
+        } else if(mapping.targetKind==="task_completion"){
+          const itemId=typeof payload.item_id==="string"?payload.item_id:null; targetId=itemId?taskTargets.get(itemId)??null:null;
+          if(targetId){this.database.prepare("UPDATE knowledge_tasks SET status='done', revision=revision+1, updated_at=? WHERE id=? AND project_id=?").run(now,targetId,batch.targetProjectId);}
+          else {targetId=stable("task",mapping);taskTargets.set(mapping.legacyId??mapping.sourcePath,targetId);this.database.prepare("INSERT INTO knowledge_tasks(id,project_id,title,description,status,priority,revision,created_by,created_at,updated_at) VALUES (?,?,?,?,'done','later',1,?,?,?)")
+            .run(targetId,batch.targetProjectId,text(payload.title,mapping.legacyId??mapping.sourcePath),text(payload.summary,`Imported completion from ${mapping.sourcePath}`),batch.actorPrincipalId,now,now);}
+        } else if(mapping.targetKind==="historical_comment"){
+          const parentLegacy=mapping.legacyId?.replace(/:note:\d+$/,"")??"",taskId=taskTargets.get(parentLegacy);
+          if(!taskId) throw new KnowledgeError("invalid_request",`Historical comment has no imported task: ${mapping.sourcePath}`);
+          let threadId=threadTargets.get(parentLegacy); if(!threadId){const parent=mappings.find(item=>item.targetKind==="task"&&item.legacyId===parentLegacy);if(!parent) throw new KnowledgeError("invalid_request","Historical comment parent is missing.");threadId=stable("thread",parent);threadTargets.set(parentLegacy,threadId);
+            this.database.prepare("INSERT INTO knowledge_threads(id,project_id,title,body,revision,created_by,created_at,updated_at) VALUES (?,?,?,?,1,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,body=excluded.body,revision=knowledge_threads.revision+1,updated_at=excluded.updated_at").run(threadId,batch.targetProjectId,`Imported discussion: ${parentLegacy}`,`Historical comments imported from ${parent.sourcePath}`,batch.actorPrincipalId,now,now);
+            const relationId=stable("task-thread",parent);this.database.prepare("INSERT OR IGNORE INTO knowledge_relations(id,project_id,type,source_kind,source_id,target_kind,target_id,revision,created_by,created_at) VALUES (?,?,'derived_from','task',?,'thread',?,1,?,?)").run(relationId,batch.targetProjectId,taskId,threadId,batch.actorPrincipalId,now);
+          }
+          targetId=stable("reply",mapping);this.database.prepare("INSERT INTO knowledge_replies(id,project_id,thread_id,body,revision,created_by,created_at,updated_at) VALUES (?,?,?,?,1,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,revision=knowledge_replies.revision+1,updated_at=excluded.updated_at").run(targetId,batch.targetProjectId,threadId,text(payload.text,JSON.stringify(payload)),batch.actorPrincipalId,now,now);
+        } else if(mapping.targetKind==="attachment"){
+          if(!attachmentDirectory) throw new KnowledgeError("invalid_request","Attachment directory is required.");
+          const slash=mapping.sourcePath.lastIndexOf("/"),notePath=`${mapping.sourcePath.slice(0,slash+1)}note.json`,parent=mappings.find(item=>item.sourcePath===notePath&&item.targetKind==="memory");
+          if(!parent) throw new KnowledgeError("invalid_request",`Attachment has no imported note: ${mapping.sourcePath}`); const memoryId=stable("memory",parent);
+          const encoded=typeof payload.dataBase64==="string"?payload.dataBase64:"",bytes=Buffer.from(encoded,"base64"),hash=createHash("sha256").update(bytes).digest("hex");
+          if(bytes.byteLength!==mapping.size||hash!==mapping.sourceSha256||bytes.toString("base64")!==encoded) throw new KnowledgeError("revision_conflict",`Staged attachment is invalid: ${mapping.sourcePath}`);
+          const root=resolve(attachmentDirectory),file=resolve(root,hash.slice(0,2),hash);if(!file.startsWith(root+sep)) throw new KnowledgeError("invalid_request","Attachment target is unsafe.");mkdirSync(dirname(file),{recursive:true});
+          if(existsSync(file)){const current=readFileSync(file);if(current.byteLength!==bytes.byteLength||createHash("sha256").update(current).digest("hex")!==hash) throw new KnowledgeError("invalid_request","Existing attachment object conflicts with the import.");}
+          else{writeFileSync(file,bytes,{flag:"wx",mode:0o600});chmodSync(file,0o600);installed.push(file);}
+          targetId=stable("attachment",mapping);this.database.prepare("INSERT INTO knowledge_attachments(id,project_id,record_kind,record_id,filename,media_type,size,sha256,created_by,created_at) VALUES (?,?,'memory',?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET filename=excluded.filename,media_type=excluded.media_type,size=excluded.size,sha256=excluded.sha256")
+            .run(targetId,batch.targetProjectId,memoryId,text(payload.fileName,mapping.sourcePath.slice(slash+1)),text(payload.mediaType,"application/octet-stream"),bytes.byteLength,hash,batch.actorPrincipalId,now);
+        }
+        const sourceId=stable("source",mapping);
+        this.database.prepare(`INSERT INTO knowledge_import_sources
+          (id,project_id,batch_id,source_id,source_repository,source_commit,source_path,legacy_id,source_sha256,mapping_version,target_kind,target_id,original_payload_json,created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET batch_id=excluded.batch_id,source_repository=excluded.source_repository,source_commit=excluded.source_commit,source_sha256=excluded.source_sha256,target_kind=excluded.target_kind,target_id=excluded.target_id,original_payload_json=excluded.original_payload_json,created_at=excluded.created_at`).run(sourceId,batch.targetProjectId,batch.id,batch.sourceId,batch.sourceRepository,batch.sourceCommit,mapping.sourcePath,mapping.legacyId,mapping.sourceSha256,mapping.targetKind,targetId,mapping.targetKind==="attachment"||mapping.originalPayload===undefined?null:JSON.stringify(mapping.originalPayload),now);
+      }
+      for(const mapping of mappings){if(mapping.targetKind!=="task"||!mapping.legacyId) continue;const payload=(mapping.originalPayload??{}) as Record<string,unknown>,links=payload.links&&typeof payload.links==="object"&&!Array.isArray(payload.links)?payload.links as Record<string,unknown>:null,related=Array.isArray(links?.related_ids)?links.related_ids.filter((value):value is string=>typeof value==="string"):[];
+        for(const legacy of related){const source=taskTargets.get(mapping.legacyId),target=taskTargets.get(legacy);if(!source||!target||source===target) continue;const key=[source,target].sort().join("\0"),id=createHash("sha256").update(`${batch.targetProjectId}\0${batch.sourceId}\0relates_to\0${key}`).digest("hex").slice(0,32);this.database.prepare("INSERT OR IGNORE INTO knowledge_relations(id,project_id,type,source_kind,source_id,target_kind,target_id,revision,created_by,created_at) VALUES (?,?,'relates_to','task',?,'task',?,1,?,?)").run(id,batch.targetProjectId,source,target,batch.actorPrincipalId,now);}
+      }
+      for(const mapping of mappings){
+        const sourceId=stable("source",mapping),targetTable=mapping.targetKind==="task"||mapping.targetKind==="task_completion"?"knowledge_tasks":mapping.targetKind==="memory"?"knowledge_memories":mapping.targetKind==="historical_comment"?"knowledge_replies":null;
+        if(!targetTable) continue;
+        const source=this.database.prepare("SELECT target_id FROM knowledge_import_sources WHERE id = ?").get(sourceId) as {target_id:string|null}|undefined;
+        if(!source?.target_id) continue;
+        const target=this.database.prepare(`SELECT revision FROM ${targetTable} WHERE id = ? AND project_id = ?`).get(source.target_id,batch.targetProjectId) as {revision:number}|undefined;
+        if(target) this.database.prepare("UPDATE knowledge_import_sources SET target_revision = ? WHERE id = ?").run(target.revision,sourceId);
+      }
+      this.database.prepare("UPDATE knowledge_import_batches SET status='published', published_at=?, updated_at=? WHERE id=?").run(now,now,batchId);
+      return this.getHubImport(batchId)!;
+    }).immediate();}catch(error){for(const file of installed.reverse())rmSync(file,{force:true});throw error;}
+  }
+
   exportKnowledgeProject(projectId: string): KnowledgeProjectSnapshot | null {
     const project = this.database.prepare("SELECT * FROM knowledge_projects WHERE id = ?").get(projectId) as Record<string, unknown> | undefined;
     if (!project) return null;
@@ -80,8 +210,9 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
       const approval = JSON.parse(row.approval_json) as { principalId?: unknown };
       if (typeof approval.principalId === "string") required.add(approval.principalId);
     }
+    const importSources=table("knowledge_import_sources").map(row=>{const result={...row};delete result.batch_id;return result;});
     return { project, threads: table("knowledge_threads"), replies: table("knowledge_replies"), tasks: table("knowledge_tasks"), memories,
-      relations: table("knowledge_relations"), history, attachments: table("knowledge_attachments"), requiredPrincipals: [...required].sort() };
+      relations: table("knowledge_relations"), history, attachments: table("knowledge_attachments"), importSources, requiredPrincipals: [...required].sort() };
   }
 
   importKnowledgeProject(snapshot: KnowledgeProjectSnapshot): void {
@@ -98,6 +229,7 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
         knowledge_relations:["id","project_id","type","source_kind","source_id","target_kind","target_id","revision","created_by","created_at"],
         knowledge_history:["ordinal","project_id","record_kind","record_id","operation","previous_json","principal_id","authentication_method","revision","created_at"],
         knowledge_attachments:["id","project_id","record_kind","record_id","filename","media_type","size","sha256","created_by","created_at"],
+        knowledge_import_sources:["id","project_id","source_id","source_repository","source_commit","source_path","legacy_id","source_sha256","mapping_version","target_kind","target_id","original_payload_json","created_at","target_revision"],
       };
       const insert = (table: string, rows: Array<Record<string, unknown>>) => {
         const expected=columns[table]!;
@@ -111,6 +243,7 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
       insert("knowledge_projects", [snapshot.project]);
       insert("knowledge_threads", snapshot.threads); insert("knowledge_tasks", snapshot.tasks); insert("knowledge_memories", snapshot.memories);
       insert("knowledge_replies", snapshot.replies); insert("knowledge_relations", snapshot.relations); insert("knowledge_history", snapshot.history); insert("knowledge_attachments", snapshot.attachments);
+      insert("knowledge_import_sources", snapshot.importSources);
     }).immediate();
   }
 
