@@ -563,7 +563,7 @@ test("agent context remains copyable when clipboard access is denied", async ({ 
   await page.reload();
   await page.getByRole("tab", { name: "Backlog", exact: true }).click();
   await page.getByRole("link", { name: "K4 task", exact: true }).click();
-  const exported = page.waitForRequest(request => request.url().endswith("/api/knowledge") && request.postDataJSON()?.operation === "export_context");
+  const exported = page.waitForRequest(request => request.url().endsWith("/api/knowledge") && request.postDataJSON()?.operation === "export_context");
   await page.getByRole("button", { name: "Copy context for agent", exact: true }).click();
   await expect(page.getByLabel("Context to copy", { exact: true })).not.toHaveValue("");
   await expect(page.getByText("The export contains this context page", { exact: false })).toBeVisible();
