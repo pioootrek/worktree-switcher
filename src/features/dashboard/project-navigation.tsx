@@ -2,15 +2,16 @@
 
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
 import { useI18n } from "@/i18n/provider";
-import { FlaskConical, GitBranch, HardDrive, ScrollText } from "lucide-react";
+import { BookOpen, FlaskConical, GitBranch, HardDrive, ScrollText } from "lucide-react";
 
-export type ProjectSection = "worktrees" | "tests" | "resources" | "logs";
+export type ProjectSection = "worktrees" | "tests" | "resources" | "logs" | "knowledge";
 
 export const projectSections = [
   { id: "worktrees", label: "dashboard.navWorktrees", icon: GitBranch },
   { id: "tests", label: "dashboard.navTests", icon: FlaskConical },
   { id: "resources", label: "dashboard.navResources", icon: HardDrive },
   { id: "logs", label: "project.logs", icon: ScrollText },
+  { id: "knowledge", label: "knowledge.title", icon: BookOpen },
 ] as const;
 
 export function ProjectNavigation({ section, onSelect, projectName }: {
@@ -37,11 +38,11 @@ export function ProjectNavigation({ section, onSelect, projectName }: {
                 <SidebarMenuItem key={id}>
                   <SidebarMenuButton
                     type="button"
-                    isActive={section === id && !!projectName}
-                    aria-current={section === id && projectName ? "page" : undefined}
+                    isActive={section === id && (!!projectName || id === "knowledge")}
+                    aria-current={section === id && (projectName || id === "knowledge") ? "page" : undefined}
                     aria-label={t(label)}
                     tooltip={t(label)}
-                    disabled={!projectName}
+                    disabled={!projectName && id !== "knowledge"}
                     className="h-11 data-active:bg-sidebar-accent data-active:text-primary"
                     onClick={() => { onSelect(id); setOpenMobile(false); }}
                   >

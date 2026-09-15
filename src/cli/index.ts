@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { parseKnowledgeCommandArgs, runKnowledgeCommand } from "./knowledge-management";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { homedir, networkInterfaces } from "node:os";
@@ -18,6 +19,7 @@ import {
 } from "./controller-addresses";
 import { writeCliLine } from "./output";
 import { runIdentityCommand } from "./identity-management";
+import { runBackupCommand } from "./backup-management";
 import { pairingUrl } from "./pairing-url";
 import { openProjectGateway, runDoctorCommand, runProjectCommand } from "./project-management";
 import { localDashboardEndpoint, publicDashboardEndpoint, readServiceAccess, removeServiceAccess, writeServiceAccess } from "./service-access";
@@ -30,6 +32,7 @@ import { EventStream } from "../server/events";
 import { FileLogWriter } from "../server/log-writer";
 import { ProjectLifecycle } from "../server/modules/lifecycle";
 import { IdentityService } from "../server/modules/identity";
+import { KnowledgeAttachmentService, KnowledgeService } from "../server/modules/knowledge";
 import { createMcpControllerServer } from "../server/mcp-http-server";
 import { SystemGitWorktreeReader } from "../server/git-worktrees";
 import { createControllerServer } from "../server/http-server";
@@ -55,7 +58,10 @@ function optionalPositiveNumber(value: string | undefined, label: string): numbe
 async function main(): Promise<void> {
   const locale = systemLocale(process.env);
   const command = process.argv[2] && !process.argv[2].startsWith("-") ? process.argv[2] : "start";
-  const paths = resolveAppPaths(option("--data-dir"), option("--state-dir"));
+  const knowledgeArgs = command === "knowledge" ? parseKnowledgeCommandArgs(process.argv.slice(3)) : undefined;
+  const paths = knowledgeArgs
+    ? resolveAppPaths(knowledgeArgs.dataDir, knowledgeArgs.stateDir)
+    : resolveAppPaths(option("--data-dir"), option("--state-dir"));
   if (command === "service") {
     await handleServiceCommand(process.argv.slice(3), paths);
     return;
@@ -64,8 +70,16 @@ async function main(): Promise<void> {
     writeCliLine(paths.databasePath);
     return;
   }
+  if (command === "knowledge") {
+    await runKnowledgeCommand(knowledgeArgs!.args, paths, { write: writeCliLine });
+    return;
+  }
   if (command === "identity") {
     await runIdentityCommand(process.argv.slice(3), paths, { write: writeCliLine });
+    return;
+  }
+  if (command === "backup") {
+    await runBackupCommand(process.argv.slice(3), paths, packageJson.version, writeCliLine);
     return;
   }
   if (command === "project" || command === "doctor") {
@@ -126,8 +140,10 @@ async function main(): Promise<void> {
     kinds: ["tests", "controller"],
     ...(projectId ? { projectIds: [projectId] } : {}),
   }));
-  const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs, undefined, storage, undefined, undefined, tests, lifecycle);
   const identity = new IdentityService(store);
+  const attachments = new KnowledgeAttachmentService(store, identity, paths.knowledgeAttachmentDirectory);
+  const knowledge = new KnowledgeService(store, identity, undefined, undefined, events.publishKnowledge, attachments);
+  const service = new ControlService(store, new SystemGitWorktreeReader(), processes, logs, undefined, storage, undefined, undefined, tests, lifecycle, knowledge);
   const accessToken = randomBytes(32).toString("base64url");
   const sessionId = randomBytes(8).toString("hex");
   const mcpSessions = new Set<string>();

@@ -6,14 +6,15 @@
     "related_ids": [
       "FEAT-20260905-shared-project-memory"
     ],
-    "summary": "Plan K0-K9: kontrakty i tożsamość, serwis/SQLite, UI/MCP/CLI, pamięć i wyszukiwanie, backup/restore, import, pilotaż, playbooki i instrukcje. Zawiera mapowanie danych Huba, zależności, scenariusze negatywne i warunki odbioru. Propozycja implementacji; bez zmian runtime i migracji."
+    "summary": "Plan K0-K9 przeniesienia funkcjonalności Huba. Aktualna decyzja właściciela: najpierw działający przepływ na SQLite; migracja do PostgreSQL później. Zastępuje wcześniejsze PostgreSQL-first i wymóg dwóch adapterów. K1 nadal wymaga domknięcia dostępu właściciela oraz zarządzania agentami i grantami."
   },
   "created": "2026-09-13",
   "files": [
     "implementation-plan.md",
     "k0-baseline.json",
     "k0-contract.md",
-    "k0-hub-inventory.json"
+    "k0-hub-inventory.json",
+    "database-portability.md"
   ],
   "id": "NOTE-20260913-knowledge-backlog-implementation",
   "last_reviewed": "2026-09-13",

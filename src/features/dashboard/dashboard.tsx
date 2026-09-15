@@ -17,25 +17,47 @@ import { TestQueueDialog } from "@/features/verification/test-queue-dialog";
 import { dashboardSummary } from "@/i18n/messages";
 import { useI18n } from "@/i18n/provider";
 import { AlertTriangle, CheckCircle2, Languages, LoaderCircle, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ProjectNavigation, projectSections, type ProjectSection } from "./project-navigation";
 import { ProjectSwitcher } from "./project-switcher";
 import { AllProjectsWorktrees } from "@/features/projects/all-projects-worktrees";
 import { ALL_PROJECTS, useProjectSelection } from "./project-selection";
+import { KnowledgeDashboard } from "@/features/knowledge/knowledge-dashboard";
 import { useDashboard } from "./use-dashboard";
 
 export function Dashboard() {
   const { locale, setLocale, t } = useI18n();
-  const { data, observedAt, token, loading, error, notice, dismissNotice, mutate, setError, runningCount } = useDashboard();
+  const { data, observedAt, token, loading, error, notice, dismissNotice, mutate, setError, runningCount, knowledgeToken, knowledgeSessionVersion, changeKnowledgeToken, knowledgeChange } = useDashboard();
   const [section, setSection] = useState<ProjectSection>("worktrees");
+  useEffect(() => {
+    const sync = () => {
+      const view = new URLSearchParams(window.location.search).get("view");
+      setSection(projectSections.find(item => item.id === view)?.id ?? "worktrees");
+    };
+    const timer = setTimeout(sync, 0);
+    window.addEventListener("popstate", sync);
+    return () => { clearTimeout(timer); window.removeEventListener("popstate", sync); };
+  }, []);
   const [dialogOpen, setDialogOpen] = useState(false);
   const { selectedProjectId, selectProject } = useProjectSelection();
   const allProjects = selectedProjectId === ALL_PROJECTS;
   const selectedSnapshot = data.projects.find(({ project }) => project.id === selectedProjectId) ?? data.projects[0];
 
+  const selectSection = (next: ProjectSection) => {
+    setSection(next);
+    const url = new URL(window.location.href);
+    if (next === "worktrees") url.searchParams.delete("view");
+    else url.searchParams.set("view", next);
+    if (next !== "knowledge") {
+      for (const key of ["knowledgeProject", "knowledgeTab", "record", "knowledgeEditor"]) url.searchParams.delete(key);
+    }
+    if (url.href !== window.location.href) window.history.pushState(null, "", url);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  };
+
   return (
     <SidebarProvider>
-      <ProjectNavigation section={section} projectName={allProjects ? t("projectSwitcher.all") : selectedSnapshot?.project.name} onSelect={(next) => { setSection(next); window.scrollTo({ top: 0, behavior: "instant" }); }} />
+      <ProjectNavigation section={section} projectName={allProjects ? t("projectSwitcher.all") : selectedSnapshot?.project.name} onSelect={selectSection} />
       <main className="min-w-0 flex-1">
         <header className="z-30 flex min-h-16 flex-wrap items-center justify-between gap-4 border-b border-border bg-background/92 px-4 py-3 backdrop-blur-xl sm:px-7 sticky top-0 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
@@ -104,6 +126,8 @@ export function Dashboard() {
             <LoaderCircle className="mb-3 size-6 animate-spin motion-reduce:animate-none" aria-hidden />
             {t("dashboard.connecting")}
           </div>
+        ) : section === "knowledge" ? (
+          <KnowledgeDashboard key={knowledgeSessionVersion} token={knowledgeToken} setToken={changeKnowledgeToken} change={knowledgeChange} />
         ) : data.projects.length === 0 ? (
           <EmptyState onAdd={() => setDialogOpen(true)} />
         ) : (

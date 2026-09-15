@@ -131,6 +131,85 @@ const IDENTITY_AND_KNOWLEDGE_ACCESS_SCHEMA = `
   );
 `;
 
+const KNOWLEDGE_CONTENT_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS knowledge_threads (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision > 0),
+    created_by TEXT NOT NULL REFERENCES remote_principals(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS knowledge_threads_project ON knowledge_threads(project_id, updated_at DESC, id);
+
+  CREATE TABLE IF NOT EXISTS knowledge_replies (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+    thread_id TEXT NOT NULL REFERENCES knowledge_threads(id),
+    body TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision > 0),
+    created_by TEXT NOT NULL REFERENCES remote_principals(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS knowledge_replies_thread ON knowledge_replies(project_id, thread_id, created_at, id);
+
+  CREATE TABLE IF NOT EXISTS knowledge_tasks (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('open', 'in_progress', 'blocked', 'done', 'archived')),
+    priority TEXT NOT NULL CHECK(priority IN ('now', 'next', 'later')),
+    revision INTEGER NOT NULL CHECK(revision > 0),
+    created_by TEXT NOT NULL REFERENCES remote_principals(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS knowledge_tasks_project ON knowledge_tasks(project_id, updated_at DESC, id);
+
+  CREATE TABLE IF NOT EXISTS knowledge_relations (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+    type TEXT NOT NULL CHECK(type IN ('derived_from', 'blocks', 'relates_to', 'supersedes')),
+    source_kind TEXT NOT NULL CHECK(source_kind IN ('thread', 'reply', 'task')),
+    source_id TEXT NOT NULL,
+    target_kind TEXT NOT NULL CHECK(target_kind IN ('thread', 'reply', 'task')),
+    target_id TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision > 0),
+    created_by TEXT NOT NULL REFERENCES remote_principals(id),
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, type, source_kind, source_id, target_kind, target_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS knowledge_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+    record_kind TEXT NOT NULL CHECK(record_kind IN ('project', 'thread', 'reply', 'task', 'relation')),
+    record_id TEXT NOT NULL,
+    operation TEXT NOT NULL CHECK(operation IN ('created', 'updated', 'archived', 'linked', 'unlinked')),
+    previous_json TEXT,
+    principal_id TEXT NOT NULL REFERENCES remote_principals(id),
+    authentication_method TEXT NOT NULL CHECK(authentication_method IN ('owner_session', 'agent_token', 'worker_token')),
+    revision INTEGER NOT NULL CHECK(revision > 0),
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS knowledge_history_record ON knowledge_history(project_id, record_kind, record_id, id);
+
+  CREATE TABLE IF NOT EXISTS knowledge_idempotency (
+    principal_id TEXT NOT NULL REFERENCES remote_principals(id),
+    project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+    operation TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_hash TEXT NOT NULL CHECK(length(request_hash) = 64),
+    result_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(principal_id, project_id, operation, idempotency_key)
+  );
+`;
+
 const schema = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
@@ -247,6 +326,7 @@ const schema = `
   ${REMOTE_VERIFICATION_SCHEMA}
   ${REMOTE_VERIFICATION_ATTEMPT_SCHEMA}
   ${IDENTITY_AND_KNOWLEDGE_ACCESS_SCHEMA}
+  ${KNOWLEDGE_CONTENT_SCHEMA}
 
   INSERT OR IGNORE INTO schema_migrations(version, applied_at)
     VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
@@ -467,6 +547,161 @@ function applyMigrations(database: Database.Database): void {
       recordMigration(database, 18);
     })();
   }
+  if (!hasMigration(database, 19)) {
+    database.transaction(() => {
+      database.exec(KNOWLEDGE_CONTENT_SCHEMA);
+      recordMigration(database, 19);
+    })();
+  }
+  if (!hasMigration(database, 20)) {
+    database.transaction(() => {
+      database.exec(`
+        ALTER TABLE knowledge_history RENAME TO knowledge_history_k3;
+        DROP INDEX knowledge_history_record;
+      `);
+      database.exec(KNOWLEDGE_CONTENT_SCHEMA
+        .replace("('project', 'thread', 'reply', 'task', 'relation')", "('project', 'thread', 'reply', 'task', 'relation', 'memory')")
+        .replace("('created', 'updated', 'archived', 'linked', 'unlinked')", "('created', 'updated', 'archived', 'linked', 'unlinked', 'approved', 'superseded')"));
+      database.exec(`
+        INSERT INTO knowledge_history SELECT * FROM knowledge_history_k3;
+        DROP TABLE knowledge_history_k3;
+        CREATE TABLE IF NOT EXISTS knowledge_memories (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          category TEXT NOT NULL CHECK(category IN ('decision', 'question', 'note')),
+          tags_json TEXT NOT NULL,
+          legacy_id TEXT,
+          sources_json TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('active', 'archived', 'superseded')),
+          superseded_by_json TEXT,
+          approval_json TEXT,
+          revision INTEGER NOT NULL CHECK(revision > 0),
+          created_by TEXT NOT NULL REFERENCES remote_principals(id),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS knowledge_memories_project ON knowledge_memories(project_id, status, updated_at DESC, id);
+      `);
+      recordMigration(database, 20);
+    })();
+  }
+  if (!hasMigration(database, 21)) {
+    database.transaction(() => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS knowledge_attachments (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+          record_kind TEXT NOT NULL CHECK(record_kind IN ('thread','reply','task','memory')),
+          record_id TEXT NOT NULL,
+          filename TEXT NOT NULL,
+          media_type TEXT NOT NULL,
+          size INTEGER NOT NULL CHECK(size >= 0),
+          sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+          created_by TEXT NOT NULL REFERENCES remote_principals(id),
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS knowledge_attachments_record ON knowledge_attachments(project_id, record_kind, record_id, created_at, id);
+      `);
+      recordMigration(database, 21);
+    })();
+  }
+  if (!hasMigration(database, 22)) {
+    database.transaction(() => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS knowledge_import_batches (
+          id TEXT PRIMARY KEY,
+          plan_id TEXT NOT NULL,
+          plan_hash TEXT NOT NULL,
+          source_id TEXT NOT NULL,
+          source_repository TEXT NOT NULL,
+          source_commit TEXT NOT NULL CHECK(length(source_commit) = 40),
+          target_project_id TEXT NOT NULL,
+          target_project_name TEXT NOT NULL,
+          expected_target_revision INTEGER CHECK(expected_target_revision > 0),
+          actor_principal_id TEXT NOT NULL REFERENCES remote_principals(id),
+          status TEXT NOT NULL CHECK(status IN ('staging','published','failed')),
+          cursor INTEGER NOT NULL DEFAULT 0 CHECK(cursor >= 0),
+          total_items INTEGER NOT NULL CHECK(total_items >= 0),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          published_at TEXT,
+          error TEXT,
+          UNIQUE(source_id, source_commit, plan_hash, target_project_id)
+        );
+        CREATE INDEX IF NOT EXISTS knowledge_import_batches_target
+          ON knowledge_import_batches(target_project_id, created_at, id);
+
+        CREATE TABLE IF NOT EXISTS knowledge_import_staging (
+          batch_id TEXT NOT NULL REFERENCES knowledge_import_batches(id) ON DELETE CASCADE,
+          ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+          mapping_json TEXT NOT NULL,
+          PRIMARY KEY(batch_id, ordinal)
+        );
+
+        CREATE TABLE IF NOT EXISTS knowledge_import_sources (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+          batch_id TEXT REFERENCES knowledge_import_batches(id),
+          source_id TEXT NOT NULL,
+          source_repository TEXT NOT NULL,
+          source_commit TEXT NOT NULL,
+          source_path TEXT NOT NULL,
+          legacy_id TEXT,
+          source_sha256 TEXT NOT NULL CHECK(length(source_sha256) = 64),
+          mapping_version INTEGER NOT NULL,
+          target_kind TEXT,
+          target_id TEXT,
+          original_payload_json TEXT,
+          created_at TEXT NOT NULL,
+          UNIQUE(project_id, source_id, legacy_id, source_path)
+        );
+        CREATE INDEX IF NOT EXISTS knowledge_import_sources_project
+          ON knowledge_import_sources(project_id, source_path, id);
+      `);
+      recordMigration(database, 22);
+    })();
+  }
+
+  if (!hasMigration(database, 23)) {
+    database.transaction(() => {
+      const columns = new Set((database.prepare("PRAGMA table_info(knowledge_import_sources)").all() as Array<{ name: string }>).map(({ name }) => name));
+      if (!columns.has("target_revision")) database.exec(`ALTER TABLE knowledge_import_sources ADD COLUMN target_revision INTEGER CHECK(target_revision IS NULL OR target_revision > 0)`);
+      recordMigration(database, 23);
+    })();
+  }
+
+  if (!hasMigration(database, 24)) {
+    database.transaction(() => {
+      database.exec(`
+        CREATE TABLE knowledge_import_sources_v24 (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+          batch_id TEXT REFERENCES knowledge_import_batches(id),
+          source_id TEXT NOT NULL,
+          source_repository TEXT NOT NULL,
+          source_commit TEXT NOT NULL,
+          source_path TEXT NOT NULL,
+          legacy_id TEXT,
+          source_sha256 TEXT NOT NULL CHECK(length(source_sha256) = 64),
+          mapping_version INTEGER NOT NULL,
+          target_kind TEXT,
+          target_id TEXT,
+          original_payload_json TEXT,
+          created_at TEXT NOT NULL,
+          target_revision INTEGER CHECK(target_revision IS NULL OR target_revision > 0),
+          UNIQUE(project_id, source_id, legacy_id, source_path)
+        );
+        INSERT INTO knowledge_import_sources_v24 SELECT * FROM knowledge_import_sources;
+        DROP TABLE knowledge_import_sources;
+        ALTER TABLE knowledge_import_sources_v24 RENAME TO knowledge_import_sources;
+        CREATE INDEX knowledge_import_sources_project ON knowledge_import_sources(project_id, source_path, id);
+      `);
+      recordMigration(database, 24);
+    })();
+  }
+
 }
 
 function ensureLaunchPresetColumn(database: Database.Database): void {

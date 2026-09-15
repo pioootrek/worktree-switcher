@@ -1,3 +1,4 @@
+import { knowledgeSchemas } from "@/shared/contracts/knowledge";
 import type { AddressInfo } from "node:net";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -85,7 +86,7 @@ afterEach(async () => {
 });
 
 describe("MCP loopback server", () => {
-  it("limits scoped credentials to identity and reauthenticates existing sessions", async () => {
+  it("limits scoped credentials to knowledge and identity and reauthenticates existing sessions", async () => {
     let active = true;
     const actor = {
       principalId: "agent-1",
@@ -127,7 +128,7 @@ describe("MCP loopback server", () => {
     const client = new Client({ name: "scoped-test", version: "1.0.0" });
     await client.connect(transport);
 
-    expect((await client.listTools()).tools.map(({ name }) => name)).toEqual(["get_identity"]);
+    expect((await client.listTools()).tools.map(({ name }) => name)).toEqual([...Object.keys(knowledgeSchemas).map(operation => `knowledge_${operation}`), "get_identity"]);
     const result = await client.callTool({ name: "get_identity", arguments: {} });
     expect(JSON.stringify(result)).toContain("knowledge:read");
     expect(JSON.stringify(result)).not.toContain("verifierHash");

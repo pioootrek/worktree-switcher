@@ -304,13 +304,14 @@ export class IdentityService {
     actor: AuthenticatedPrincipal,
     projectId: string,
     permission: KnowledgePermission,
+    options: { allowArchived?: boolean } = {},
   ): void {
     this.requireCurrentAuthentication(actor);
     const project = this.store.getKnowledgeProject(projectId);
     const grant = this.store.getKnowledgeProjectGrant(actor.principalId, projectId);
     if (
       !project
-      || project.status !== "active"
+      || (project.status !== "active" && permission !== "knowledge:read" && !options.allowArchived)
       || !grant
       || grant.revokedAt !== null
       || !grant.permissions.includes(permission)
@@ -321,7 +322,7 @@ export class IdentityService {
     }
   }
 
-  private requireOwnerSession(actor: AuthenticatedPrincipal): void {
+  requireOwnerSession(actor: AuthenticatedPrincipal): void {
     this.requireCurrentAuthentication(actor);
     if (actor.principalKind !== "owner" || actor.authenticationMethod !== "owner_session") {
       throw new IdentityError("owner_authentication_required", "Ta operacja wymaga uwierzytelnionej sesji właściciela.");

@@ -315,3 +315,104 @@ before contributing code.
 
 [MIT](LICENSE). Dependency attribution is recorded in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Project knowledge
+
+The **Knowledge** view contains Backlog, Discussions and Memory. Knowledge
+projects remain available without a runtime project or repository. Memory stores
+decisions, open questions and notes with pinned source revisions, tags and an
+optional legacy ID. Hub import remains a later stage.
+
+Memory requires at least one source: a record in the same project with its
+current revision, or an explicit HTTP/HTTPS link. Only an owner session with
+`knowledge:approve` can approve memory. Approval is a revisioned mutation and
+points to the resulting revision. Editing, archiving or restoring clears current
+approval; history retains its provenance. Superseded records remain readable and
+immutable, with the replacement's ID and revision. Supersession retains the
+approval of the earlier revision as historical provenance. Memory writes also
+require `knowledge:read` because their responses include retained content.
+
+The Memory search can include threads, replies and tasks. It matches literal
+Unicode text in titles and bodies, with filters for record type, state, memory
+tags and memory legacy IDs. Archived and superseded records are hidden unless
+explicitly included. Search is project-scoped and never scans Git.
+
+A task's **Next session context** shows its scope, directly linked memory,
+approved decisions, proposals and open questions. Source revisions disclose
+stale or inactive evidence. Excerpts are labelled and link to the full records;
+no model-generated summary is implied. Context and export responses are bounded
+to 256 KiB. Read subsequent pages using `nextOffset`; retain the same page limit.
+
+`knowledge task_context` requires `knowledge:read`. `knowledge export_context`
+also requires `knowledge:export` and returns Markdown or JSON in `content`.
+Exports are versioned context pages, not a project backup. They include IDs,
+revisions, generation time, page coordinates and a fingerprint. Compare an old
+export using `knowledge check_context_export` with the same project, task,
+limit, offset and fingerprint. Its `current` field describes that page only.
+
+```bash
+worktree-switcher knowledge create_memory --input-file memory.json
+worktree-switcher knowledge search --json '{"projectId":"<project-id>","query":"storage"}'
+worktree-switcher knowledge task_context --json '{"projectId":"<project-id>","taskId":"<task-id>"}'
+worktree-switcher knowledge export_context --json '{"projectId":"<project-id>","taskId":"<task-id>","format":"markdown"}'
+```
+
+Example `memory.json` (replace IDs and the source revision):
+
+```json
+{
+  "projectId": "<project-id>",
+  "title": "Storage decision",
+  "body": "Keep one SQLite connection owner.",
+  "category": "decision",
+  "tags": ["storage"],
+  "legacyId": null,
+  "sources": [{ "kind": "task", "id": "<task-id>", "revision": 1 }],
+  "idempotencyKey": "storage-decision-1"
+}
+```
+
+Knowledge requires an owner session or a scoped agent token. The existing
+pairing token and shared runtime MCP token do not grant knowledge access. Use
+`worktree-switcher identity bootstrap-owner` for the initial owner, then supply
+that session through `WORKTREE_SWITCHER_OWNER_TOKEN` for identity administration.
+Use `identity renew-owner` before expiry; `identity recover-owner` is a local
+recovery operation that requires the controller to be stopped and acquires its
+singleton lock. Enter an active session in **Sign in to knowledge** in the UI.
+
+Create a project with `identity create-knowledge-project --name "My project"`.
+Give the owner and each participating agent explicit grants with
+`identity grant-knowledge --principal-id <principal-id> --project-id <project-id>
+--permissions knowledge:read,knowledge:write`. Existing `create-agent` and
+`issue-agent-token` commands provide agent credentials. Keep credentials private.
+
+The online CLI uses `WORKTREE_SWITCHER_KNOWLEDGE_TOKEN` (or
+`WORKTREE_SWITCHER_OWNER_TOKEN`) and never opens the database:
+
+```bash
+worktree-switcher knowledge projects
+worktree-switcher knowledge threads --json '{"projectId":"<project-id>"}'
+worktree-switcher knowledge create_thread --input-file finding.json
+```
+
+`finding.json` contains `projectId`, `title`, `body` and `idempotencyKey`.
+Reuse the same key and input after a lost response. Editing a task requires
+`expectedRevision`; conflicts preserve the saved record. CLI failures return
+nonzero and carry the application error code. The command lists its available
+operations when invoked without an operation. `--json` and `--input-file` contain
+only the operation input; authentication comes from the environment.
+
+Scoped MCP sessions expose `get_identity` and `knowledge_*` tools, including
+`knowledge_projects`, `knowledge_create_thread`, `knowledge_create_reply`,
+`knowledge_task_from_thread`, `knowledge_create_task` and `knowledge_update_task`.
+HTTP uses `POST /api/knowledge` with a bearer credential and the envelope
+`{"operation":"threads","input":{"projectId":"<project-id>"}}`.
+All three transports invoke the same application operations. Pages default to
+25 records (maximum 100) and provide `nextOffset`; requests are limited to 64 KiB.
+Thread and task lists contain summaries; full bodies use the detail operations.
+
+Record links use `?view=knowledge&knowledgeProject=...&knowledgeTab=...&record=...`
+and survive refresh of the static dashboard. Drafts, write failures and retry
+keys remain in the current browser tab's session storage. Knowledge changes
+reuse the dashboard event connection, filter projects by current grants and
+refresh only knowledge. Revoked grants also block reads and idempotent retries.
