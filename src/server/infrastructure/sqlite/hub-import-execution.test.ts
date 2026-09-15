@@ -138,6 +138,15 @@ describe("K6b Hub import execution",()=>{
     expect(f.store.listTasks("lifecycle",25,0).items).toMatchObject([{title:"One",status:"done",revision:2}]);expect(f.store.listTasks("lifecycle",25,0).items).toHaveLength(1);f.store.close();
   });
 
+  it("removes an imported relation that disappeared from a later source commit",()=>{
+    const f=fixture(),linked=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One",links:{related_ids:["two"]}}),mapping("docs/backlog/feature/two.json","task","task",{id:"two",title:"Two"})]);
+    execute(f.store,f.identity,f.owner,{plan:linked,targetProjectId:"relations",targetProjectName:"Relations"});
+    const one=f.store.listTasks("relations",25,0).items.find(task=>task.title==="One")!;expect(f.store.listRelations("relations","task",one.id,25,0).items).toHaveLength(1);
+    const unlinked=atCommit(plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One"}),mapping("docs/backlog/feature/two.json","task","task",{id:"two",title:"Two"})]),"f".repeat(40));
+    execute(f.store,f.identity,f.owner,{plan:unlinked,targetProjectId:"relations",targetProjectName:"Relations",expectedTargetRevision:1});
+    expect(f.store.listRelations("relations","task",one.id,25,0).items).toHaveLength(0);f.store.close();
+  });
+
   it("imports the same Hub source into two projects",()=>{
     const f=fixture(),source=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One"})]);
     execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:"first-target",targetProjectName:"First"});
