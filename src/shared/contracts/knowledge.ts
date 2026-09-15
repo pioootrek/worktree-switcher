@@ -35,6 +35,11 @@ export interface KnowledgeReply {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  historicalImport?: {
+    sourceAuthor: string | null;
+    sourceDate: string | null;
+    sourceDateStatus: "valid" | "missing" | "invalid";
+  };
 }
 
 export interface KnowledgeTask {

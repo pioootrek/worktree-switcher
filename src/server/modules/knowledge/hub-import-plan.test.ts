@@ -48,7 +48,14 @@ describe("K6a Hub import planning", () => {
     const source = repository(), trusted = validator(); const nested = join(source.root, "docs", "backlog", "notes", "NOTE-20260913-synthetic-memory", "evidence", "note.json"); writeFileSync(nested, "{\"evidence\":true}"); source.commit = commit(source.root, "nested");
     const first = plan(source, trusted); const clone = mkdtempSync(join(tmpdir(), "source-clone-")); roots.push(clone); execFileSync("git", ["clone", "-q", source.root, clone]); const vclone = mkdtempSync(join(tmpdir(), "validator-clone-")); roots.push(vclone); execFileSync("git", ["clone", "-q", trusted.root, vclone]);
     const second = planHubImportAgainstValidator({ repository: clone, commit: source.commit, sourceId: "fixture", validatorRepository: vclone }, trusted.commit);
-    expect(first.counts).toMatchObject({ tasks: 1, embeddedNotes: 1, done: 1, notes: 1, attachments: 3, schemas: 4, derived: 1, unresolvedRelations: 2, missing: 0 }); expect(first.mappings.find(item => item.sourcePath.endsWith("evidence/note.json"))).toMatchObject({ sourceKind: "attachment" }); expect(first.planHash).toBe(second.planHash);
+    expect(first).toMatchObject({mappingVersion:2}); expect(first.counts).toMatchObject({ tasks: 1, embeddedNotes: 1, done: 1, notes: 1, attachments: 3, schemas: 4, derived: 1, unresolvedRelations: 1, missing: 0 }); expect(first.mappings.find(item => item.sourcePath.endsWith("evidence/note.json"))).toMatchObject({ sourceKind: "attachment" }); expect(first.planHash).toBe(second.planHash);
+  });
+
+  it("resolves done IDs and item_id aliases independently of file order and reports ambiguous completion aliases",()=>{
+    const source=repository(),trusted=validator(),taskPath=join(source.root,"docs","backlog","feature","FEAT-20260913-synthetic-open.json"),task=JSON.parse(readFileSync(taskPath,"utf8"));task.links.related_ids=["DONE-20260913-synthetic-finished","FEAT-20260912-synthetic-finished"];writeFileSync(taskPath,JSON.stringify(task));source.commit=commit(source.root,"archived aliases");
+    const resolved=plan(source,trusted);expect(resolved.unresolvedRelations).toEqual([]);
+    const original=JSON.parse(readFileSync(join(source.root,"docs","backlog","done","DONE-20260913-synthetic-finished.json"),"utf8"));writeFileSync(join(source.root,"docs","backlog","done","DONE-20260914-duplicate.json"),JSON.stringify({...original,id:"DONE-20260914-duplicate"}));source.commit=commit(source.root,"ambiguous alias");
+    expect(plan(source,trusted).conflicts).toEqual(expect.arrayContaining([expect.objectContaining({legacyId:"FEAT-20260912-synthetic-finished",blocking:true,reason:expect.stringContaining("ambiguous_done_item_id")})]));
   });
 
   it("reports malformed JSON once, duplicate IDs, custom enums, and missing attachments", () => {

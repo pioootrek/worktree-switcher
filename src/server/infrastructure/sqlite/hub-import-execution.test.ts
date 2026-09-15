@@ -15,12 +15,44 @@ const NOW="2026-09-15T10:00:00.000Z";
 function mapping(path:string,kind:HubImportMapping["sourceKind"],target:HubImportMapping["targetKind"],payload:Record<string,unknown>):HubImportMapping {
   return {sourcePath:path,sourceKind:kind,targetKind:target,legacyId:String(payload.id??path),disposition:"mapped",sourceSha256:"a".repeat(64),size:10,mappedFields:Object.keys(payload),sourceOnlyFields:[],originalPayload:payload};
 }
-function plan(mappings:HubImportMapping[]):HubImportPlan{const value:HubImportPlan={formatVersion:1,planId:"",planHash:"",source:{sourceId:"fixture",repository:"/source",commit:"d".repeat(40),backlogPath:"docs/backlog"},validator:{repository:"/validator",commit:"e".repeat(40),command:["validate"],valid:true,diagnostics:[]},counts:{files:mappings.length,bytes:20,tasks:1,embeddedNotes:0,done:0,notes:1,attachments:0,documents:0,configurations:0,schemas:0,derived:0,unclassified:0,mapped:mappings.length,sourceOnly:0,skipped:0,missing:0,conflicts:0,unresolvedRelations:0},mappings,missing:[],conflicts:[],unresolvedRelations:[],guarantees:{dataWritten:false,sourceReadFromCommit:true,importedRepositoryScriptsExecuted:false}};value.planHash=calculateHubImportPlanHash(value);value.planId=`hub:fixture:${"d".repeat(40)}:${value.planHash.slice(0,16)}`;return value;}
+function plan(mappings:HubImportMapping[]):HubImportPlan{const value:HubImportPlan={formatVersion:1,mappingVersion:2,planId:"",planHash:"",source:{sourceId:"fixture",repository:"/source",commit:"d".repeat(40),backlogPath:"docs/backlog"},validator:{repository:"/validator",commit:"e".repeat(40),command:["validate"],valid:true,diagnostics:[]},counts:{files:mappings.length,bytes:20,tasks:1,embeddedNotes:0,done:0,notes:1,attachments:0,documents:0,configurations:0,schemas:0,derived:0,unclassified:0,mapped:mappings.length,sourceOnly:0,skipped:0,missing:0,conflicts:0,unresolvedRelations:0},mappings,missing:[],conflicts:[],unresolvedRelations:[],guarantees:{dataWritten:false,sourceReadFromCommit:true,importedRepositoryScriptsExecuted:false}};value.planHash=calculateHubImportPlanHash(value);value.planId=`hub:fixture:${"d".repeat(40)}:${value.planHash.slice(0,16)}`;return value;}
 function atCommit(value:HubImportPlan,commit:string):HubImportPlan{const result={...value,source:{...value.source,commit},planId:"",planHash:""};result.planHash=calculateHubImportPlanHash(result);result.planId=`hub:fixture:${commit}:${result.planHash.slice(0,16)}`;return result;}
 function fixture(){const root=mkdtempSync(join(tmpdir(),"hub-import-execution-"));roots.push(root);let n=0;const ids=["00000000-0000-4000-8000-000000000001","00000000-0000-4000-8000-000000000002"];const store=new SqliteStateStore(join(root,"state.sqlite3")),identity=new IdentityService(store,()=>NOW,()=>ids[n++]!,()=>"a".repeat(64)),owner=identity.authenticateBearer(identity.bootstrapOwnerSession().token);return {root,store,identity,owner};}
 const execute=(store:SqliteStateStore,identity:IdentityService,owner:ReturnType<IdentityService["authenticateBearer"]>,input:Parameters<typeof executeHubImport>[3])=>executeHubImport(store,identity,owner,input,()=>NOW,plan=>plan);
 
 describe("K6b Hub import execution",()=>{
+  it("preserves archived aliases, ordered completion summaries, follow-ups, and historical comment attribution",()=>{
+    const f=fixture();
+    const historical=mapping("docs/backlog/feature/A.json#notes/0","task_note","historical_comment",{id:"A:note:0",text:"Historical context",author:"Ada",date:"2026-09-13"});historical.legacyId="A:note:0";
+    const source=plan([
+      mapping("docs/backlog/feature/A.json","task","task",{id:"A",title:"Active",problem:["Problem"],links:{related_ids:["DONE-B"]}}),
+      historical,
+      mapping("docs/backlog/done/B.json","done","task_completion",{id:"DONE-B",item_id:"B",title:"Completed",summary:["First","middle phrase","Last"],followup_ids:["C"]}),
+      mapping("docs/backlog/feature/C.json","task","task",{id:"C",title:"Follow-up"}),
+    ]);
+    execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:"fidelity",targetProjectName:"Fidelity"});
+    const tasks=f.store.listTasks("fidelity",25,0).items,active=tasks.find(task=>task.title==="Active")!,completed=tasks.find(task=>task.title==="Completed")!,followup=tasks.find(task=>task.title==="Follow-up")!;
+    expect(completed.description).toBe("- First\n- middle phrase\n- Last");
+    expect(f.store.searchKnowledge("fidelity",25,0,{query:"middle phrase"}).items).toEqual(expect.arrayContaining([expect.objectContaining({id:completed.id,kind:"task"})]));
+    expect(f.store.listRelations("fidelity","task",active.id,25,0).items).toEqual(expect.arrayContaining([expect.objectContaining({type:"relates_to",sourceId:active.id,targetId:completed.id})]));
+    expect(f.store.listRelations("fidelity","task",followup.id,25,0).items).toEqual(expect.arrayContaining([expect.objectContaining({type:"derived_from",sourceId:followup.id,targetId:completed.id})]));
+    const thread=f.store.listThreads("fidelity",25,0).items[0]!,reply=f.store.listReplies("fidelity",thread.id,25,0).items[0]!;
+    expect(reply.historicalImport).toEqual({sourceAuthor:"Ada",sourceDate:"2026-09-13",sourceDateStatus:"valid"});
+    expect(f.store.getReply("foreign-project",reply.id)).toBeNull();
+    const snapshot=f.store.exportKnowledgeProject("fidelity")!;expect(snapshot.importSources.every(row=>row.mapping_version===2)).toBe(true);
+    f.store.close();
+  });
+
+  it("reports invalid or missing historical dates without inventing an import time",()=>{
+    const f=fixture(),task=mapping("docs/backlog/feature/A.json","task","task",{id:"A",title:"Active"}),invalid=mapping("docs/backlog/feature/A.json#notes/0","task_note","historical_comment",{id:"A:note:0",text:"Invalid date",author:"Ada",date:"2026-02-31"}),missing=mapping("docs/backlog/feature/A.json#notes/1","task_note","historical_comment",{id:"A:note:1",text:"Missing date"});invalid.legacyId="A:note:0";missing.legacyId="A:note:1";
+    execute(f.store,f.identity,f.owner,{plan:plan([task,invalid,missing]),targetProjectId:"dates",targetProjectName:"Dates"});
+    const thread=f.store.listThreads("dates",25,0).items[0]!,replies=f.store.listReplies("dates",thread.id,25,0).items;
+    expect(replies.map(reply=>reply.historicalImport)).toEqual(expect.arrayContaining([
+      {sourceAuthor:"Ada",sourceDate:"2026-02-31",sourceDateStatus:"invalid"},
+      {sourceAuthor:null,sourceDate:null,sourceDateStatus:"missing"},
+    ]));f.store.close();
+  });
+
   it("keeps chunks invisible, resumes from its durable cursor, and publishes once",()=>{
     const f=fixture(),source=plan([
       mapping("docs/backlog/feature/one.json","task","task",{id:"FEAT-one",title:"One",problem:["Do it"],status:"in-progress",priority:"now"}),
@@ -64,14 +96,20 @@ describe("K6b Hub import execution",()=>{
     expect(f.store.getKnowledgeProject("target")).toBeNull(); f.store.close();
   });
 
+  it("requires a fresh v2 plan instead of treating an old published mapping as fixed",()=>{
+    const f=fixture(),current=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One"})]),legacy={...current,mappingVersion:1} as unknown as HubImportPlan;legacy.planHash=calculateHubImportPlanHash(legacy);legacy.planId=`hub:fixture:${legacy.source.commit}:${legacy.planHash.slice(0,16)}`;
+    expect(()=>execute(f.store,f.identity,f.owner,{plan:legacy,targetProjectId:"legacy",targetProjectName:"Legacy"})).toThrowError(expect.objectContaining({code:"invalid_request"}));expect(f.store.getKnowledgeProject("legacy")).toBeNull();f.store.close();
+  });
+
   it("round-trips imported memories and their original provenance",()=>{
-    const source=fixture(),report=plan([mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"NOTE-one",title:"Decision",body:"Keep source",status:"archived",custom:{answer:42}})]);
+    const source=fixture(),comment=mapping("docs/backlog/feature/one.json#notes/0","task_note","historical_comment",{id:"one:note:0",text:"History",author:"Ada",date:"2026-09-13"});comment.legacyId="one:note:0";const report=plan([mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"NOTE-one",title:"Decision",body:"Keep source",status:"archived",custom:{answer:42}}),mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One"}),comment]);
     execute(source.store,source.identity,source.owner,{plan:report,targetProjectId:"portable",targetProjectName:"Portable"});
     const before=source.store.exportKnowledgeProject("portable")!,directory=join(source.root,"export");
     exportKnowledgeProject(source.store,source.identity,"portable",directory,join(source.root,"attachments"),source.owner,{applicationVersion:"test",clock:()=>NOW}); source.store.close();
     const target=fixture(); importKnowledgeProject(target.store,target.identity,directory,join(target.root,"attachments"),target.owner);
     expect(target.store.exportKnowledgeProject("portable")?.importSources).toEqual(before.importSources);
-    expect(target.store.listMemories("portable",25,0,"",true).items[0]).toMatchObject({status:"archived",sources:[{kind:"repository",sourceId:"fixture",repository:"/source",commit:"d".repeat(40),path:"docs/backlog/notes/NOTE-one/note.json"}]}); target.store.close();
+    expect(target.store.listMemories("portable",25,0,"",true).items[0]).toMatchObject({status:"archived",sources:[{kind:"repository",sourceId:"fixture",repository:"/source",commit:"d".repeat(40),path:"docs/backlog/notes/NOTE-one/note.json"}]});
+    const thread=target.store.listThreads("portable",25,0).items[0]!;expect(target.store.listReplies("portable",thread.id,25,0).items[0]?.historicalImport).toEqual({sourceAuthor:"Ada",sourceDate:"2026-09-13",sourceDateStatus:"valid"}); target.store.close();
   });
 
   it.each([["attachment","attachment"]] as const)("blocks unsupported %s mappings",(sourceKind,targetKind)=>{
@@ -136,6 +174,26 @@ describe("K6b Hub import execution",()=>{
     const completed=atCommit(plan([mapping("docs/backlog/done/DONE-one.json","done","task_completion",{id:"DONE-one",item_id:"one",title:"One",summary:"Shipped"})]),"f".repeat(40));
     execute(f.store,f.identity,f.owner,{plan:completed,targetProjectId:"lifecycle",targetProjectName:"Lifecycle",expectedTargetRevision:1});
     expect(f.store.listTasks("lifecycle",25,0).items).toMatchObject([{title:"One",status:"done",revision:2}]);expect(f.store.listTasks("lifecycle",25,0).items).toHaveLength(1);f.store.close();
+  });
+
+  it("updates a v1-mapped completion to v2 and replaces its prior summary on later imports",()=>{
+    const source=fixture(),open=mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One",problem:["Work"]}),done=mapping("docs/backlog/done/DONE-one.json","done","task_completion",{id:"DONE-one",item_id:"one",title:"One",summary:"Before"});
+    execute(source.store,source.identity,source.owner,{plan:plan([open,done]),targetProjectId:"legacy-copy",targetProjectName:"Legacy copy"});
+    const snapshot=source.store.exportKnowledgeProject("legacy-copy")!;
+    snapshot.importSources.forEach(row=>{row.mapping_version=1;});
+    snapshot.tasks[0]!.description="Work";
+    source.store.close();
+
+    const target=fixture();target.store.importKnowledgeProject(snapshot);
+    const updated=atCommit(plan([mapping("docs/backlog/done/DONE-one.json","done","task_completion",{id:"DONE-one",item_id:"one",title:"One",summary:"After"})]),"f".repeat(40));
+    execute(target.store,target.identity,target.owner,{plan:updated,targetProjectId:"legacy-copy",targetProjectName:"Legacy copy",expectedTargetRevision:1});
+    expect(target.store.exportKnowledgeProject("legacy-copy")!.importSources.find(row=>row.target_kind==="task_completion")?.mapping_version).toBe(2);
+    expect(target.store.listTasks("legacy-copy",25,0).items[0]?.description).toBe("Work\n\nCompletion summary\nAfter");
+
+    const corrected=atCommit(plan([mapping("docs/backlog/done/archive/DONE-one.json","done","task_completion",{id:"DONE-one",item_id:"one",title:"One",summary:"Corrected"})]),"b".repeat(40));
+    execute(target.store,target.identity,target.owner,{plan:corrected,targetProjectId:"legacy-copy",targetProjectName:"Legacy copy",expectedTargetRevision:2});
+    expect(target.store.listTasks("legacy-copy",25,0).items[0]?.description).toBe("Work\n\nCompletion summary\nCorrected");
+    target.store.close();
   });
 
   it("removes an imported relation that disappeared from a later source commit",()=>{
