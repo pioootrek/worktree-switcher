@@ -64,13 +64,13 @@ export class KnowledgeMemoryService {
       case "thread": return this.store.getThread(projectId, source.id);
       case "reply": return this.store.getReply(projectId, source.id);
       case "memory": return this.store.getMemory(projectId, source.id);
-      case "external": return null;
+      case "external": case "repository": return null;
     }
   }
 
   private validateSources(projectId: string, memoryId: string, sources: KnowledgeSource[]) {
     for (const source of sources) {
-      if (source.kind === "external") continue;
+      if (source.kind === "external" || source.kind === "repository") continue;
       if (source.kind === "memory" && source.id === memoryId) throw new KnowledgeError("invalid_request", "Memory cannot cite itself.");
       const record = this.sourceRecord(projectId, source);
       if (!record) throw new KnowledgeError("not_found", "Source not found in this project.");
@@ -138,7 +138,7 @@ export class KnowledgeMemoryService {
   private sourceState(projectId: string, source: KnowledgeSource): KnowledgeSourceState {
     const current = this.sourceRecord(projectId, source);
     return { source, href: knowledgeSourceHref(projectId, source, current && "threadId" in current ? current.threadId : undefined), currentRevision: current?.revision ?? null,
-      stale: source.kind !== "external" && current?.revision !== source.revision,
+      stale: source.kind !== "external" && source.kind !== "repository" && current?.revision !== source.revision,
       inactive: Boolean(current && "status" in current && ["archived", "superseded"].includes(current.status)) };
   }
 

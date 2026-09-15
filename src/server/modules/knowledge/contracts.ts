@@ -26,6 +26,7 @@ export interface KnowledgeProjectSnapshot {
   relations: Array<Record<string, unknown>>;
   history: Array<Record<string, unknown>>;
   attachments: Array<Record<string, unknown>>;
+  importSources: Array<Record<string, unknown>>;
   requiredPrincipals: string[];
 }
 export interface KnowledgeProjectExportManifest {

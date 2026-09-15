@@ -80,11 +80,12 @@ export function MemoryEditor({ token, principalId, projectId, record, onSaved, o
         return <div key={index} className="space-y-2 rounded-lg border border-border p-3">
           <Label htmlFor={`${id}-kind-${index}`}>{t("knowledge.sourceKind")}</Label><select id={`${id}-kind-${index}`} className={fieldClass} value={source.kind} onChange={e => replace(e.target.value === "external" ? { kind: "external", url: "", label: "" } : { kind: e.target.value as "task", id: "", revision: 1 })}>
             {(["task", "thread", "reply", "memory", "external"] as const).map(kind => <option key={kind} value={kind}>{t(`knowledge.source.${kind}`)}</option>)}
+            {source.kind === "repository" && <option value="repository">repository</option>}
           </select>
           {source.kind === "external" ? <>
             <Label htmlFor={`${id}-url-${index}`}>{t("knowledge.sourceUrl")}</Label><Input id={`${id}-url-${index}`} type="url" required value={source.url} onChange={e => replace({ ...source, url: e.target.value })} />
             <Label htmlFor={`${id}-label-${index}`}>{t("knowledge.sourceLabel")}</Label><Input id={`${id}-label-${index}`} required value={source.label} onChange={e => replace({ ...source, label: e.target.value })} />
-          </> : <>
+          </> : source.kind === "repository" ? <p className="break-all text-sm">{source.sourceId} · {source.repository} · {source.commit}:{source.path}</p> : <>
             <Label htmlFor={`${id}-source-${index}`}>{t("knowledge.sourceId")}</Label><Input id={`${id}-source-${index}`} required value={source.id} onChange={e => replace({ ...source, id: e.target.value })} />
             <Label htmlFor={`${id}-revision-${index}`}>{t("knowledge.sourceRevision")}</Label><Input id={`${id}-revision-${index}`} type="number" min={1} required value={source.revision} onChange={e => replace({ ...source, revision: Number(e.target.value) })} />
           </>}
