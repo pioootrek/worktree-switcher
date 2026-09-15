@@ -25,7 +25,7 @@ const implementation = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "u
 const sourceDirty = Boolean(execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim());
 const plan = planHubImport({ repository, commit, sourceId: "worktree-switcher", validatorRepository });
 save("plan.json", plan);
-save("pilot.json", { implementation, sourceDirty, repository: resolve(repository), commit, projectId, liveWrites: false });
+save("pilot.json", { implementation, sourceDirty, repository: resolve(repository), commit, projectId, mappingVersion: plan.mappingVersion, liveWrites: false });
 const lock = acquireControllerLock(join(root, "state/controller.lock"));
 let store = new SqliteStateStore(database);
 try {
@@ -44,7 +44,9 @@ try {
   } while (batch.status === "staging");
   checks.push("staging invisible; cursor survives connection reopen; complete publication");
   const snapshot = store.exportKnowledgeProject(projectId)!;
-  assert.equal(snapshot.tasks.length, plan.counts.tasks + plan.counts.done);
+  const activeTaskIds=new Set(plan.mappings.filter(mapping=>mapping.targetKind==="task"&&mapping.legacyId).map(mapping=>mapping.legacyId!));
+  const orphanCompletionIds=new Set(plan.mappings.filter(mapping=>mapping.targetKind==="task_completion").map(mapping=>{const payload=mapping.originalPayload as Record<string,unknown>;const itemId=typeof payload?.item_id==="string"?payload.item_id:null;return itemId&&!activeTaskIds.has(itemId)?itemId:null;}).filter((value):value is string=>Boolean(value)));
+  assert.equal(snapshot.tasks.length, activeTaskIds.size + orphanCompletionIds.size);
   assert.equal(snapshot.memories.length, plan.counts.notes);
   assert.equal(snapshot.replies.length, plan.counts.embeddedNotes);
   assert.equal(snapshot.attachments.length, plan.counts.attachments);
@@ -61,6 +63,15 @@ try {
     assert.equal(createHash("sha256").update(bytes).digest("hex"), hash);
   }
   checks.push("counts, original payloads, source hashes and attachment bytes match the plan");
+  for(const mapping of plan.mappings.filter(mapping=>mapping.targetKind==="task_completion")){
+    const source=snapshot.importSources.find(row=>row.source_path===mapping.sourcePath)!;
+    const task=snapshot.tasks.find(row=>row.id===source.target_id)!;
+    const summary=(mapping.originalPayload as Record<string,unknown>).summary;
+    if(Array.isArray(summary)) for(const item of summary) if(typeof item==="string"&&item.trim()) assert.match(String(task.description),new RegExp(item.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")));
+  }
+  const importedReplies=new Map(snapshot.importSources.filter(row=>row.target_kind==="historical_comment").map(row=>[row.target_id,row]));
+  for(const reply of snapshot.replies){const source=importedReplies.get(reply.id);if(!source) continue;const payload=JSON.parse(String(source.original_payload_json)) as Record<string,unknown>;assert.equal(typeof payload.author==="string"&&payload.author.length>0,true);assert.equal(typeof payload.date==="string"&&payload.date.length>0,true);}
+  checks.push("completion summaries and historical comment attribution remain readable from provenance");
   const identity = new IdentityService(store), actor = identity.authenticateBearer(owner.token);
   executeHubImport(store, identity, actor, input);
   assert.deepEqual(store.exportKnowledgeProject(projectId), snapshot);
@@ -81,7 +92,7 @@ try {
   try { assert.deepEqual(physical.exportKnowledgeProject(projectId), snapshot); } finally { physical.close(); }
   checks.push("controller backup/restore matches the full knowledge snapshot");
   const knownArchived = new Set(plan.mappings.filter(m => m.sourceKind === "done").map(m => (m.originalPayload as Record<string, unknown>)?.item_id));
-  const report = { implementation, sourceDirty, sourceCommit: commit, planId: plan.planId, checks, counts: Object.fromEntries(Object.entries(snapshot).filter(([, value]) => Array.isArray(value)).map(([key, value]) => [key, (value as unknown[]).length])), unresolvedRelations: plan.unresolvedRelations, unresolvedWithArchivedTarget: plan.unresolvedRelations.filter(r => knownArchived.has(r.targetLegacyId)).length, cutoverApproved: false };
+  const report = { implementation, sourceDirty, sourceCommit: commit, planId: plan.planId, mappingVersion:plan.mappingVersion, schemaVersion:store.schemaVersion(), checks, counts: Object.fromEntries(Object.entries(snapshot).filter(([, value]) => Array.isArray(value)).map(([key, value]) => [key, (value as unknown[]).length])), unresolvedRelations: plan.unresolvedRelations, unresolvedWithArchivedTarget: plan.unresolvedRelations.filter(r => knownArchived.has(r.targetLegacyId)).length, cutoverApproved: false };
   save("report.json", report);
   console.log(JSON.stringify({ stage: "complete", checks, counts: report.counts, unresolved: report.unresolvedRelations.length }));
 } catch (error) {

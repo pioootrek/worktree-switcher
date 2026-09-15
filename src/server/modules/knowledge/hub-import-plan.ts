@@ -42,6 +42,7 @@ export interface HubImportMapping {
 
 export interface HubImportPlan {
   formatVersion: 1;
+  mappingVersion: 2;
   planId: string;
   planHash: string;
   source: { sourceId: string; repository: string; commit: string; backlogPath: "docs/backlog" };
@@ -175,6 +176,7 @@ export function planHubImportAgainstValidator(options: HubImportPlanOptions, exp
 
   const mappings: HubImportMapping[] = [], missing: HubImportPlan["missing"] = [], conflicts: HubImportPlan["conflicts"] = [], unresolvedRelations: HubImportPlan["unresolvedRelations"] = [];
   const legacyPaths = new Map<string, string>(); const knownIds = new Set<string>();
+  const doneItemPaths = new Map<string, string>();
   const parsedJson = new Map<string, Record<string, unknown> | null>();
   const json = (file: SourceFile): Record<string, unknown> | null => {
     if (parsedJson.has(file.path)) return parsedJson.get(file.path)!;
@@ -185,7 +187,16 @@ export function planHubImportAgainstValidator(options: HubImportPlanOptions, exp
   const backlogJson = files.filter(file => file.path.startsWith("docs/backlog/") && file.path.endsWith(".json"));
   for (const file of backlogJson) {
     const relative = file.path.slice("docs/backlog/".length), parts = relative.split("/");
-    if (parts.length === 2 && (ITEM_DIRECTORIES.has(parts[0]!) || parts[0] === "done")) { const payload = json(file); if (payload && typeof payload.id === "string") knownIds.add(payload.id); }
+    if (parts.length === 2 && (ITEM_DIRECTORIES.has(parts[0]!) || parts[0] === "done")) {
+      const payload = json(file);
+      if (payload && typeof payload.id === "string") knownIds.add(payload.id);
+      if (payload && parts[0] === "done" && typeof payload.item_id === "string") {
+        knownIds.add(payload.item_id);
+        const previous = doneItemPaths.get(payload.item_id);
+        if (previous && previous !== file.path) conflicts.push({ sourcePath: file.path, legacyId: payload.item_id, blocking: true, reason: `ambiguous_done_item_id:${previous}` });
+        else doneItemPaths.set(payload.item_id, file.path);
+      }
+    }
     if (parts.length === 3 && parts[0] === "notes" && parts[2] === "note.json") { const payload = json(file); if (payload && typeof payload.id === "string") knownIds.add(payload.id); }
   }
   const register = (item: HubImportMapping) => { mappings.push(item); if (item.legacyId) { const previous = legacyPaths.get(item.legacyId); if (previous && previous !== item.sourcePath) conflicts.push({ sourcePath: item.sourcePath, legacyId: item.legacyId, blocking: true, reason: `duplicate_legacy_id:${previous}` }); else legacyPaths.set(item.legacyId, item.sourcePath); } };
@@ -243,6 +254,7 @@ export function planHubImportAgainstValidator(options: HubImportPlanOptions, exp
   const kinds = (kind: HubImportMapping["sourceKind"]) => mappings.filter(item => item.sourceKind === kind).length;
   const base = {
     formatVersion: 1 as const,
+    mappingVersion: 2 as const,
     source: { sourceId, repository, commit: resolvedCommit, backlogPath: "docs/backlog" as const },
     validator: { repository: trusted.root, commit: expectedValidatorCommit, command: ["python3", "-I", "<trusted Hub compatibility adapter>", "bin/hub.py", "validate", "--backlog-dir", "<temporary>/docs/backlog"], valid: validatorValid, diagnostics },
     counts: { files: files.length, bytes: files.reduce((sum, file) => sum + file.bytes.byteLength, 0), tasks: kinds("task"), embeddedNotes: kinds("task_note"), done: kinds("done"), notes: kinds("note"), attachments: kinds("attachment"), documents: kinds("document"), configurations: kinds("configuration"), schemas: kinds("schema"), derived: kinds("derived"), unclassified: kinds("unclassified"), mapped: mappings.filter(item => item.disposition === "mapped").length, sourceOnly: mappings.filter(item => item.disposition === "source_only").length, skipped: mappings.filter(item => item.disposition === "skipped").length, missing: missing.length, conflicts: conflicts.length, unresolvedRelations: unresolvedRelations.length },

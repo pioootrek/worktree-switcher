@@ -46,6 +46,7 @@ export interface ExecuteHubImportInput {
 }
 
 function validate(input: ExecuteHubImportInput): void {
+  if (input.plan.mappingVersion !== 2) throw new KnowledgeError("invalid_request", "Hub import plan uses an unsupported mapping version; create a fresh plan before reimporting.");
   if (!input.targetProjectId.trim() || input.targetProjectId.trim().length > 160) throw new KnowledgeError("invalid_request", "Target project ID is required and must not exceed 160 characters.");
   if (!input.targetProjectName.trim() || input.targetProjectName.trim().length > 120) throw new KnowledgeError("invalid_request", "Target project name is required and must not exceed 120 characters.");
   if (input.expectedTargetRevision !== undefined && input.expectedTargetRevision !== null && (!Number.isInteger(input.expectedTargetRevision) || input.expectedTargetRevision < 1)) throw new KnowledgeError("invalid_request", "Expected target revision must be positive.");

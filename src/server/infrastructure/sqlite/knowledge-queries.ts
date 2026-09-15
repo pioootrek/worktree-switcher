@@ -20,7 +20,7 @@ import type { KnowledgeProject, KnowledgeProjectRuntimeLink } from "@/server/mod
 import type { KnowledgeAttachment } from "@/shared/contracts/knowledge-attachments";
 
 type ThreadRow = { id: string; project_id: string; title: string; body: string; revision: number; created_by: string; created_at: string; updated_at: string };
-type ReplyRow = { id: string; project_id: string; thread_id: string; body: string; revision: number; created_by: string; created_at: string; updated_at: string };
+type ReplyRow = { id: string; project_id: string; thread_id: string; body: string; revision: number; created_by: string; created_at: string; updated_at: string; import_source_id?: string | null; source_author?: unknown; source_date?: unknown };
 type TaskRow = { id: string; project_id: string; title: string; description: string; status: KnowledgeTask["status"]; priority: KnowledgeTask["priority"]; revision: number; created_by: string; created_at: string; updated_at: string };
 type HistoryRow = { id: number; project_id: string; record_kind: KnowledgeHistoryEntry["recordKind"]; record_id: string; operation: KnowledgeHistoryEntry["operation"]; previous_json: string | null; principal_id: string; authentication_method: KnowledgeHistoryEntry["authenticationMethod"]; revision: number; created_at: string };
 type RelationRow = { id: string; project_id: string; type: KnowledgeRelation["type"]; source_kind: KnowledgeRelation["sourceKind"]; source_id: string; target_kind: KnowledgeRelation["targetKind"]; target_id: string; revision: number; created_by: string; created_at: string };
@@ -31,7 +31,19 @@ const mapMemory = (row: MemoryRow): KnowledgeMemory => ({ id: row.id, projectId:
 type IdempotencyRow = { request_hash: string; result_json: string };
 
 const mapThread = (row: ThreadRow): KnowledgeThread => ({ id: row.id, projectId: row.project_id, title: row.title, body: row.body, revision: row.revision, createdBy: row.created_by, createdAt: row.created_at, updatedAt: row.updated_at });
-const mapReply = (row: ReplyRow): KnowledgeReply => ({ id: row.id, projectId: row.project_id, threadId: row.thread_id, body: row.body, revision: row.revision, createdBy: row.created_by, createdAt: row.created_at, updatedAt: row.updated_at });
+function historicalDate(value: unknown): Pick<NonNullable<KnowledgeReply["historicalImport"]>, "sourceDate" | "sourceDateStatus"> {
+  if (value === null || value === undefined || value === "") return { sourceDate: null, sourceDateStatus: "missing" };
+  const sourceDate = typeof value === "string" ? value : JSON.stringify(value);
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(sourceDate);
+  if (dateOnly) {
+    const year=Number(dateOnly[1]),month=Number(dateOnly[2]),day=Number(dateOnly[3]);
+    const valid=new Date(Date.UTC(year,month-1,day));
+    return { sourceDate, sourceDateStatus: valid.getUTCFullYear()===year&&valid.getUTCMonth()===month-1&&valid.getUTCDate()===day ? "valid" : "invalid" };
+  }
+  return { sourceDate, sourceDateStatus: Number.isNaN(Date.parse(sourceDate)) ? "invalid" : "valid" };
+}
+const mapReply = (row: ReplyRow): KnowledgeReply => ({ id: row.id, projectId: row.project_id, threadId: row.thread_id, body: row.body, revision: row.revision, createdBy: row.created_by, createdAt: row.created_at, updatedAt: row.updated_at,
+  ...(row.import_source_id ? { historicalImport: { sourceAuthor: typeof row.source_author === "string" && row.source_author.trim() ? row.source_author : null, ...historicalDate(row.source_date) } } : {}) });
 const mapTask = (row: TaskRow): KnowledgeTask => ({ id: row.id, projectId: row.project_id, title: row.title, description: row.description, status: row.status, priority: row.priority, revision: row.revision, createdBy: row.created_by, createdAt: row.created_at, updatedAt: row.updated_at });
 
 /** Borrows the controller's singleton connection and owns no lifecycle. */
@@ -72,7 +84,12 @@ export class KnowledgeQueries implements KnowledgeStore {
   }
 
   getReply(projectId: string, id: string): KnowledgeReply | null {
-    const row = this.database.prepare("SELECT * FROM knowledge_replies WHERE project_id = ? AND id = ?").get(projectId, id) as ReplyRow | undefined;
+    const row = this.database.prepare(`SELECT r.*, s.id import_source_id,
+      json_extract(s.original_payload_json, '$.author') source_author,
+      json_extract(s.original_payload_json, '$.date') source_date
+      FROM knowledge_replies r LEFT JOIN knowledge_import_sources s
+        ON s.project_id=r.project_id AND s.target_kind='historical_comment' AND s.target_id=r.id
+      WHERE r.project_id = ? AND r.id = ?`).get(projectId, id) as ReplyRow | undefined;
     return row ? mapReply(row) : null;
   }
 
@@ -165,7 +182,12 @@ export class KnowledgeQueries implements KnowledgeStore {
     return row ? mapThread(row) : null;
   }
   listReplies(projectId: string, threadId: string, limit: number, offset: number): KnowledgePage<KnowledgeReply> {
-    return this.page((this.database.prepare("SELECT * FROM knowledge_replies WHERE project_id = ? AND thread_id = ? ORDER BY created_at, id LIMIT ? OFFSET ?").all(projectId, threadId, limit + 1, offset) as ReplyRow[]).map(mapReply), limit, offset);
+    return this.page((this.database.prepare(`SELECT r.*, s.id import_source_id,
+      json_extract(s.original_payload_json, '$.author') source_author,
+      json_extract(s.original_payload_json, '$.date') source_date
+      FROM knowledge_replies r LEFT JOIN knowledge_import_sources s
+        ON s.project_id=r.project_id AND s.target_kind='historical_comment' AND s.target_id=r.id
+      WHERE r.project_id = ? AND r.thread_id = ? ORDER BY r.created_at, r.id LIMIT ? OFFSET ?`).all(projectId, threadId, limit + 1, offset) as ReplyRow[]).map(mapReply), limit, offset);
   }
   listRelations(projectId: string, recordKind: KnowledgeRelation["sourceKind"], recordId: string, limit: number, offset: number): KnowledgePage<KnowledgeRelation> {
     const rows = (this.database.prepare(`SELECT * FROM knowledge_relations WHERE project_id = ? AND ((source_kind = ? AND source_id = ?) OR (target_kind = ? AND target_id = ?)) ORDER BY created_at, id LIMIT ? OFFSET ?`).all(projectId, recordKind, recordId, recordKind, recordId, limit + 1, offset) as RelationRow[]).map((row) => ({ id: row.id, projectId: row.project_id, type: row.type, sourceKind: row.source_kind, sourceId: row.source_id, targetKind: row.target_kind, targetId: row.target_id, revision: row.revision, createdBy: row.created_by, createdAt: row.created_at }));

@@ -7,7 +7,7 @@ async function mountKnowledge(page: Page) {
   const fixture = await mountDashboard(page, data);
   const project = { id: "knowledge-only", name: "Knowledge without server", status: "active", writable: true, revision: 1, createdAt: "2026-01-01", updatedAt: "2026-01-01" };
   const records: Array<{ id: string; projectId: string; title: string; body?: string; description?: string; priority?: string; status?: string; revision: number; createdBy: string }> = [];
-  const replies: Array<{ id: string; threadId: string; body: string; revision: number; createdBy: string }> = [];
+  const replies: Array<{ id: string; threadId: string; body: string; revision: number; createdBy: string; historicalImport?: { sourceAuthor: string | null; sourceDate: string | null; sourceDateStatus: "valid" | "missing" | "invalid" } }> = [];
   const calls: Array<{ operation: string; input: Record<string, unknown> }> = [];
   const saved = new Map<string, unknown>();
   const savedInputs = new Map<string, string>();
@@ -55,8 +55,15 @@ async function mountKnowledge(page: Page) {
   });
   await page.getByRole("button", { name: "Knowledge", exact: true }).click();
   await expect(page.getByLabel("Knowledge project", { exact: true })).toHaveValue(project.id);
-  return { ...fixture, records, calls, setFailure: (value: boolean) => { failSave = value; }, loseNextResponse: () => { loseResponse = true; } };
+  return { ...fixture, records, replies, calls, setFailure: (value: boolean) => { failSave = value; }, loseNextResponse: () => { loseResponse = true; } };
 }
+
+test("historical imported replies distinguish source attribution from the importing principal",async({page})=>{
+  const f=await mountKnowledge(page);f.records.push({id:"historical-thread",projectId:"knowledge-only",title:"Imported discussion",body:"Context",revision:1,createdBy:"owner"});f.replies.push({id:"historical-reply",threadId:"historical-thread",body:"Historical comment",revision:1,createdBy:"import-owner",historicalImport:{sourceAuthor:"Ada",sourceDate:"2026-09-13",sourceDateStatus:"valid"}});
+  await page.getByRole("tab",{name:"Discussions",exact:true}).click();await page.getByRole("button",{name:"Refresh",exact:true}).click();await page.getByRole("link",{name:"Imported discussion",exact:true}).click();
+  await expect(page.getByText("Author: import-owner · revision 1",{exact:true})).toBeVisible();await expect(page.getByText("Historical import source — author: Ada · date: 2026-09-13",{exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"Switch language to Polish"}).click();await expect(page.getByText("Źródło historyczne importu — autor: Ada · data: 2026-09-13",{exact:true})).toBeVisible();
+});
 
 test("knowledge without runtime: discussion, reply, task, filters and static deep link", async ({ page }) => {
   const f = await mountKnowledge(page);
