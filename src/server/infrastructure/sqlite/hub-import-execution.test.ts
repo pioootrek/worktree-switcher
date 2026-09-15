@@ -176,6 +176,26 @@ describe("K6b Hub import execution",()=>{
     expect(f.store.listTasks("lifecycle",25,0).items).toMatchObject([{title:"One",status:"done",revision:2}]);expect(f.store.listTasks("lifecycle",25,0).items).toHaveLength(1);f.store.close();
   });
 
+  it("updates a v1-mapped completion to v2 and replaces its prior summary on later imports",()=>{
+    const source=fixture(),open=mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One",problem:["Work"]}),done=mapping("docs/backlog/done/DONE-one.json","done","task_completion",{id:"DONE-one",item_id:"one",title:"One",summary:"Before"});
+    execute(source.store,source.identity,source.owner,{plan:plan([open,done]),targetProjectId:"legacy-copy",targetProjectName:"Legacy copy"});
+    const snapshot=source.store.exportKnowledgeProject("legacy-copy")!;
+    snapshot.importSources.forEach(row=>{row.mapping_version=1;});
+    snapshot.tasks[0]!.description="Work";
+    source.store.close();
+
+    const target=fixture();target.store.importKnowledgeProject(snapshot);
+    const updated=atCommit(plan([mapping("docs/backlog/done/DONE-one.json","done","task_completion",{id:"DONE-one",item_id:"one",title:"One",summary:"After"})]),"f".repeat(40));
+    execute(target.store,target.identity,target.owner,{plan:updated,targetProjectId:"legacy-copy",targetProjectName:"Legacy copy",expectedTargetRevision:1});
+    expect(target.store.exportKnowledgeProject("legacy-copy")!.importSources.find(row=>row.target_kind==="task_completion")?.mapping_version).toBe(2);
+    expect(target.store.listTasks("legacy-copy",25,0).items[0]?.description).toBe("Work\n\nCompletion summary\nAfter");
+
+    const corrected=atCommit(plan([mapping("docs/backlog/done/DONE-one.json","done","task_completion",{id:"DONE-one",item_id:"one",title:"One",summary:"Corrected"})]),"b".repeat(40));
+    execute(target.store,target.identity,target.owner,{plan:corrected,targetProjectId:"legacy-copy",targetProjectName:"Legacy copy",expectedTargetRevision:2});
+    expect(target.store.listTasks("legacy-copy",25,0).items[0]?.description).toBe("Work\n\nCompletion summary\nCorrected");
+    target.store.close();
+  });
+
   it("removes an imported relation that disappeared from a later source commit",()=>{
     const f=fixture(),linked=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One",links:{related_ids:["two"]}}),mapping("docs/backlog/feature/two.json","task","task",{id:"two",title:"Two"})]);
     execute(f.store,f.identity,f.owner,{plan:linked,targetProjectId:"relations",targetProjectName:"Relations"});
