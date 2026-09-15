@@ -190,7 +190,7 @@ describe("K6b Hub import execution",()=>{
     expect(target.store.exportKnowledgeProject("legacy-copy")!.importSources.find(row=>row.target_kind==="task_completion")?.mapping_version).toBe(2);
     expect(target.store.listTasks("legacy-copy",25,0).items[0]?.description).toBe("Work\n\nCompletion summary\nAfter");
 
-    const corrected=atCommit(plan([mapping("docs/backlog/done/DONE-one.json","done","task_completion",{id:"DONE-one",item_id:"one",title:"One",summary:"Corrected"})]),"b".repeat(40));
+    const corrected=atCommit(plan([mapping("docs/backlog/done/archive/DONE-one.json","done","task_completion",{id:"DONE-one",item_id:"one",title:"One",summary:"Corrected"})]),"b".repeat(40));
     execute(target.store,target.identity,target.owner,{plan:corrected,targetProjectId:"legacy-copy",targetProjectName:"Legacy copy",expectedTargetRevision:2});
     expect(target.store.listTasks("legacy-copy",25,0).items[0]?.description).toBe("Work\n\nCompletion summary\nCorrected");
     target.store.close();
