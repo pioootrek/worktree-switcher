@@ -151,7 +151,8 @@ export function planHubImport(options: HubImportPlanOptions): HubImportPlan {
 /** Internal compatibility seam used to exercise a real validator process in tests. */
 export function planHubImportAgainstValidator(options: HubImportPlanOptions, expectedValidatorCommit: string): HubImportPlan {
   if (!/^[a-f0-9]{40}$/.test(options.commit)) throw new KnowledgeError("invalid_request", "Import source must be an exact 40-character commit SHA.");
-  if (!options.sourceId.trim() || options.sourceId.length > 200) throw new KnowledgeError("invalid_request", "Import source ID is required.");
+  const sourceId=options.sourceId.trim();
+  if (!sourceId || sourceId.length > 160) throw new KnowledgeError("invalid_request", "Import source ID is required and must not exceed 160 characters.");
   let repository: string;
   try { repository = realpathSync(options.repository); } catch { throw new KnowledgeError("invalid_request", "Hub source repository does not exist."); }
   const resolvedCommit = String(git(repository, ["rev-parse", "--verify", `${options.commit}^{commit}`])).trim();
@@ -242,7 +243,7 @@ export function planHubImportAgainstValidator(options: HubImportPlanOptions, exp
   const kinds = (kind: HubImportMapping["sourceKind"]) => mappings.filter(item => item.sourceKind === kind).length;
   const base = {
     formatVersion: 1 as const,
-    source: { sourceId: options.sourceId, repository, commit: resolvedCommit, backlogPath: "docs/backlog" as const },
+    source: { sourceId, repository, commit: resolvedCommit, backlogPath: "docs/backlog" as const },
     validator: { repository: trusted.root, commit: expectedValidatorCommit, command: ["python3", "-I", "<trusted Hub compatibility adapter>", "bin/hub.py", "validate", "--backlog-dir", "<temporary>/docs/backlog"], valid: validatorValid, diagnostics },
     counts: { files: files.length, bytes: files.reduce((sum, file) => sum + file.bytes.byteLength, 0), tasks: kinds("task"), embeddedNotes: kinds("task_note"), done: kinds("done"), notes: kinds("note"), attachments: kinds("attachment"), documents: kinds("document"), configurations: kinds("configuration"), schemas: kinds("schema"), derived: kinds("derived"), unclassified: kinds("unclassified"), mapped: mappings.filter(item => item.disposition === "mapped").length, sourceOnly: mappings.filter(item => item.disposition === "source_only").length, skipped: mappings.filter(item => item.disposition === "skipped").length, missing: missing.length, conflicts: conflicts.length, unresolvedRelations: unresolvedRelations.length },
     mappings, missing, conflicts, unresolvedRelations,
@@ -250,5 +251,5 @@ export function planHubImportAgainstValidator(options: HubImportPlanOptions, exp
   };
   const provisional = { ...base, planId: "", planHash: "" };
   const planHash = calculateHubImportPlanHash(provisional);
-  return { ...base, planId: `hub:${options.sourceId}:${resolvedCommit}:${planHash.slice(0, 16)}`, planHash };
+  return { ...base, planId: `hub:${sourceId}:${resolvedCommit}:${planHash.slice(0, 16)}`, planHash };
 }

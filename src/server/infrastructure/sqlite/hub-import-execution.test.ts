@@ -152,6 +152,22 @@ describe("K6b Hub import execution",()=>{
     const padded=` ${"x".repeat(160)} `;execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:padded,targetProjectName:"Padded"});expect(f.store.getKnowledgeProject(padded)).toBeNull();expect(f.store.getKnowledgeProject(padded.trim())?.id).toBe(padded.trim());f.store.close();
   });
 
+  it.each([
+    ["task title",mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"x".repeat(201)})],
+    ["memory body",mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"NOTE-one",title:"Note",body:"x".repeat(65537)})],
+  ])("rejects an oversized imported %s before publishing",(_label,item)=>{
+    const f=fixture();
+    expect(()=>execute(f.store,f.identity,f.owner,{plan:plan([item]),targetProjectId:"bounded",targetProjectName:"Bounded"})).toThrowError(expect.objectContaining({code:"limit_exceeded"}));
+    expect(f.store.getKnowledgeProject("bounded")).toBeNull();f.store.close();
+  });
+
+  it("rejects source and legacy IDs that cannot be logically restored",()=>{
+    const f=fixture(),longSource=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One"})]);longSource.source.sourceId="x".repeat(161);longSource.planHash=calculateHubImportPlanHash(longSource);longSource.planId=`hub:${longSource.source.sourceId}:${longSource.source.commit}:${longSource.planHash.slice(0,16)}`;
+    expect(()=>execute(f.store,f.identity,f.owner,{plan:longSource,targetProjectId:"long-source",targetProjectName:"Long source"})).toThrowError(expect.objectContaining({code:"invalid_request"}));
+    const longLegacy=plan([mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"x".repeat(161),title:"Note",body:"Body"})]);
+    expect(()=>execute(f.store,f.identity,f.owner,{plan:longLegacy,targetProjectId:"long-legacy",targetProjectName:"Long legacy"})).toThrowError(expect.objectContaining({code:"invalid_request"}));f.store.close();
+  });
+
   it("verifies and installs attachment bytes for their imported note",()=>{
     const f=fixture(),bytes=Buffer.from("attachment proof"),hash=createHash("sha256").update(bytes).digest("hex"),note=mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"NOTE-one",title:"Note",body:"Body"});
     const attachment:HubImportMapping={sourcePath:"docs/backlog/notes/NOTE-one/proof.txt",sourceKind:"attachment",targetKind:"attachment",legacyId:null,disposition:"mapped",sourceSha256:hash,size:bytes.byteLength,mappedFields:[],sourceOnlyFields:[]},report=plan([note,attachment]),directory=join(f.root,"attachments");

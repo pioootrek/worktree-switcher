@@ -31,8 +31,8 @@ const history = z.strictObject({ ordinal: z.number().int().positive(), ...projec
   authentication_method: z.enum(["owner_session", "agent_token", "worker_token"]), revision, created_at: timestamp });
 const attachment = z.strictObject({ ...record, record_kind: recordKind, record_id: id, filename: z.string().min(1).max(255), media_type: z.string().min(1).max(255),
   size: z.number().int().positive(), sha256: z.string().regex(/^[a-f0-9]{64}$/), ...authored });
-const importSource = z.strictObject({ ...record, source_id:id, source_repository:z.string().min(1).max(4096), source_commit:z.string().regex(/^[a-f0-9]{40}$/), source_path:z.string().min(1).max(4096), legacy_id:z.string().max(200).nullable(),
-  source_sha256:z.string().regex(/^[a-f0-9]{64}$/), mapping_version:z.number().int().positive(), target_kind:z.string().max(100).nullable(), target_id:z.string().max(200).nullable(), target_revision:revision.nullable().optional().default(null), original_payload_json:nullableJson(z.unknown()), created_at:timestamp });
+const importSource = z.strictObject({ ...record, source_id:id, source_repository:z.string().min(1).max(4096), source_commit:z.string().regex(/^[a-f0-9]{40}$/), source_path:z.string().min(1).max(4096), legacy_id:z.string().max(160).nullable(),
+  source_sha256:z.string().regex(/^[a-f0-9]{64}$/), mapping_version:z.number().int().positive(), target_kind:z.string().max(100).nullable(), target_id:id.nullable(), target_revision:revision.nullable().optional().default(null), original_payload_json:nullableJson(z.unknown()), created_at:timestamp });
 
 const snapshotSchema = z.strictObject({ project, threads:z.array(thread), replies:z.array(reply), tasks:z.array(task), memories:z.array(memory), relations:z.array(relation), history:z.array(history), attachments:z.array(attachment), importSources:z.array(importSource).default([]), requiredPrincipals:z.array(id) });
 const count=z.number().int().nonnegative();
