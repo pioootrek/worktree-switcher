@@ -1,80 +1,63 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execFileSync as realExecFileSync } from "node:child_process";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
+import { afterEach, describe, expect, it } from "vitest";
+import { planHubImportAgainstValidator } from "./hub-import-plan";
 
 const roots: string[] = [];
-const validatorRoots = new Set<string>();
-vi.mock("node:child_process", async importOriginal => {
-  const actual = await importOriginal<typeof import("node:child_process")>();
-  return {
-    ...actual,
-    execFileSync: vi.fn((file: string, args: string[], options: Record<string, unknown>) => {
-      const root = args[1];
-      if (file === "git" && validatorRoots.has(root) && args[2] === "rev-parse") return "22afb656c74b2fde84cb92f1aefcf8b427697cc6\n";
-      if (file === "git" && validatorRoots.has(root) && args[2] === "status") return "";
-      return actual.execFileSync(file, args, options);
-    }),
-    spawnSync: vi.fn(() => ({ status: 0, stdout: "Backlog validation passed.\n", stderr: "" })),
-  };
-});
-
-import { PINNED_HUB_VALIDATOR_COMMIT, planHubImport } from "./hub-import-plan";
-import { runHubImportPlanCommand } from "../../../cli/knowledge-management";
-
-function repository(): { root: string; commit: string; marker: string } {
+function commit(root: string, message = "fixture"): string {
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "add", "."], { cwd: root });
+  execFileSync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", message], { cwd: root });
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+}
+function repository() {
   const root = mkdtempSync(join(tmpdir(), "hub-import-source-")); roots.push(root);
   cpSync(join(process.cwd(), "tests", "fixtures", "knowledge-hub"), root, { recursive: true });
-  for (const name of ["schema.json", "done-schema.json", "note-schema.json", "docs-header-schema.json"]) writeFileSync(join(root, "docs", "backlog", name), "{\n  \"type\": \"object\"\n}\n");
-  const marker = join(root, "imported-script-ran");
-  mkdirSync(join(root, "bin"), { recursive: true }); writeFileSync(join(root, "bin", "hub.py"), `require('fs').writeFileSync(${JSON.stringify(marker)}, 'bad')`);
-  realExecFileSync("git", ["init", "-q"], { cwd: root });
-  realExecFileSync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "add", "."], { cwd: root });
-  realExecFileSync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "fixture"], { cwd: root });
-  return { root, commit: realExecFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(), marker };
+  for (const name of ["schema.json", "done-schema.json", "note-schema.json", "docs-header-schema.json"]) writeFileSync(join(root, "docs", "backlog", name), "{\"type\":\"object\"}");
+  const marker = join(root, "imported-script-ran"); mkdirSync(join(root, "bin"), { recursive: true }); writeFileSync(join(root, "bin", "hub.py"), `require('fs').writeFileSync(${JSON.stringify(marker)}, 'bad')`);
+  return { root, commit: commit(root), marker };
 }
-function validator(): string {
-  const root = mkdtempSync(join(tmpdir(), "hub-validator-")); roots.push(root); validatorRoots.add(root);
-  mkdirSync(join(root, "bin"), { recursive: true }); writeFileSync(join(root, "bin", "hub.py"), "# trusted fixture\n");
-  return root;
+function validator() {
+  const root = mkdtempSync(join(tmpdir(), "hub-validator-")); roots.push(root); mkdirSync(join(root, "bin"));
+  writeFileSync(join(root, "bin", "hub.py"), `import argparse,json,pathlib,subprocess,sys
+p=argparse.ArgumentParser();p.add_argument('command');p.add_argument('--backlog-dir');a=p.parse_args()
+root=subprocess.check_output(['git','rev-parse','--show-toplevel'],cwd=pathlib.Path(a.backlog_dir)).decode().strip();c=json.loads((pathlib.Path(a.backlog_dir)/'config.json').read_text());d=c.get('docs_dir');ok=(not d or (pathlib.Path(root)/d).exists()) and not (pathlib.Path(a.backlog_dir)/'force-invalid').exists();print('passed' if ok else 'failed');sys.exit(0 if ok else 1)
+`);
+  return { root, commit: commit(root, "validator") };
 }
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); validatorRoots.clear(); });
+function plan(source: ReturnType<typeof repository>, trusted: ReturnType<typeof validator>) {
+  return planHubImportAgainstValidator({ repository: source.root, commit: source.commit, sourceId: "fixture", validatorRepository: trusted.root }, trusted.commit);
+}
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("K6a Hub import planning", () => {
-  it("reports every source family, custom schemas, missing relations and stable provenance without writing data", () => {
-    const source = repository(), trusted = validator();
-    const state = join(source.root, "controller.sqlite3"); writeFileSync(state, "unchanged");
-    const options = { repository: source.root, commit: source.commit, sourceId: "fixture-repository", validatorRepository: trusted };
-    const first = planHubImport(options), second = planHubImport(options);
-    expect(first.validator).toMatchObject({ commit: PINNED_HUB_VALIDATOR_COMMIT, valid: true });
-    expect(first.counts).toMatchObject({ tasks: 1, embeddedNotes: 1, done: 1, notes: 1, attachments: 2, documents: 1, schemas: 4, derived: 1, unresolvedRelations: 2, missing: 0, conflicts: 0 });
-    expect(first.mappings.find(item => item.legacyId === "NOTE-20260913-synthetic-memory")).toMatchObject({ targetKind: "memory", sourceOnlyFields: expect.arrayContaining(["fixture_extension"]) });
-    expect(first.mappings.filter(item => item.sourceKind === "attachment").map(item => item.sourcePath)).toEqual(expect.arrayContaining([
-      "docs/backlog/notes/NOTE-20260913-synthetic-memory/evidence/declared.txt",
-      "docs/backlog/notes/NOTE-20260913-synthetic-memory/evidence/nested/discovered-only.txt",
-    ]));
-    expect(first.unresolvedRelations).toEqual(expect.arrayContaining([
-      { sourcePath: "docs/backlog/feature/FEAT-20260913-synthetic-open.json", relation: "related_ids", targetLegacyId: "FEAT-20260913-missing-target", blocking: false },
-      { sourcePath: "docs/backlog/done/DONE-20260913-synthetic-finished.json", relation: "item_id", targetLegacyId: "FEAT-20260912-synthetic-finished", blocking: false },
-    ]));
-    expect(first.guarantees).toEqual({ dataWritten: false, sourceReadFromCommit: true, importedRepositoryScriptsExecuted: false });
-    expect(first.planHash).toBe(second.planHash); expect(first.planId).toBe(second.planId);
+  it("runs a trusted validator in an isolated Git worktree and writes no imported data", () => {
+    const source = repository(), trusted = validator(); mkdirSync(join(source.root, "handbook")); writeFileSync(join(source.root, "handbook", "overview.md"), "# Docs\n");
+    const configPath = join(source.root, "docs", "backlog", "config.json"); const config = JSON.parse(readFileSync(configPath, "utf8")); config.docs_dir = "handbook"; writeFileSync(configPath, JSON.stringify(config)); source.commit = commit(source.root, "configured docs");
+    const state = join(source.root, "controller.sqlite3"); writeFileSync(state, "unchanged"); const report = plan(source, trusted);
+    expect(report.validator.valid).toBe(true); expect(report.mappings).toEqual(expect.arrayContaining([expect.objectContaining({ sourcePath: "handbook/overview.md", sourceKind: "unclassified", disposition: "source_only" })]));
     expect(readFileSync(state, "utf8")).toBe("unchanged"); expect(existsSync(source.marker)).toBe(false);
   });
 
-  it("reads the committed tree despite dirty checkout changes and exposes the offline CLI", () => {
-    const source = repository(), trusted = validator(); writeFileSync(join(source.root, "docs", "backlog", "feature", "FEAT-20260913-synthetic-open.json"), "not committed");
-    const lines: string[] = [];
-    runHubImportPlanCommand(["plan-import", "--repository", source.root, "--commit", source.commit, "--source-id", "fixture", "--validator-repository", trusted], line => lines.push(line));
-    const report = JSON.parse(lines[0]!);
-    expect(report.source.commit).toBe(source.commit); expect(report.validator.valid).toBe(true); expect(report.counts.tasks).toBe(1);
+  it("reports nested note.json attachments and stable location-independent hashes", () => {
+    const source = repository(), trusted = validator(); const nested = join(source.root, "docs", "backlog", "notes", "NOTE-20260913-synthetic-memory", "evidence", "note.json"); writeFileSync(nested, "{\"evidence\":true}"); source.commit = commit(source.root, "nested");
+    const first = plan(source, trusted); const clone = mkdtempSync(join(tmpdir(), "source-clone-")); roots.push(clone); execFileSync("git", ["clone", "-q", source.root, clone]); const vclone = mkdtempSync(join(tmpdir(), "validator-clone-")); roots.push(vclone); execFileSync("git", ["clone", "-q", trusted.root, vclone]);
+    const second = planHubImportAgainstValidator({ repository: clone, commit: source.commit, sourceId: "fixture", validatorRepository: vclone }, trusted.commit);
+    expect(first.counts).toMatchObject({ tasks: 1, embeddedNotes: 1, done: 1, notes: 1, attachments: 3, schemas: 4, derived: 1, unresolvedRelations: 2, missing: 0 }); expect(first.mappings.find(item => item.sourcePath.endsWith("evidence/note.json"))).toMatchObject({ sourceKind: "attachment" }); expect(first.planHash).toBe(second.planHash);
   });
 
-  it("rejects a ref name and any validator other than the clean pinned checkout", () => {
-    const source = repository(), trusted = validator();
-    expect(() => planHubImport({ repository: source.root, commit: "HEAD", sourceId: "fixture", validatorRepository: trusted })).toThrow("exact 40-character commit SHA");
-    validatorRoots.delete(trusted);
-    expect(() => planHubImport({ repository: source.root, commit: source.commit, sourceId: "fixture", validatorRepository: trusted })).toThrow("Unable to read the requested Git source");
+  it("reports malformed JSON once, duplicate IDs, custom enums, and missing attachments", () => {
+    const source = repository(), trusted = validator(); const taskPath = join(source.root, "docs", "backlog", "feature", "FEAT-20260913-synthetic-open.json"); const task = JSON.parse(readFileSync(taskPath, "utf8")); task.status = "awaiting_legal"; writeFileSync(taskPath, JSON.stringify(task)); mkdirSync(join(source.root, "docs", "backlog", "fix"), { recursive: true }); writeFileSync(join(source.root, "docs", "backlog", "fix", "duplicate.json"), JSON.stringify({ ...task, status: "open" }));
+    const notePath = join(source.root, "docs", "backlog", "notes", "NOTE-20260913-synthetic-memory", "note.json"); const note = JSON.parse(readFileSync(notePath, "utf8")); note.files.push("absent.txt"); writeFileSync(notePath, JSON.stringify(note)); writeFileSync(join(source.root, "docs", "backlog", "done", "broken.json"), "{"); source.commit = commit(source.root, "failures"); const report = plan(source, trusted);
+    expect(report.missing.filter(item => item.reason === "invalid_json")).toHaveLength(1); expect(report.missing).toEqual(expect.arrayContaining([expect.objectContaining({ reference: "absent.txt" })])); expect(report.conflicts.map(item => item.reason)).toEqual(expect.arrayContaining([expect.stringContaining("duplicate_legacy_id"), "unsupported_task_status:awaiting_legal"])); expect(report.mappings.find(item => item.sourcePath === "docs/backlog/feature/FEAT-20260913-synthetic-open.json")?.sourceOnlyFields).toContain("status");
+  });
+
+  it("reports validator failures and enforces repository, ref, trust, traversal, and Git-mode boundaries", () => {
+    const source = repository(), trusted = validator(); writeFileSync(join(source.root, "docs", "backlog", "force-invalid"), "x"); source.commit = commit(source.root, "invalid"); expect(plan(source, trusted).missing).toEqual(expect.arrayContaining([expect.objectContaining({ reason: "hub_validation_failed" })]));
+    expect(() => planHubImportAgainstValidator({ repository: "/definitely/missing", commit: source.commit, sourceId: "x", validatorRepository: trusted.root }, trusted.commit)).toThrow("source repository does not exist"); expect(() => planHubImportAgainstValidator({ repository: source.root, commit: "HEAD", sourceId: "x", validatorRepository: trusted.root }, trusted.commit)).toThrow("exact 40-character");
+    writeFileSync(join(trusted.root, "dirty"), "x"); expect(() => plan(source, trusted)).toThrow("clean checkout"); rmSync(join(trusted.root, "dirty")); const configPath = join(source.root, "docs", "backlog", "config.json"); const config = JSON.parse(readFileSync(configPath, "utf8")); config.docs_dir = "../outside"; writeFileSync(configPath, JSON.stringify(config)); source.commit = commit(source.root, "unsafe"); expect(() => plan(source, trusted)).toThrow("safe repository-relative path");
+    delete config.docs_dir; writeFileSync(configPath, JSON.stringify(config)); symlinkSync("config.json", join(source.root, "docs", "backlog", "linked.json")); source.commit = commit(source.root, "symlink"); expect(() => plan(source, trusted)).toThrow("unsupported Git entry");
   });
 });
