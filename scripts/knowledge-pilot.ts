@@ -45,7 +45,7 @@ try {
   checks.push("staging invisible; cursor survives connection reopen; complete publication");
   const snapshot = store.exportKnowledgeProject(projectId)!;
   const activeTaskIds=new Set(plan.mappings.filter(mapping=>mapping.targetKind==="task"&&mapping.legacyId).map(mapping=>mapping.legacyId!));
-  const orphanCompletionIds=new Set(plan.mappings.filter(mapping=>mapping.targetKind==="task_completion").map(mapping=>{const payload=mapping.originalPayload as Record<string,unknown>;const itemId=typeof payload?.item_id==="string"?payload.item_id:null;return itemId&&!activeTaskIds.has(itemId)?itemId:null;}).filter((value):value is string=>Boolean(value)));
+  const orphanCompletionIds=new Set(plan.mappings.filter(mapping=>mapping.targetKind==="task_completion").map(mapping=>{const payload=mapping.originalPayload as Record<string,unknown>;const itemId=typeof payload?.item_id==="string"&&payload.item_id?payload.item_id:null;return itemId&&activeTaskIds.has(itemId)?null:itemId??mapping.legacyId??mapping.sourcePath;}).filter((value):value is string=>Boolean(value)));
   assert.equal(snapshot.tasks.length, activeTaskIds.size + orphanCompletionIds.size);
   assert.equal(snapshot.memories.length, plan.counts.notes);
   assert.equal(snapshot.replies.length, plan.counts.embeddedNotes);
