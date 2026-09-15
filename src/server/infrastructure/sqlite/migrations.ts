@@ -655,7 +655,7 @@ function applyMigrations(database: Database.Database): void {
           target_id TEXT,
           original_payload_json TEXT,
           created_at TEXT NOT NULL,
-          UNIQUE(source_id, legacy_id, source_path)
+          UNIQUE(project_id, source_id, legacy_id, source_path)
         );
         CREATE INDEX IF NOT EXISTS knowledge_import_sources_project
           ON knowledge_import_sources(project_id, source_path, id);
@@ -669,6 +669,36 @@ function applyMigrations(database: Database.Database): void {
       const columns = new Set((database.prepare("PRAGMA table_info(knowledge_import_sources)").all() as Array<{ name: string }>).map(({ name }) => name));
       if (!columns.has("target_revision")) database.exec(`ALTER TABLE knowledge_import_sources ADD COLUMN target_revision INTEGER CHECK(target_revision IS NULL OR target_revision > 0)`);
       recordMigration(database, 23);
+    })();
+  }
+
+  if (!hasMigration(database, 24)) {
+    database.transaction(() => {
+      database.exec(`
+        CREATE TABLE knowledge_import_sources_v24 (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES knowledge_projects(id),
+          batch_id TEXT REFERENCES knowledge_import_batches(id),
+          source_id TEXT NOT NULL,
+          source_repository TEXT NOT NULL,
+          source_commit TEXT NOT NULL,
+          source_path TEXT NOT NULL,
+          legacy_id TEXT,
+          source_sha256 TEXT NOT NULL CHECK(length(source_sha256) = 64),
+          mapping_version INTEGER NOT NULL,
+          target_kind TEXT,
+          target_id TEXT,
+          original_payload_json TEXT,
+          created_at TEXT NOT NULL,
+          target_revision INTEGER CHECK(target_revision IS NULL OR target_revision > 0),
+          UNIQUE(project_id, source_id, legacy_id, source_path)
+        );
+        INSERT INTO knowledge_import_sources_v24 SELECT * FROM knowledge_import_sources;
+        DROP TABLE knowledge_import_sources;
+        ALTER TABLE knowledge_import_sources_v24 RENAME TO knowledge_import_sources;
+        CREATE INDEX knowledge_import_sources_project ON knowledge_import_sources(project_id, source_path, id);
+      `);
+      recordMigration(database, 24);
     })();
   }
 

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -84,7 +84,7 @@ describe("K6b Hub import execution",()=>{
     const f=fixture(),first=mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One",links:{related_ids:["two"]}}),second=mapping("docs/backlog/feature/two.json","task","task",{id:"two",title:"Two"});
     const comment=mapping("docs/backlog/feature/one.json#notes/0","task_note","historical_comment",{id:"one:note:0",text:"Historical context",author:"human:reviewer"});comment.legacyId="one:note:0";
     const done=mapping("docs/backlog/done/DONE-one.json","done","task_completion",{id:"DONE-one",item_id:"one",title:"One completed",summary:"Shipped"});
-    const report=plan([first,comment,second,done]);execute(f.store,f.identity,f.owner,{plan:report,targetProjectId:"complete",targetProjectName:"Complete"});
+    const report=plan([done,first,comment,second]);execute(f.store,f.identity,f.owner,{plan:report,targetProjectId:"complete",targetProjectName:"Complete"});
     const tasks=f.store.listTasks("complete",25,0).items;expect(tasks.find(task=>task.title==="One")?.status).toBe("done");expect(tasks).toHaveLength(2);
     const thread=f.store.listThreads("complete",25,0).items[0]!;expect(f.store.listReplies("complete",thread.id,25,0).items[0]?.body).toBe("Historical context");
     expect(f.store.listRelations("complete","task",tasks.find(task=>task.title==="One")!.id,25,0).items.some(relation=>relation.type==="relates_to")).toBe(true);f.store.close();
@@ -122,12 +122,43 @@ describe("K6b Hub import execution",()=>{
     f.store.close();
   });
 
+  it("reimports an orphan completion and updates its stable task",()=>{
+    const f=fixture(),first=plan([mapping("docs/backlog/done/DONE-one.json","done","task_completion",{id:"DONE-one",item_id:"missing",title:"Done",summary:"Before"})]);
+    execute(f.store,f.identity,f.owner,{plan:first,targetProjectId:"done-only",targetProjectName:"Done only"});
+    const changed=atCommit(plan([mapping("docs/backlog/done/DONE-one.json","done","task_completion",{id:"DONE-one",item_id:"missing",title:"Done",summary:"After"})]),"f".repeat(40));
+    execute(f.store,f.identity,f.owner,{plan:changed,targetProjectId:"done-only",targetProjectName:"Done only",expectedTargetRevision:1});
+    expect(f.store.listTasks("done-only",25,0).items).toMatchObject([{description:"After",status:"done",revision:2}]);f.store.close();
+  });
+
+  it("imports the same Hub source into two projects",()=>{
+    const f=fixture(),source=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One"})]);
+    execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:"first-target",targetProjectName:"First"});
+    execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:"second-target",targetProjectName:"Second"});
+    expect(f.store.listTasks("first-target",25,0).items).toHaveLength(1);expect(f.store.listTasks("second-target",25,0).items).toHaveLength(1);f.store.close();
+  });
+
+  it("rejects target identities that cannot be logically restored",()=>{
+    const f=fixture(),source=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One"})]);
+    expect(()=>execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:"x".repeat(161),targetProjectName:"Target"})).toThrowError(expect.objectContaining({code:"invalid_request"}));
+    expect(()=>execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:"target",targetProjectName:"x".repeat(121)})).toThrowError(expect.objectContaining({code:"invalid_request"}));f.store.close();
+  });
+
   it("verifies and installs attachment bytes for their imported note",()=>{
     const f=fixture(),bytes=Buffer.from("attachment proof"),hash=createHash("sha256").update(bytes).digest("hex"),note=mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"NOTE-one",title:"Note",body:"Body"});
     const attachment:HubImportMapping={sourcePath:"docs/backlog/notes/NOTE-one/proof.txt",sourceKind:"attachment",targetKind:"attachment",legacyId:null,disposition:"mapped",sourceSha256:hash,size:bytes.byteLength,mappedFields:[],sourceOnlyFields:[]},report=plan([note,attachment]),directory=join(f.root,"attachments");
     executeHubImport(f.store,f.identity,f.owner,{plan:report,targetProjectId:"files",targetProjectName:"Files",attachmentDirectory:directory},()=>NOW,value=>value,()=>bytes);
     const memory=f.store.listMemories("files",25,0,"",true).items[0]!;expect(f.store.listAttachments("files","memory",memory.id,25,0).items).toMatchObject([{filename:"proof.txt",sha256:hash,size:bytes.byteLength}]);
     expect(readFileSync(join(directory,hash.slice(0,2),hash))).toEqual(bytes);f.store.close();
+  });
+
+  it("links nested attachments to the note directory and rejects symlink shards",()=>{
+    const f=fixture(),bytes=Buffer.from("nested proof"),hash=createHash("sha256").update(bytes).digest("hex"),note=mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"NOTE-one",title:"Note",body:"Body"});
+    const attachment:HubImportMapping={sourcePath:"docs/backlog/notes/NOTE-one/assets/proof.txt",sourceKind:"attachment",targetKind:"attachment",legacyId:null,disposition:"mapped",sourceSha256:hash,size:bytes.byteLength,mappedFields:[],sourceOnlyFields:[]},report=plan([note,attachment]),directory=join(f.root,"nested-attachments");
+    executeHubImport(f.store,f.identity,f.owner,{plan:report,targetProjectId:"nested",targetProjectName:"Nested",attachmentDirectory:directory},()=>NOW,value=>value,()=>bytes);
+    expect(f.store.listAttachments("nested","memory",f.store.listMemories("nested",25,0,"",true).items[0]!.id,25,0).items).toHaveLength(1);f.store.close();
+    const unsafe=fixture(),unsafeDirectory=join(unsafe.root,"unsafe-attachments"),outside=join(unsafe.root,"outside");mkdirSync(unsafeDirectory);mkdirSync(outside);symlinkSync(outside,join(unsafeDirectory,hash.slice(0,2)));
+    expect(()=>executeHubImport(unsafe.store,unsafe.identity,unsafe.owner,{plan:report,targetProjectId:"unsafe",targetProjectName:"Unsafe",attachmentDirectory:unsafeDirectory,batchId:"unsafe-batch"},()=>NOW,value=>value,()=>bytes)).toThrowError(expect.objectContaining({code:"invalid_request"}));
+    expect(existsSync(join(outside,hash))).toBe(false);expect(unsafe.store.getHubImport("unsafe-batch")).toMatchObject({status:"failed"});unsafe.store.close();
   });
 
   it("removes newly installed attachment objects when database publication rolls back",()=>{

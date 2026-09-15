@@ -45,8 +45,8 @@ export interface ExecuteHubImportInput {
 }
 
 function validate(input: ExecuteHubImportInput): void {
-  if (!input.targetProjectId.trim() || input.targetProjectId.length > 200) throw new KnowledgeError("invalid_request", "Target project ID is required.");
-  if (!input.targetProjectName.trim() || input.targetProjectName.length > 200) throw new KnowledgeError("invalid_request", "Target project name is required.");
+  if (!input.targetProjectId.trim() || input.targetProjectId.trim().length > 160) throw new KnowledgeError("invalid_request", "Target project ID is required and must not exceed 160 characters.");
+  if (!input.targetProjectName.trim() || input.targetProjectName.trim().length > 120) throw new KnowledgeError("invalid_request", "Target project name is required and must not exceed 120 characters.");
   if (input.expectedTargetRevision !== undefined && input.expectedTargetRevision !== null && (!Number.isInteger(input.expectedTargetRevision) || input.expectedTargetRevision < 1)) throw new KnowledgeError("invalid_request", "Expected target revision must be positive.");
   if (input.plan.guarantees.dataWritten !== false || !input.plan.validator.valid) throw new KnowledgeError("invalid_request", "Only a valid read-only Hub import plan can be executed.");
   if (calculateHubImportPlanHash(input.plan) !== input.plan.planHash || !input.plan.planId.endsWith(input.plan.planHash.slice(0, 16))) throw new KnowledgeError("revision_conflict", "Hub import plan hash does not match its contents.");
