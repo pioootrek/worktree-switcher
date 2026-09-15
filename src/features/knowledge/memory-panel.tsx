@@ -93,8 +93,8 @@ function MemoryPanelContent({ token, principalId, projectId, recordId, writable,
     {error && <p role="alert">{t(error as "knowledge.saveFailed")}</p>}
     {pending && !busy && <Button variant="outline" onClick={() => void mutate(pending!.operation as "approve_memory")}>{t("knowledge.retryOperation")}</Button>}
     {editor && (editor === "new" || record) && <MemoryEditor key={`${projectId}:${editor === "new" ? "new" : recordId}`} token={token} principalId={principalId} projectId={projectId} record={editor === "edit" ? record! : undefined} onClose={() => setEditor(null)} onConflict={() => setVersion(v => v + 1)} onSaved={id => { setEditor(null); setVersion(v => v + 1); onSelect("memory", id); }} />}
-    <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(200px,1fr)_minmax(0,2fr)]">
-      <div className="space-y-3"><ul className="divide-y divide-border rounded-xl border border-border">{page.items.map(row => <li className="p-3" key={`${row.kind}:${row.id}`}><a className="break-words underline" href={sourceHref(projectId, { kind: row.kind === "reply" ? "thread" : row.kind, id: row.threadId ?? row.id, revision: row.revision })} onClick={event => {
+    <div className="grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-[minmax(200px,1fr)_minmax(0,2fr)]">
+      <div className="min-w-0 space-y-3"><ul className="divide-y divide-border rounded-xl border border-border">{page.items.map(row => <li className="p-3" key={`${row.kind}:${row.id}`}><a className="break-words underline" href={sourceHref(projectId, { kind: row.kind === "reply" ? "thread" : row.kind, id: row.threadId ?? row.id, revision: row.revision })} onClick={event => {
         if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
         event.preventDefault(); setEditor(null); onSelect(row.kind === "memory" ? "memory" : row.kind === "task" ? "backlog" : "discussions", row.threadId ?? row.id);
       }}>{row.title || t("knowledge.source.reply")}</a><p className="text-xs">{row.id} · {t(`knowledge.source.${row.kind}`)}</p><p className="break-words text-sm text-muted-foreground">{row.excerpt}</p></li>)}</ul>
