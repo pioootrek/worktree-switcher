@@ -36,7 +36,7 @@
   "scripts": {
     "build": "next build && tsup src/cli/index.ts --format esm --platform node --target node22 --clean --out-dir dist/cli && node scripts/build-fingerprint.mjs --write",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:resources",
-    "dev": "tsx src/cli/index.ts start --web-root out",
+    "dev": "node scripts/dev-controller.mjs",
     "dev:web": "next dev",
     "lint": "eslint .",
     "package:trial": "node scripts/package-trial.mjs",
