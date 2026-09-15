@@ -60,4 +60,9 @@ describe("K6a Hub import planning", () => {
     writeFileSync(join(trusted.root, "dirty"), "x"); expect(() => plan(source, trusted)).toThrow("clean checkout"); rmSync(join(trusted.root, "dirty")); const configPath = join(source.root, "docs", "backlog", "config.json"); const config = JSON.parse(readFileSync(configPath, "utf8")); config.docs_dir = "../outside"; writeFileSync(configPath, JSON.stringify(config)); source.commit = commit(source.root, "unsafe"); expect(() => plan(source, trusted)).toThrow("safe repository-relative path");
     delete config.docs_dir; writeFileSync(configPath, JSON.stringify(config)); symlinkSync("config.json", join(source.root, "docs", "backlog", "linked.json")); source.commit = commit(source.root, "symlink"); expect(() => plan(source, trusted)).toThrow("unsupported Git entry");
   });
+
+  it("enforces per-file and file-count limits before validation", () => {
+    const oversized = repository(), trusted = validator(); writeFileSync(join(oversized.root, "docs", "backlog", "oversized.bin"), Buffer.alloc(10 * 1024 * 1024 + 1)); oversized.commit = commit(oversized.root, "oversized"); expect(() => plan(oversized, trusted)).toThrow("planning limits");
+    const crowded = repository(); const directory = join(crowded.root, "docs", "backlog", "bulk"); mkdirSync(directory); for (let index = 0; index < 5_000; index += 1) writeFileSync(join(directory, `${index}.txt`), "x"); crowded.commit = commit(crowded.root, "crowded"); expect(() => plan(crowded, trusted)).toThrow("too many files");
+  });
 });
