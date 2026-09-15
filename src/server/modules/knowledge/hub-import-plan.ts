@@ -13,6 +13,11 @@ const MAX_TOTAL_BYTES = 200 * 1024 * 1024;
 const ITEM_DIRECTORIES = new Set(["feature", "fix", "rework", "security"]);
 const DERIVED_NAMES = new Set(["index.json"]);
 const OVERRIDES = new Set(["schema.json", "done-schema.json", "note-schema.json", "docs-header-schema.json"]);
+const compareCodePoints = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
+const HUB_VALIDATOR_ADAPTER = `import importlib.util,sys
+sys.dont_write_bytecode=True;script=sys.argv.pop(1);spec=importlib.util.spec_from_file_location("trusted_hub",script);hub=importlib.util.module_from_spec(spec);spec.loader.exec_module(hub)
+original=hub.item_files;hub.item_files=lambda source:[path for path in original(source) if path != hub.PROJECT_DOCS_SCHEMA_FILE]
+raise SystemExit(hub.main())`;
 
 export interface HubImportPlanOptions {
   repository: string;
@@ -31,6 +36,7 @@ export interface HubImportMapping {
   size: number;
   mappedFields: string[];
   sourceOnlyFields: string[];
+  valueMappings?: Array<{ field: string; sourceValue: string; targetValue: string }>;
   originalPayload?: unknown;
 }
 
@@ -56,7 +62,7 @@ interface SourceFile { path: string; bytes: Buffer }
 const sha = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
+  if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => compareCodePoints(a, b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
   return JSON.stringify(value);
 }
 function git(repository: string, args: string[], encoding: BufferEncoding | "buffer" = "utf8"): string | Buffer {
@@ -64,19 +70,19 @@ function git(repository: string, args: string[], encoding: BufferEncoding | "buf
   catch { throw new KnowledgeError("invalid_request", "Unable to read the requested Git source."); }
 }
 function safeTarget(root: string, relative: string): string {
-  if (!relative || relative.startsWith("/") || relative.includes("\\") || relative.split("/").includes("..")) throw new KnowledgeError("invalid_request", "Source commit contains an unsafe path.");
+  if (!relative || relative.startsWith("/") || relative.includes("\\") || relative.split("/").some(part => part === ".." || part === ".git")) throw new KnowledgeError("invalid_request", "Source commit contains an unsafe path.");
   const target = resolve(root, ...relative.split("/"));
   if (target === resolve(root) || !target.startsWith(resolve(root) + sep)) throw new KnowledgeError("invalid_request", "Source commit contains an unsafe path.");
   return target;
 }
 function safeConfiguredRoot(value: unknown, name: string): string | null {
   if (value === undefined || value === null || value === "") return null;
-  if (typeof value !== "string" || value.startsWith("/") || value.includes("\\") || value.split("/").includes("..")) {
+  if (typeof value !== "string" || value.startsWith("/") || value.includes("\\") || value.split("/").some(part => part === ".." || part === ".git")) {
     throw new KnowledgeError("invalid_request", `Hub ${name} must be a safe repository-relative path.`);
   }
   return value.replace(/^\.\//, "").replace(/\/$/, "") || ".";
 }
-function readCommit(repository: string, commit: string): SourceFile[] {
+function readCommit(repository: string, commit: string): { files: SourceFile[]; docsRoot: string | null; instructionsRoot: string | null } {
   const configBytes = git(repository, ["show", `${commit}:docs/backlog/config.json`], "buffer") as Buffer;
   let config: Record<string, unknown>;
   try {
@@ -93,23 +99,31 @@ function readCommit(repository: string, commit: string): SourceFile[] {
     return path.startsWith("docs/backlog/") || inRoot(docsRoot) || (inRoot(instructionsRoot) && ["AGENTS.md", "CLAUDE.md"].includes(path.split("/").at(-1)!));
   });
   if (selected.length > MAX_FILES) throw new KnowledgeError("limit_exceeded", "Hub source contains too many files.");
-  let total = 0;
-  return selected.map(entry => {
+  const paths = selected.map(entry => {
     const match = /^(\d+)\s+blob\s+[a-f0-9]+\t(.+)$/.exec(entry);
     if (!match || match[1] === "120000") throw new KnowledgeError("invalid_request", "Hub source contains an unsupported Git entry.");
-    const path = match[2]!;
-    const bytes = git(repository, ["show", `${commit}:${path}`], "buffer") as Buffer;
+    return match[2]!;
+  });
+  const result = spawnSync("git", ["-C", repository, "cat-file", "--batch"], { input: paths.map(path => `${commit}:${path}\n`).join(""), encoding: null, maxBuffer: MAX_TOTAL_BYTES + 4 * 1024 * 1024 });
+  if (result.error || result.status !== 0 || !result.stdout) throw new KnowledgeError("invalid_request", "Unable to read the requested Git source.");
+  const output = result.stdout as Buffer; let offset = 0; let total = 0;
+  const files = paths.map(path => {
+    const newline = output.indexOf(10, offset); if (newline < 0) throw new KnowledgeError("invalid_request", "Unable to read the requested Git source.");
+    const header = output.subarray(offset, newline).toString("utf8"), size = Number(header.split(" ").at(-1));
+    if (!Number.isSafeInteger(size) || size < 0 || size > MAX_FILE_BYTES) throw new KnowledgeError("limit_exceeded", "Hub source exceeds import planning limits.");
+    offset = newline + 1; const bytes = output.subarray(offset, offset + size); offset += size + 1;
     total += bytes.byteLength;
     if (bytes.byteLength > MAX_FILE_BYTES || total > MAX_TOTAL_BYTES) throw new KnowledgeError("limit_exceeded", "Hub source exceeds import planning limits.");
-    return { path, bytes };
+    return { path, bytes: Buffer.from(bytes) };
   });
+  return { files, docsRoot, instructionsRoot };
 }
 function stringArray(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
 function mapping(file: SourceFile, sourceKind: HubImportMapping["sourceKind"], targetKind: HubImportMapping["targetKind"], legacyId: string | null,
-  disposition: HubImportMapping["disposition"], payload?: Record<string, unknown>, supported: string[] = []): HubImportMapping {
+  disposition: HubImportMapping["disposition"], payload?: Record<string, unknown>, supported: string[] = [], valueMappings: HubImportMapping["valueMappings"] = []): HubImportMapping {
   const keys = payload ? Object.keys(payload).sort() : [];
   return { sourcePath: file.path, sourceKind, targetKind, legacyId, disposition, sourceSha256: sha(file.bytes), size: file.bytes.byteLength,
-    mappedFields: keys.filter(key => supported.includes(key)), sourceOnlyFields: keys.filter(key => !supported.includes(key)), ...(payload ? { originalPayload: payload } : {}) };
+    mappedFields: keys.filter(key => supported.includes(key)), sourceOnlyFields: keys.filter(key => !supported.includes(key)), ...(valueMappings.length ? { valueMappings } : {}), ...(payload ? { originalPayload: payload } : {}) };
 }
 
 function verifyValidator(repository: string, expectedCommit: string): { root: string } {
@@ -137,14 +151,15 @@ export function planHubImportAgainstValidator(options: HubImportPlanOptions, exp
   const resolvedCommit = String(git(repository, ["rev-parse", "--verify", `${options.commit}^{commit}`])).trim();
   if (resolvedCommit !== options.commit) throw new KnowledgeError("invalid_request", "Import source commit could not be resolved exactly.");
   const trusted = verifyValidator(options.validatorRepository, expectedValidatorCommit);
-  const files = readCommit(repository, resolvedCommit).sort((a, b) => a.path.localeCompare(b.path));
+  const snapshot = readCommit(repository, resolvedCommit);
+  const files = snapshot.files.sort((a, b) => compareCodePoints(a.path, b.path));
   if (!files.some(file => file.path === "docs/backlog/config.json")) throw new KnowledgeError("invalid_request", "Source commit has no docs/backlog/config.json.");
   const temporary = mkdtempSync(join(tmpdir(), "worktree-switcher-hub-plan-"));
   let validatorValid = false; let diagnostics: string[] = [];
   try {
     execFileSync("git", ["init", "-q", temporary], { encoding: "utf8" });
     for (const file of files) { const target = safeTarget(temporary, file.path); mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, file.bytes, { mode: 0o600 }); }
-    const command = [join(trusted.root, "bin", "hub.py"), "validate", "--backlog-dir", join(temporary, "docs", "backlog")];
+    const command = ["-I", "-c", HUB_VALIDATOR_ADAPTER, join(trusted.root, "bin", "hub.py"), "validate", "--backlog-dir", join(temporary, "docs", "backlog")];
     const result = spawnSync("python3", command, { cwd: temporary, encoding: "utf8", timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
     if (result.error) throw new KnowledgeError("invalid_request", "Pinned Hub validator could not be executed.");
     validatorValid = result.status === 0;
@@ -173,12 +188,14 @@ export function planHubImportAgainstValidator(options: HubImportPlanOptions, exp
     if (relative && parts.length === 2 && ITEM_DIRECTORIES.has(parts[0]!)) {
       const payload = json(file); if (!payload) continue; const id = typeof payload.id === "string" ? payload.id : null;
       const supported = ["id","title","problem","status","priority","type","area","scope","validation","risk","risk_acceptance","created","source","notes","links"];
-      const enums: Record<string, Set<string>> = { status: new Set(["open", "in_progress", "blocked", "done", "archived"]), priority: new Set(["now", "next", "later"]), type: ITEM_DIRECTORIES };
+      const valueMappings: HubImportMapping["valueMappings"] = [];
+      const enums: Record<string, Set<string>> = { status: new Set(["open", "in_progress", "in-progress", "blocked", "done", "archived"]), priority: new Set(["now", "next", "later"]), type: ITEM_DIRECTORIES };
       for (const [field, allowed] of Object.entries(enums)) if (typeof payload[field] === "string" && !allowed.has(payload[field] as string)) {
         supported.splice(supported.indexOf(field), 1);
         conflicts.push({ sourcePath: file.path, legacyId: id, blocking: true, reason: `unsupported_task_${field}:${payload[field] as string}` });
       }
-      register(mapping(file, "task", "task", id, "mapped", payload, supported));
+      if (payload.status === "in-progress") valueMappings.push({ field: "status", sourceValue: "in-progress", targetValue: "in_progress" });
+      register(mapping(file, "task", "task", id, "mapped", payload, supported, valueMappings));
       if (Array.isArray(payload.notes)) payload.notes.forEach((note, index) => {
         if (!note || typeof note !== "object" || Array.isArray(note)) return;
         const notePayload = note as Record<string, unknown>, bytes = Buffer.from(canonical(notePayload));
@@ -207,7 +224,9 @@ export function planHubImportAgainstValidator(options: HubImportPlanOptions, exp
       const payload = json(file); if (payload) register(mapping(file, "schema", "import_metadata", null, "source_only", payload));
     } else if (relative && DERIVED_NAMES.has(relative)) {
       const payload = json(file); if (payload) register(mapping(file, "derived", null, null, "skipped", payload));
-    } else if (file.path.startsWith("docs/") && file.path.endsWith(".md")) {
+    } else if (snapshot.docsRoot && (snapshot.docsRoot === "." || file.path.startsWith(`${snapshot.docsRoot}/`)) && file.path.endsWith(".md")) {
+      register(mapping(file, "document", "external_source", null, "source_only"));
+    } else if (snapshot.instructionsRoot && (snapshot.instructionsRoot === "." || file.path.startsWith(`${snapshot.instructionsRoot}/`)) && ["AGENTS.md", "CLAUDE.md"].includes(file.path.split("/").at(-1)!)) {
       register(mapping(file, "document", "external_source", null, "source_only"));
     } else {
       register(mapping(file, "unclassified", null, null, "source_only"));
@@ -218,7 +237,7 @@ export function planHubImportAgainstValidator(options: HubImportPlanOptions, exp
   const base = {
     formatVersion: 1 as const,
     source: { sourceId: options.sourceId, repository, commit: resolvedCommit, backlogPath: "docs/backlog" as const },
-    validator: { repository: trusted.root, commit: expectedValidatorCommit, command: ["bin/hub.py", "validate", "--backlog-dir", "<temporary>/docs/backlog"], valid: validatorValid, diagnostics },
+    validator: { repository: trusted.root, commit: expectedValidatorCommit, command: ["python3", "-I", "<trusted Hub compatibility adapter>", "bin/hub.py", "validate", "--backlog-dir", "<temporary>/docs/backlog"], valid: validatorValid, diagnostics },
     counts: { files: files.length, bytes: files.reduce((sum, file) => sum + file.bytes.byteLength, 0), tasks: kinds("task"), embeddedNotes: kinds("task_note"), done: kinds("done"), notes: kinds("note"), attachments: kinds("attachment"), documents: kinds("document"), configurations: kinds("configuration"), schemas: kinds("schema"), derived: kinds("derived"), unclassified: kinds("unclassified"), mapped: mappings.filter(item => item.disposition === "mapped").length, sourceOnly: mappings.filter(item => item.disposition === "source_only").length, skipped: mappings.filter(item => item.disposition === "skipped").length, missing: missing.length, conflicts: conflicts.length, unresolvedRelations: unresolvedRelations.length },
     mappings, missing, conflicts, unresolvedRelations,
     guarantees: { dataWritten: false as const, sourceReadFromCommit: true as const, importedRepositoryScriptsExecuted: false as const },

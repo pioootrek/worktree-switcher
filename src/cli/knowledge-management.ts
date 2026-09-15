@@ -2,7 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import type { AppPaths } from "../server/paths";
 import { knowledgeSchemas, type KnowledgeOperation, type KnowledgeFailure } from "../shared/contracts/knowledge";
 import { localDashboardEndpoint, readServiceAccess } from "./service-access";
-import { planHubImport } from "../server/modules/knowledge";
+import { planHubImport, KnowledgeError, type HubImportPlanOptions, type HubImportPlan } from "../server/modules/knowledge";
 
 function option(args: string[], name: string): string {
   const index = args.indexOf(name), value = index < 0 ? undefined : args[index + 1];
@@ -10,10 +10,16 @@ function option(args: string[], name: string): string {
   return value;
 }
 
-export function runHubImportPlanCommand(args: string[], write: (line: string) => void = console.log): void {
+export function runHubImportPlanCommand(args: string[], write: (line: string) => void = console.log,
+  planner: (options: HubImportPlanOptions) => HubImportPlan = planHubImport): void {
   const allowed = new Set(["--repository", "--commit", "--source-id", "--validator-repository"]);
   for (let index = 1; index < args.length; index += 2) if (!allowed.has(args[index]!) || !args[index + 1] || args[index + 1]!.startsWith("--")) throw new Error("Usage: knowledge plan-import --repository <path> --commit <sha> --source-id <id> --validator-repository <path>");
-  write(JSON.stringify(planHubImport({ repository: option(args, "--repository"), commit: option(args, "--commit"), sourceId: option(args, "--source-id"), validatorRepository: option(args, "--validator-repository") }), null, 2));
+  try {
+    write(JSON.stringify(planner({ repository: option(args, "--repository"), commit: option(args, "--commit"), sourceId: option(args, "--source-id"), validatorRepository: option(args, "--validator-repository") }), null, 2));
+  } catch (error) {
+    if (error instanceof KnowledgeError) throw new Error(`${error.code}: ${error.message}`);
+    throw error;
+  }
 }
 
 /** Extract global path options before the operation's strict argument validation. */

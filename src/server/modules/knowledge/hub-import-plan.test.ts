@@ -16,14 +16,17 @@ function repository() {
   const root = mkdtempSync(join(tmpdir(), "hub-import-source-")); roots.push(root);
   cpSync(join(process.cwd(), "tests", "fixtures", "knowledge-hub"), root, { recursive: true });
   for (const name of ["schema.json", "done-schema.json", "note-schema.json", "docs-header-schema.json"]) writeFileSync(join(root, "docs", "backlog", name), "{\"type\":\"object\"}");
-  const marker = join(root, "imported-script-ran"); mkdirSync(join(root, "bin"), { recursive: true }); writeFileSync(join(root, "bin", "hub.py"), `require('fs').writeFileSync(${JSON.stringify(marker)}, 'bad')`);
+  const marker = join(root, "imported-script-ran"), sourceBin = join(root, "docs", "backlog", "bin"); mkdirSync(sourceBin); writeFileSync(join(sourceBin, "hub.py"), `from pathlib import Path\nPath(${JSON.stringify(marker)}).write_text("bad")\n`);
   return { root, commit: commit(root), marker };
 }
 function validator() {
   const root = mkdtempSync(join(tmpdir(), "hub-validator-")); roots.push(root); mkdirSync(join(root, "bin"));
-  writeFileSync(join(root, "bin", "hub.py"), `import argparse,json,pathlib,subprocess,sys
-p=argparse.ArgumentParser();p.add_argument('command');p.add_argument('--backlog-dir');a=p.parse_args()
-root=subprocess.check_output(['git','rev-parse','--show-toplevel'],cwd=pathlib.Path(a.backlog_dir)).decode().strip();c=json.loads((pathlib.Path(a.backlog_dir)/'config.json').read_text());d=c.get('docs_dir');ok=(not d or (pathlib.Path(root)/d).exists()) and not (pathlib.Path(a.backlog_dir)/'force-invalid').exists();print('passed' if ok else 'failed');sys.exit(0 if ok else 1)
+  writeFileSync(join(root, "bin", "hub.py"), `import argparse,json,pathlib,subprocess
+PROJECT_DOCS_SCHEMA_FILE='docs-header-schema.json'
+def item_files(source): return [PROJECT_DOCS_SCHEMA_FILE]
+def main():
+ p=argparse.ArgumentParser();p.add_argument('command');p.add_argument('--backlog-dir');a=p.parse_args()
+ root=subprocess.check_output(['git','rev-parse','--show-toplevel'],cwd=pathlib.Path(a.backlog_dir)).decode().strip();c=json.loads((pathlib.Path(a.backlog_dir)/'config.json').read_text());d=c.get('docs_dir');ok=(not d or (pathlib.Path(root)/d).exists()) and not (pathlib.Path(a.backlog_dir)/'force-invalid').exists() and item_files(None)==[];print('passed' if ok else 'failed');return 0 if ok else 1
 `);
   return { root, commit: commit(root, "validator") };
 }
@@ -37,7 +40,7 @@ describe("K6a Hub import planning", () => {
     const source = repository(), trusted = validator(); mkdirSync(join(source.root, "handbook")); writeFileSync(join(source.root, "handbook", "overview.md"), "# Docs\n");
     const configPath = join(source.root, "docs", "backlog", "config.json"); const config = JSON.parse(readFileSync(configPath, "utf8")); config.docs_dir = "handbook"; writeFileSync(configPath, JSON.stringify(config)); source.commit = commit(source.root, "configured docs");
     const state = join(source.root, "controller.sqlite3"); writeFileSync(state, "unchanged"); const report = plan(source, trusted);
-    expect(report.validator.valid).toBe(true); expect(report.mappings).toEqual(expect.arrayContaining([expect.objectContaining({ sourcePath: "handbook/overview.md", sourceKind: "unclassified", disposition: "source_only" })]));
+    expect(report.validator.valid).toBe(true); expect(report.mappings).toEqual(expect.arrayContaining([expect.objectContaining({ sourcePath: "handbook/overview.md", sourceKind: "document", disposition: "source_only" })]));
     expect(readFileSync(state, "utf8")).toBe("unchanged"); expect(existsSync(source.marker)).toBe(false);
   });
 
@@ -54,10 +57,15 @@ describe("K6a Hub import planning", () => {
     expect(report.missing.filter(item => item.reason === "invalid_json")).toHaveLength(1); expect(report.missing).toEqual(expect.arrayContaining([expect.objectContaining({ reference: "absent.txt" })])); expect(report.conflicts.map(item => item.reason)).toEqual(expect.arrayContaining([expect.stringContaining("duplicate_legacy_id"), "unsupported_task_status:awaiting_legal"])); expect(report.mappings.find(item => item.sourcePath === "docs/backlog/feature/FEAT-20260913-synthetic-open.json")?.sourceOnlyFields).toContain("status");
   });
 
+  it("maps the standard Hub in-progress status explicitly and sorts paths by code point", () => {
+    const source = repository(), trusted = validator(); const taskPath = join(source.root, "docs", "backlog", "feature", "FEAT-20260913-synthetic-open.json"); const task = JSON.parse(readFileSync(taskPath, "utf8")); task.status = "in-progress"; writeFileSync(taskPath, JSON.stringify(task)); writeFileSync(join(source.root, "docs", "backlog", "z.txt"), "z"); writeFileSync(join(source.root, "docs", "backlog", "ä.txt"), "a"); source.commit = commit(source.root, "known status"); const report = plan(source, trusted);
+    expect(report.conflicts).not.toEqual(expect.arrayContaining([expect.objectContaining({ reason: expect.stringContaining("in-progress") })])); expect(report.mappings.find(item => item.legacyId === task.id)?.valueMappings).toEqual([{ field: "status", sourceValue: "in-progress", targetValue: "in_progress" }]); expect(report.mappings.map(item => item.sourcePath).indexOf("docs/backlog/z.txt")).toBeLessThan(report.mappings.map(item => item.sourcePath).indexOf("docs/backlog/ä.txt"));
+  });
+
   it("reports validator failures and enforces repository, ref, trust, traversal, and Git-mode boundaries", () => {
     const source = repository(), trusted = validator(); writeFileSync(join(source.root, "docs", "backlog", "force-invalid"), "x"); source.commit = commit(source.root, "invalid"); expect(plan(source, trusted).missing).toEqual(expect.arrayContaining([expect.objectContaining({ reason: "hub_validation_failed" })]));
     expect(() => planHubImportAgainstValidator({ repository: "/definitely/missing", commit: source.commit, sourceId: "x", validatorRepository: trusted.root }, trusted.commit)).toThrow("source repository does not exist"); expect(() => planHubImportAgainstValidator({ repository: source.root, commit: "HEAD", sourceId: "x", validatorRepository: trusted.root }, trusted.commit)).toThrow("exact 40-character");
-    writeFileSync(join(trusted.root, "dirty"), "x"); expect(() => plan(source, trusted)).toThrow("clean checkout"); rmSync(join(trusted.root, "dirty")); const configPath = join(source.root, "docs", "backlog", "config.json"); const config = JSON.parse(readFileSync(configPath, "utf8")); config.docs_dir = "../outside"; writeFileSync(configPath, JSON.stringify(config)); source.commit = commit(source.root, "unsafe"); expect(() => plan(source, trusted)).toThrow("safe repository-relative path");
+    writeFileSync(join(trusted.root, "dirty"), "x"); expect(() => plan(source, trusted)).toThrow("clean checkout"); rmSync(join(trusted.root, "dirty")); const configPath = join(source.root, "docs", "backlog", "config.json"); const config = JSON.parse(readFileSync(configPath, "utf8")); config.docs_dir = "../outside"; writeFileSync(configPath, JSON.stringify(config)); source.commit = commit(source.root, "unsafe"); expect(() => plan(source, trusted)).toThrow("safe repository-relative path"); config.docs_dir = ".git"; writeFileSync(configPath, JSON.stringify(config)); source.commit = commit(source.root, "git metadata"); expect(() => plan(source, trusted)).toThrow("safe repository-relative path");
     delete config.docs_dir; writeFileSync(configPath, JSON.stringify(config)); symlinkSync("config.json", join(source.root, "docs", "backlog", "linked.json")); source.commit = commit(source.root, "symlink"); expect(() => plan(source, trusted)).toThrow("unsupported Git entry");
   });
 
