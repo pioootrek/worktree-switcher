@@ -612,3 +612,37 @@ test("closing editors returns keyboard focus to the action that opened them", as
   await page.keyboard.press("Escape");
   await expect(editTask).toBeFocused();
 });
+
+
+for (const mode of ["edit", "reply", "from_thread"] as const) {
+  test(`a failed background read in ${mode} exposes retry and restores the record draft`, async ({ page }) => {
+    const f = await mountKnowledge(page);
+    const task = mode === "edit";
+    f.records.push({ id: "existing", projectId: "knowledge-only", title: "Existing record", ...(task ? { description: "Original", status: "open", priority: "next" } : { body: "Original" }), revision: 1, createdBy: "owner" });
+    if (!task) await page.getByRole("tab", { name: "Discussions", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("link", { name: "Existing record", exact: true }).click();
+    await page.getByRole("button", { name: task ? "Edit task" : mode === "reply" ? "Reply" : "Create task from thread", exact: true }).click();
+    await page.getByLabel("Body", { exact: true }).fill("Unsaved record draft");
+    let fail = true;
+    await page.route("**/api/knowledge", route => {
+      if (fail && route.request().postDataJSON().operation === (task ? "task" : "thread")) return route.fulfill({ status: 503, json: { error: "Unavailable" } });
+      return route.fallback();
+    });
+    await page.evaluate(() => (window as unknown as { fixtureEvents: { emit: (type: string, value: unknown) => void } }).fixtureEvents.emit("knowledge-changed", { projectIds: ["knowledge-only"] }));
+    await expect(page.getByRole("alert")).toContainText("Could not read knowledge.");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByLabel("Knowledge credential", { exact: true })).toHaveCount(0);
+    fail = false;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page.getByLabel("Body", { exact: true })).toHaveValue("Unsaved record draft");
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
+    const saved = f.calls.findLast(call => call.operation === (task ? "update_task" : mode === "reply" ? "create_reply" : "task_from_thread"));
+    expect(saved?.input[task ? "taskId" : "threadId"]).toBe("existing");
+    expect(saved?.input[mode === "reply" ? "body" : "description"]).toBe("Unsaved record draft");
+    expect(f.errors).toEqual([]);
+  });
+}

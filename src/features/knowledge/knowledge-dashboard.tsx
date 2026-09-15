@@ -60,6 +60,7 @@ export function KnowledgeDashboard({ token, setToken, change }: { token: string;
   const close = () => setMode(null);
   const navigate = (tab: KnowledgeTab, recordId = "", projectId = selection.projectId) => { close(); setNotice(false); model.select({ tab, recordId, projectId }); };
 
+  const editorReady = Boolean(mode && (mode === "task" || mode === "thread" || detail));
   const applyFilters = (filters: KnowledgeFilters) => { navigate(selection.tab); model.setFilters(filters); };
 
   if (!token || model.sessionError) return <form className="max-w-xl space-y-4 rounded-xl border border-border p-5" onSubmit={event => {
@@ -119,10 +120,10 @@ export function KnowledgeDashboard({ token, setToken, change }: { token: string;
           <Button type="submit" variant="outline">{t("knowledge.filter")}</Button>
         </form>
       </div>
-      {model.error && !mode && <Alert variant="destructive"><AlertDescription>{t("knowledge.loadFailed")}</AlertDescription></Alert>}
+      {model.error && !editorReady && <Alert variant="destructive"><AlertDescription>{t("knowledge.loadFailed")}</AlertDescription></Alert>}
       {model.loading && <p role="status">{t("knowledge.loading")}</p>}
-      <Dialog open={Boolean(mode)} onOpenChange={open => { if (!open) close(); }}>
-        {mode && (mode === "task" || mode === "thread" || detail) && <DialogContent className="sm:max-w-2xl" aria-describedby={undefined} onCloseAutoFocus={event => { event.preventDefault(); (editorTriggerRef.current?.isConnected ? editorTriggerRef.current : actionRef.current)?.focus(); }}>
+      <Dialog open={editorReady} onOpenChange={open => { if (!open) close(); }}>
+        {mode && editorReady && <DialogContent className="sm:max-w-2xl" aria-describedby={undefined} onCloseAutoFocus={event => { event.preventDefault(); (editorTriggerRef.current?.isConnected ? editorTriggerRef.current : actionRef.current)?.focus(); }}>
           <DialogTitle className="sr-only">{t(mode === "edit" ? "knowledge.edit" : mode === "reply" ? "knowledge.reply" : mode === "thread" ? "knowledge.addDiscussion" : "knowledge.addTask")}</DialogTitle>
           {model.error && <Alert variant="destructive"><AlertDescription>{t("knowledge.loadFailed")}</AlertDescription></Alert>}
           <Button variant="ghost" className="mr-8 w-fit" onClick={model.reload}><RefreshCw aria-hidden className="size-4" />{t("knowledge.refresh")}</Button>
