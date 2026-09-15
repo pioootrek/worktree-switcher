@@ -87,7 +87,7 @@ try {
   url.searchParams.set("knowledgeTab", "backlog");
   url.searchParams.delete("record");
   await page.goto(url.href);
-  await page.getByRole("button", { name: "Quick save", exact: true }).click();
+  await page.getByRole("button", { name: "Add task", exact: true }).click();
   const title = `K7a human task ${run}`;
   await page.getByLabel("Title", { exact: true }).fill(title);
   await page.getByLabel("Body", { exact: true }).fill("Pilot copy only: verify a human can hand work to two agents.");
