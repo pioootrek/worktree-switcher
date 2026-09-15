@@ -148,7 +148,8 @@ describe("K6b Hub import execution",()=>{
   it("rejects target identities that cannot be logically restored",()=>{
     const f=fixture(),source=plan([mapping("docs/backlog/feature/one.json","task","task",{id:"one",title:"One"})]);
     expect(()=>execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:"x".repeat(161),targetProjectName:"Target"})).toThrowError(expect.objectContaining({code:"invalid_request"}));
-    expect(()=>execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:"target",targetProjectName:"x".repeat(121)})).toThrowError(expect.objectContaining({code:"invalid_request"}));f.store.close();
+    expect(()=>execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:"target",targetProjectName:"x".repeat(121)})).toThrowError(expect.objectContaining({code:"invalid_request"}));
+    const padded=` ${"x".repeat(160)} `;execute(f.store,f.identity,f.owner,{plan:source,targetProjectId:padded,targetProjectName:"Padded"});expect(f.store.getKnowledgeProject(padded)).toBeNull();expect(f.store.getKnowledgeProject(padded.trim())?.id).toBe(padded.trim());f.store.close();
   });
 
   it("verifies and installs attachment bytes for their imported note",()=>{
@@ -167,6 +168,12 @@ describe("K6b Hub import execution",()=>{
     const unsafe=fixture(),unsafeDirectory=join(unsafe.root,"unsafe-attachments"),outside=join(unsafe.root,"outside");mkdirSync(unsafeDirectory);mkdirSync(outside);symlinkSync(outside,join(unsafeDirectory,hash.slice(0,2)));
     expect(()=>executeHubImport(unsafe.store,unsafe.identity,unsafe.owner,{plan:report,targetProjectId:"unsafe",targetProjectName:"Unsafe",attachmentDirectory:unsafeDirectory,batchId:"unsafe-batch"},()=>NOW,value=>value,()=>bytes)).toThrowError(expect.objectContaining({code:"invalid_request"}));
     expect(existsSync(join(outside,hash))).toBe(false);expect(unsafe.store.getHubImport("unsafe-batch")).toMatchObject({status:"failed"});unsafe.store.close();
+  });
+
+  it("resets and resumes a failed publication after its external cause is removed",()=>{
+    const f=fixture(),bytes=Buffer.from("retry proof"),hash=createHash("sha256").update(bytes).digest("hex"),note=mapping("docs/backlog/notes/NOTE-one/note.json","note","memory",{id:"NOTE-one",title:"Note",body:"Body"}),attachment:HubImportMapping={sourcePath:"docs/backlog/notes/NOTE-one/proof.txt",sourceKind:"attachment",targetKind:"attachment",legacyId:null,disposition:"mapped",sourceSha256:hash,size:bytes.byteLength,mappedFields:[],sourceOnlyFields:[]},report=plan([note,attachment]),directory=join(f.root,"retry-attachments"),outside=join(f.root,"retry-outside");mkdirSync(directory);mkdirSync(outside);symlinkSync(outside,join(directory,hash.slice(0,2)));
+    const input={plan:report,targetProjectId:"retry",targetProjectName:"Retry",attachmentDirectory:directory,batchId:"retry-batch"};expect(()=>executeHubImport(f.store,f.identity,f.owner,input,()=>NOW,value=>value,()=>bytes)).toThrow();expect(f.store.getHubImport("retry-batch")).toMatchObject({status:"failed",cursor:2});
+    rmSync(join(directory,hash.slice(0,2)));const published=executeHubImport(f.store,f.identity,f.owner,input,()=>NOW,value=>value,()=>bytes);expect(published).toMatchObject({status:"published",cursor:2,error:null});expect(existsSync(join(directory,hash.slice(0,2),hash))).toBe(true);f.store.close();
   });
 
   it("removes newly installed attachment objects when database publication rolls back",()=>{

@@ -95,6 +95,16 @@ export class SqliteStateStore implements StateStore, IdentityStore, KnowledgeSto
     return row ? this.mapHubImportBatch(row) : null;
   }
 
+  resetHubImport(batchId: string, now: string): HubImportBatch {
+    return this.database.transaction(()=>{
+      const batch=this.getHubImport(batchId);if(!batch) throw new KnowledgeError("not_found","Import batch not found.");
+      if(batch.status!=="failed") throw new KnowledgeError("revision_conflict","Only a failed import batch can be reset.");
+      this.database.prepare("DELETE FROM knowledge_import_staging WHERE batch_id=?").run(batchId);
+      this.database.prepare("UPDATE knowledge_import_batches SET status='staging',cursor=0,error=NULL,published_at=NULL,updated_at=? WHERE id=? AND status='failed'").run(now,batchId);
+      return this.getHubImport(batchId)!;
+    }).immediate();
+  }
+
   stageHubImportChunk(batchId: string, expectedCursor: number, mappings: HubImportMapping[], now: string): HubImportBatch {
     return this.database.transaction(() => {
       const batch=this.getHubImport(batchId); if(!batch||batch.status!=="staging"||batch.cursor!==expectedCursor) throw new KnowledgeError("revision_conflict","Import cursor changed.");

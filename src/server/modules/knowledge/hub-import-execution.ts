@@ -30,6 +30,7 @@ export interface HubImportBatch {
 export interface HubImportExecutionStore {
   beginHubImport(input: Omit<HubImportBatch, "status" | "cursor" | "createdAt" | "updatedAt" | "publishedAt" | "error">, now: string): HubImportBatch;
   getHubImport(batchId: string): HubImportBatch | null;
+  resetHubImport(batchId: string, now: string): HubImportBatch;
   stageHubImportChunk(batchId: string, expectedCursor: number, mappings: HubImportMapping[], now: string): HubImportBatch;
   publishHubImport(batchId: string, now: string, attachmentDirectory?: string): HubImportBatch;
 }
@@ -78,10 +79,11 @@ export function executeHubImport(
 ): HubImportBatch {
   validate(input);
   identity.requireOwnerSession(actor);
+  const targetProjectId=input.targetProjectId.trim();
   const verified = verifyPlan(input.plan);
   if (verified.planId !== input.plan.planId || verified.planHash !== input.plan.planHash) throw new KnowledgeError("revision_conflict", "Import source no longer matches the approved plan.");
   const now = clock();
-  const stableId = `hub-import:${createHash("sha256").update(`${input.plan.planId}\0${input.targetProjectId}`).digest("hex").slice(0, 24)}`;
+  const stableId = `hub-import:${createHash("sha256").update(`${input.plan.planId}\0${targetProjectId}`).digest("hex").slice(0, 24)}`;
   let batch = store.beginHubImport({
     id: input.batchId ?? stableId,
     planId: input.plan.planId,
@@ -89,17 +91,18 @@ export function executeHubImport(
     sourceId: input.plan.source.sourceId,
     sourceRepository: input.plan.source.repository,
     sourceCommit: input.plan.source.commit,
-    targetProjectId: input.targetProjectId,
+    targetProjectId,
     targetProjectName: input.targetProjectName.trim(),
     expectedTargetRevision: input.expectedTargetRevision ?? null,
     actorPrincipalId: actor.principalId,
     totalItems: input.plan.mappings.length,
   }, now);
   if (batch.planId !== input.plan.planId || batch.planHash !== input.plan.planHash || batch.sourceId !== input.plan.source.sourceId || batch.sourceRepository !== input.plan.source.repository || batch.sourceCommit !== input.plan.source.commit
-    || batch.targetProjectId !== input.targetProjectId || batch.targetProjectName !== input.targetProjectName.trim() || batch.expectedTargetRevision !== (input.expectedTargetRevision ?? null) || batch.actorPrincipalId !== actor.principalId || batch.totalItems !== input.plan.mappings.length) {
+    || batch.targetProjectId !== targetProjectId || batch.targetProjectName !== input.targetProjectName.trim() || batch.expectedTargetRevision !== (input.expectedTargetRevision ?? null) || batch.actorPrincipalId !== actor.principalId || batch.totalItems !== input.plan.mappings.length) {
     throw new KnowledgeError("revision_conflict", "Stored import batch does not match the supplied plan.");
   }
   if (batch.status === "published") return batch;
+  if (batch.status === "failed") batch=store.resetHubImport(batch.id,clock());
   if (batch.status !== "staging") throw new KnowledgeError("invalid_request", "Import batch cannot be resumed.");
   const size = Math.max(1, Math.min(input.chunkSize ?? 100, 500));
   const mappings = input.plan.mappings.slice(batch.cursor, batch.cursor + size).map(mapping=>{
