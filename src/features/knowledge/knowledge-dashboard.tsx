@@ -40,6 +40,7 @@ export function KnowledgeDashboard({ token, setToken, change }: { token: string;
   }, []);
   const [notice, setNotice] = useState(false);
   const actionRef = useRef<HTMLButtonElement>(null);
+  const editorTriggerRef = useRef<HTMLButtonElement | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
   const model = useKnowledge(token, change);
@@ -56,7 +57,7 @@ export function KnowledgeDashboard({ token, setToken, change }: { token: string;
   useEffect(() => { detailRef.current?.scrollTo({ top: 0 }); }, [selection.recordId]);
   const project = model.project?.id === selection.projectId ? model.project : undefined;
   const writable = project?.writable && project.status === "active";
-  const close = () => { setMode(null); actionRef.current?.focus(); };
+  const close = () => setMode(null);
   const navigate = (tab: KnowledgeTab, recordId = "", projectId = selection.projectId) => { close(); setNotice(false); model.select({ tab, recordId, projectId }); };
 
   const applyFilters = (filters: KnowledgeFilters) => { navigate(selection.tab); model.setFilters(filters); };
@@ -89,7 +90,7 @@ export function KnowledgeDashboard({ token, setToken, change }: { token: string;
     </div>
     {(model.projectOffset > 0 || projects.nextOffset !== null) && <div className="flex gap-2"><Button variant="outline" disabled={model.projectOffset === 0} onClick={() => model.setProjectOffset(Math.max(0, model.projectOffset - 25))}>{t("knowledge.previousProjects")}</Button><Button variant="outline" disabled={projects.nextOffset === null} onClick={() => model.setProjectOffset(projects.nextOffset!)}>{t("knowledge.nextProjects")}</Button></div>}
     {!projects.items.length && !selection.projectId && <p>{t("knowledge.noProjectsHelp")}</p>}
-    <div className="flex shrink-0 flex-wrap items-center justify-between gap-3"><Tabs value={selection.tab} onValueChange={value => navigate(value as KnowledgeTab)}><TabsList aria-label={t("knowledge.title")}><TabsTrigger value="backlog">{t("knowledge.backlog")}</TabsTrigger><TabsTrigger value="discussions">{t("knowledge.discussions")}</TabsTrigger><TabsTrigger value="memory">{t("knowledge.memory")}</TabsTrigger></TabsList></Tabs>{selection.tab !== "memory" && <Button ref={actionRef} disabled={!writable} onClick={() => { setMode(selection.tab === "discussions" ? "thread" : "task"); setNotice(false); }}><Plus aria-hidden className="size-4" />{t(selection.tab === "backlog" ? "knowledge.addTask" : "knowledge.addDiscussion")}</Button>}</div>
+    <div className="flex shrink-0 flex-wrap items-center justify-between gap-3"><Tabs value={selection.tab} onValueChange={value => navigate(value as KnowledgeTab)}><TabsList aria-label={t("knowledge.title")}><TabsTrigger value="backlog">{t("knowledge.backlog")}</TabsTrigger><TabsTrigger value="discussions">{t("knowledge.discussions")}</TabsTrigger><TabsTrigger value="memory">{t("knowledge.memory")}</TabsTrigger></TabsList></Tabs>{selection.tab !== "memory" && <Button ref={actionRef} disabled={!writable} onClick={event => { editorTriggerRef.current = event.currentTarget; setMode(selection.tab === "discussions" ? "thread" : "task"); setNotice(false); }}><Plus aria-hidden className="size-4" />{t(selection.tab === "backlog" ? "knowledge.addTask" : "knowledge.addDiscussion")}</Button>}</div>
     {notice && <p role="status" className="text-sm">{t("knowledge.saved")}</p>}
     {selection.tab === "memory" ? (selection.projectId ? <MemoryPanel key={`${identity.principal.id}:${selection.projectId}`} token={token} principalId={identity.principal.id} projectId={selection.projectId} recordId={selection.recordId} writable={Boolean(writable)} approvable={identity.principal.kind === "owner" && identity.credential.kind === "owner_session" && project?.status === "active"} changeVersion={change.version + model.refreshVersion} onSelect={navigate} /> : <p>{t("knowledge.noProjectsHelp")}</p>) : selection.projectId && <>
       <div className={`shrink-0 space-y-3 ${selection.recordId ? "hidden lg:block" : ""}`}>
@@ -121,7 +122,7 @@ export function KnowledgeDashboard({ token, setToken, change }: { token: string;
       {model.error && !mode && <Alert variant="destructive"><AlertDescription>{t("knowledge.loadFailed")}</AlertDescription></Alert>}
       {model.loading && <p role="status">{t("knowledge.loading")}</p>}
       <Dialog open={Boolean(mode)} onOpenChange={open => { if (!open) close(); }}>
-        {mode && (mode === "task" || mode === "thread" || detail) && <DialogContent className="sm:max-w-2xl" aria-describedby={undefined}>
+        {mode && (mode === "task" || mode === "thread" || detail) && <DialogContent className="sm:max-w-2xl" aria-describedby={undefined} onCloseAutoFocus={event => { event.preventDefault(); (editorTriggerRef.current?.isConnected ? editorTriggerRef.current : actionRef.current)?.focus(); }}>
           <DialogTitle className="sr-only">{t(mode === "edit" ? "knowledge.edit" : mode === "reply" ? "knowledge.reply" : mode === "thread" ? "knowledge.addDiscussion" : "knowledge.addTask")}</DialogTitle>
           {model.error && <Alert variant="destructive"><AlertDescription>{t("knowledge.loadFailed")}</AlertDescription></Alert>}
           <Button variant="ghost" className="mr-8 w-fit" onClick={model.reload}><RefreshCw aria-hidden className="size-4" />{t("knowledge.refresh")}</Button>
@@ -145,7 +146,7 @@ export function KnowledgeDashboard({ token, setToken, change }: { token: string;
             <div className="space-y-3">{"description" in detail && <TaskStatus status={detail.status} priority={detail.priority} />}<h3 className="break-words text-2xl font-semibold leading-tight tracking-tight">{detail.title}</h3></div>
             <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">{t("knowledge.recordMetadata", { revision: detail.revision })}</summary><p className="mt-2 break-all">{t("knowledge.attribution", { author: detail.createdBy, revision: detail.revision })}</p><p className="mt-1 break-all">{detail.id}</p></details>
             <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{"description" in detail ? detail.description : detail.body}</p>
-            <div className="flex flex-wrap gap-2">{"description" in detail ? <Button variant="outline" disabled={!writable} onClick={() => setMode("edit")}>{t("knowledge.edit")}</Button> : <><Button variant="outline" disabled={!writable} onClick={() => setMode("reply")}>{t("knowledge.reply")}</Button><Button variant="outline" disabled={!writable} onClick={() => setMode("from_thread")}>{t("knowledge.fromThread")}</Button></>}</div>
+            <div className="flex flex-wrap gap-2">{"description" in detail ? <Button variant="outline" disabled={!writable} onClick={event => { editorTriggerRef.current = event.currentTarget; setMode("edit"); }}>{t("knowledge.edit")}</Button> : <><Button variant="outline" disabled={!writable} onClick={event => { editorTriggerRef.current = event.currentTarget; setMode("reply"); }}>{t("knowledge.reply")}</Button><Button variant="outline" disabled={!writable} onClick={event => { editorTriggerRef.current = event.currentTarget; setMode("from_thread"); }}>{t("knowledge.fromThread")}</Button></>}</div>
             {"description" in detail && <TaskContext key={`${selection.projectId}:${detail.id}`} token={token} projectId={selection.projectId} taskId={detail.id} changeVersion={change.version + detail.revision + model.refreshVersion} />}
             <RecordAttachments key={`${selection.projectId}:${detail.id}`} token={token} projectId={selection.projectId} recordId={detail.id} recordKind={"description" in detail ? "task" : "thread"} changeVersion={change.version + model.refreshVersion} />
             {model.relations.items.length > 0 && <section className="space-y-3 border-t border-border pt-5" aria-label={t("knowledge.relations")}><h4 className="font-medium">{t("knowledge.relations")}</h4><ul className="space-y-2">{model.relations.items.map(relation => {

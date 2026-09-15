@@ -594,3 +594,21 @@ test("an entry exposes authorized attachments and downloads their bytes", async 
   expect(requests).toEqual(["attachment"]);
   expect(f.errors).toEqual([]);
 });
+
+
+test("closing editors returns keyboard focus to the action that opened them", async ({ page }) => {
+  await mountMemory(page);
+  await addMemory(page, "Keyboard note");
+  const editMemory = page.getByRole("button", { name: "Edit memory", exact: true });
+  await editMemory.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(editMemory).toBeFocused();
+  await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+  await page.getByRole("link", { name: "K4 task", exact: true }).click();
+  const editTask = page.getByRole("button", { name: "Edit task", exact: true });
+  await editTask.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(editTask).toBeFocused();
+});

@@ -1,7 +1,7 @@
 "use client";
 
 import { RecordAttachments } from "./record-attachments";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,6 +81,7 @@ function MemoryPanelContent({ token, principalId, projectId, recordId, writable,
       setVersion(v => v + 1);
     } finally { setBusy(false); }
   };
+  const editorTriggerRef = useRef<HTMLButtonElement | null>(null);
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
     <form className="flex flex-wrap items-end gap-3" onSubmit={event => { event.preventDefault(); const data = new FormData(event.currentTarget); setSearch({ query: String(data.get("query") ?? ""), tag: String(data.get("tag") ?? ""), legacyId: String(data.get("legacy") ?? ""), kind: String(data.get("kind")) as typeof kind, status: String(data.get("status") ?? "") as typeof status, inactive: data.has("inactive"), offset: 0 }); setError(""); setVersion(v => v + 1); }}>
       <div className="min-w-0 flex-1 space-y-2"><Label htmlFor="memory-query">{t("knowledge.searchContent")}</Label><Input id="memory-query" name="query" defaultValue={query} maxLength={200} /></div>
@@ -91,11 +92,11 @@ function MemoryPanelContent({ token, principalId, projectId, recordId, writable,
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="inactive" defaultChecked={inactive} />{t("knowledge.includeInactive")}</label>
       <Button type="submit" variant="outline">{t("knowledge.filter")}</Button>
     </form>
-    <Button disabled={!writable || busy || Boolean(pending)} onClick={() => setEditor("new")}>{t("knowledge.addMemory")}</Button>
+    <Button disabled={!writable || busy || Boolean(pending)} onClick={event => { editorTriggerRef.current = event.currentTarget; setEditor("new"); }}>{t("knowledge.addMemory")}</Button>
     {error && <p role="alert">{t(error as "knowledge.saveFailed")}</p>}
     {pending && !busy && <Button variant="outline" onClick={() => void mutate(pending!.operation as "approve_memory")}>{t("knowledge.retryOperation")}</Button>}
     <Dialog open={Boolean(editor)} onOpenChange={open => { if (!open) setEditor(null); }}>
-      {editor && (editor === "new" || record) && <DialogContent className="sm:max-w-2xl" aria-describedby={undefined}>
+      {editor && (editor === "new" || record) && <DialogContent className="sm:max-w-2xl" aria-describedby={undefined} onCloseAutoFocus={event => { event.preventDefault(); editorTriggerRef.current?.focus(); }}>
         <DialogTitle className="sr-only">{t(editor === "new" ? "knowledge.addMemory" : "knowledge.editMemory")}</DialogTitle>
         <MemoryEditor key={`${projectId}:${editor === "new" ? "new" : recordId}`} token={token} principalId={principalId} projectId={projectId} record={editor === "edit" ? record! : undefined} onClose={() => setEditor(null)} onConflict={() => setVersion(v => v + 1)} onSaved={id => { setEditor(null); setVersion(v => v + 1); onSelect("memory", id); }} />
       </DialogContent>}
@@ -119,7 +120,7 @@ function MemoryPanelContent({ token, principalId, projectId, recordId, writable,
         <h4 className="font-medium">{t("knowledge.sources")}</h4><ul className="space-y-2">{record.sources.map((source, index) => <li className="break-all text-sm" key={index}>{source.kind === "repository" ? `${source.sourceId} · ${source.repository} · ${source.commit}:${source.path}` : source.kind === "reply" ? `${source.id} · r${source.revision}` : <a className="underline" href={sourceHref(projectId, source)}>{source.kind === "external" ? source.label : `${source.id} · r${source.revision}`}</a>}</li>)}</ul>
         {record.supersededBy && <a className="block break-all underline" href={sourceHref(projectId, { kind: "memory", ...record.supersededBy })}>{t("knowledge.replacement")}: {record.supersededBy.id} · r{record.supersededBy.revision}</a>}
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={!writable || record.status !== "active" || busy || Boolean(pending)} onClick={() => setEditor("edit")}>{t("knowledge.editMemory")}</Button>
+          <Button variant="outline" disabled={!writable || record.status !== "active" || busy || Boolean(pending)} onClick={event => { editorTriggerRef.current = event.currentTarget; setEditor("edit"); }}>{t("knowledge.editMemory")}</Button>
           <Button disabled={!approvable || record.status !== "active" || Boolean(record.approval) || busy || Boolean(pending)} onClick={() => void mutate("approve_memory")}>{t("knowledge.approve")}</Button>
           <Button variant="outline" disabled={!writable || record.status === "superseded" || busy || Boolean(pending)} onClick={() => void mutate(record.status === "archived" ? "restore_memory" : "archive_memory")}>{t(record.status === "archived" ? "knowledge.restoreMemory" : "knowledge.archiveMemory")}</Button>
         </div>
