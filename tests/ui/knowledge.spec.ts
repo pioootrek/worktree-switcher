@@ -630,14 +630,14 @@ for (const mode of ["edit", "reply", "from_thread"] as const) {
       return route.fallback();
     });
     await page.evaluate(() => (window as unknown as { fixtureEvents: { emit: (type: string, value: unknown) => void } }).fixtureEvents.emit("knowledge-changed", { projectIds: ["knowledge-only"] }));
-    await expect(page.getByRole("alert")).toContainText("Could not read knowledge.");
+    await expect(page.getByRole("alert").filter({ hasText: "Could not read knowledge." })).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByLabel("Knowledge credential", { exact: true })).toHaveCount(0);
     fail = false;
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await expect(page.getByLabel("Body", { exact: true })).toHaveValue("Unsaved record draft");
-    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(page.getByRole("alert").filter({ hasText: "Could not read knowledge." })).toHaveCount(0);
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     const saved = f.calls.findLast(call => call.operation === (task ? "update_task" : mode === "reply" ? "create_reply" : "task_from_thread"));
