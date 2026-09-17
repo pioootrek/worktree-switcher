@@ -154,6 +154,14 @@ i usuwanie danych; bez nich nie udostępniać zapisu prawdziwych danych.
 
 ### K1. Trwała tożsamość i najwęższy zakres dostępu
 
+Aktualizacja 2026-09-17: [globalne tryby CLI i plugin Better Auth](../NOTE-20260909-self-hosted-saas-plan/authentication-modes-and-plugin.md)
+zastępują poniższy wymóg oddzielnego logowania właściciela do wiedzy.
+Nowy token instalacji obejmie runtime i wiedzę, a jawny `open` nie będzie wymagał
+poświadczeń. Ograniczenia starych tokenów obowiązują do jawnej migracji;
+ograniczenia scoped tokenów i historyczna tożsamość pozostają zachowane.
+Pełny dostęp instalacji oraz anonimowy autor wymagają własnych testów i jawnego
+zapisu w audycie. Zapis planu nie dowodzi wdrożenia tych zmian.
+
 - Wprowadzić trwały principal właściciela i identyfikowalne, odwoływalne
   poświadczenia agentów z zakresem projektu i operacji wiedzy. Przechowywać
   hashe sekretów; dane poświadczeń nie trafiają do wyników MCP ani audytu.

@@ -41,6 +41,13 @@ tożsamości i pozwala zachować bieżący kontrakt zdalnej weryfikacji.
 
 ### Principal, uwierzytelnienie i granty
 
+Aktualizacja zakresu z 2026-09-17: [plan globalnych trybów](../NOTE-20260909-self-hosted-saas-plan/authentication-modes-and-plugin.md)
+wprowadza przyszły pełny dostęp do instalacji dla `open` i jednego tokena.
+Zastępuje wymóg osobnego poświadczenia wiedzy właściciela; poniższe granice
+scoped grantów i legacy obowiązują odpowiednio dla delegowanych poświadczeń
+oraz stanu przed migracją. Operacje anonimowe, także zatwierdzenia, muszą
+zachować prawdziwe oznaczenie braku uwierzytelnienia zamiast udawać człowieka.
+
 - K1 promuje wspólną część `RemotePrincipal` do transportowo neutralnego
   `Principal` z `id`, `kind: owner|agent|worker` i `status: active|revoked`.
   Zdalna weryfikacja zachowuje zgodną fasadę podczas migracji; nie powstaje

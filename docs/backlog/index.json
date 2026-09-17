@@ -22,6 +22,16 @@
       "type": "feature"
     },
     {
+      "area": "core",
+      "id": "FEAT-20260829-independent-auth-modes",
+      "path": "feature/FEAT-20260829-independent-auth-modes.json",
+      "priority": "next",
+      "risk_level": "high",
+      "status": "open",
+      "title": "Configure global open, token and Better Auth modes from CLI",
+      "type": "feature"
+    },
+    {
       "area": "process-manager",
       "id": "FEAT-20260829-launch-environment-profiles",
       "path": "feature/FEAT-20260829-launch-environment-profiles.json",
@@ -83,22 +93,12 @@
     },
     {
       "area": "core",
-      "id": "FEAT-20260829-independent-auth-modes",
-      "path": "feature/FEAT-20260829-independent-auth-modes.json",
-      "priority": "later",
-      "risk_level": "high",
-      "status": "open",
-      "title": "Control Web and MCP authentication independently",
-      "type": "feature"
-    },
-    {
-      "area": "core",
       "id": "FEAT-20260829-local-web-accounts",
       "path": "feature/FEAT-20260829-local-web-accounts.json",
       "priority": "later",
       "risk_level": "high",
       "status": "open",
-      "title": "Add simple local accounts for the web dashboard",
+      "title": "Add optional Better Auth plugin for username and password login",
       "type": "feature"
     },
     {
@@ -295,6 +295,7 @@
       "author": "agent:codex",
       "created": "2026-09-09",
       "files": [
+        "authentication-modes-and-plugin.md",
         "implementation-plan.md",
         "remote-verification-implementation.md"
       ],
@@ -307,7 +308,10 @@
         "https",
         "self-hosted",
         "saas",
-        "validation"
+        "validation",
+        "authentication",
+        "plugin",
+        "open-core"
       ],
       "title": "Self-hosted and SaaS stages with early failure validation"
     },

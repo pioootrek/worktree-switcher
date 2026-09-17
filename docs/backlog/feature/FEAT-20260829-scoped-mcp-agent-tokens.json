@@ -7,7 +7,8 @@
       "FEAT-20260829-independent-auth-modes",
       "FEAT-20260829-launch-environment-profiles",
       "FEAT-20260829-multi-project-worktree-switching",
-      "NOTE-20260829-readiness-assessment"
+      "NOTE-20260829-readiness-assessment",
+      "NOTE-20260909-self-hosted-saas-plan"
     ]
   },
   "notes": [
@@ -25,6 +26,11 @@
       "author": "agent:codex",
       "date": "2026-09-05",
       "text": "Reprioritized under the 2026-09-05 owner-first, reusable-experiment direction. Revisit when distinct client/project permissions are needed. Preserve the existing authentication and session ownership until then; compact status and owner-authorized runtime tools can ship independently."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-17",
+      "text": "The 2026-09-17 roadmap in NOTE-20260909-self-hosted-saas-plan/authentication-modes-and-plugin.md makes one installation token sufficient for all owner functions. This item remains optional least-privilege delegation; it must not force migration away from that token. Open mode deliberately has no anonymous access boundary to enforce grants against."
     }
   ],
   "priority": "later",
@@ -42,7 +48,7 @@
   },
   "schema_version": 1,
   "scope": [
-    "Replace the single shared MCP credential with human-created agent tokens carrying a stable client identity, display label, creation time, optional expiry, project allowlist, and explicit capabilities.",
+    "Offer optional human-created scoped agent tokens with stable client identity, display label, creation time, optional expiry, project allowlist and explicit capabilities alongside the unified installation-token mode; do not require one token per product module.",
     "Define least-privilege capabilities including projects:read, claims:manage, profiles:select, and config:write. A token receives only the capabilities selected by the human creator; configuration write is never implied by ordinary claim access.",
     "Create, list metadata for, rotate, and revoke tokens through the authenticated human dashboard and CLI. Never expose token minting, raw token listing, scope escalation, or revocation of other clients as MCP tools.",
     "Generate at least 256 bits of entropy, show the raw token exactly once, persist only a verifier/hash plus a non-secret identifier and short prefix, and compare credentials in constant time.",

@@ -7,7 +7,9 @@
       "FEAT-20260829-controller-https",
       "FEAT-20260829-independent-auth-modes",
       "FEAT-20260829-scoped-mcp-agent-tokens",
-      "NOTE-20260829-readiness-assessment"
+      "NOTE-20260829-readiness-assessment",
+      "NOTE-20260909-self-hosted-saas-plan",
+      "FEAT-20260913-knowledge-k1-identity"
     ]
   },
   "notes": [
@@ -25,11 +27,21 @@
       "author": "agent:codex",
       "date": "2026-09-05",
       "text": "Reprioritized under the 2026-09-05 owner-first, reusable-experiment direction. Revisit when the owner actually needs separate human identities or account recovery. The prior request remains recorded; personal use and reusable trials do not require a new account system."
+    },
+    {
+      "author": "user",
+      "date": "2026-09-17",
+      "text": "Requested Better Auth after global CLI modes, preferably as a plugin so the main project remains MIT. Asked whether its open-source license prevents monetization; commercial terms and any license key/file mechanism remain undecided."
+    },
+    {
+      "author": "agent:codex",
+      "date": "2026-09-17",
+      "text": "Stage 2 plan in NOTE-20260909-self-hosted-saas-plan/authentication-modes-and-plugin.md uses an optional provider package, one owner first, and leaves multi-user/organization scope for later. Better Auth MIT permits commercial use with notices; this does not create exclusivity or prevent third-party providers. No dependency was installed."
     }
   ],
   "priority": "later",
   "problem": [
-    "The browser currently relies on one ephemeral controller pairing token. It cannot identify individual human users, preserve ordinary login sessions, revoke one person's access, or recover access through a controlled local administrator workflow."
+    "After global CLI-selected authentication modes are available, the better-auth placeholder needs a working account provider without adding a persistent Next.js server or requiring the provider in the MIT Community package."
   ],
   "risk": {
     "dimensions": [
@@ -38,36 +50,36 @@
       "process"
     ],
     "level": "high",
-    "rollback": "Return Web authentication to the existing pairing-token mode. Preserve account records but invalidate all account sessions and do not silently fall back to anonymous LAN access."
+    "rollback": "Disable account entry points without opening access, retain provider account data, and use explicit local CLI recovery into token mode. Missing or invalid entitlement must never turn the installation anonymous."
   },
   "schema_version": 1,
   "scope": [
-    "Add local username-and-password accounts stored in SQLite with two roles only: admin and user. Admin manages authentication, accounts, projects, tokens, locks, and configuration; user may operate allowed projects but cannot change security settings or issue credentials.",
-    "Create accounts only through an authenticated admin screen or local CLI. Keep public registration, email addresses, email reset, social login, MFA, organizations, and hosted identity providers out of the first version.",
-    "Hash passwords with Argon2id using per-password salts and parameters calibrated near current OWASP guidance without blocking the event loop; never encrypt or log plaintext passwords.",
-    "Use random server-side sessions with owner-only persisted verifiers, idle and absolute expiry, rotation after login and privilege changes, HttpOnly and SameSite cookies, CSRF protection for mutations, and immediate invalidation after password reset or account disable.",
-    "Add CLI commands for user add, user list, user disable, user enable, user password, and user sessions revoke. Password entry must be interactive or read from protected stdin, never a command-line argument or normal log output.",
-    "Support local recovery without email: an administrator can set a new password directly through the CLI or generate a short-lived single-use reset link/code whose verifier is stored and whose raw value is displayed once. Reset does not automatically sign the user in.",
-    "Prevent removal or disablement of the last enabled admin while account authentication is active, and provide a documented local-console recovery command for a lost administrator password.",
-    "Apply login rate limiting and uniform failure responses to reduce guessing and username enumeration. Audit login success/failure metadata, account changes, password resets, and session revocations without recording passwords, reset tokens, cookies, or submitted secret values.",
-    "Allow account-password login on loopback HTTP for local use; require HTTPS or an explicitly recognized secure tunnel/proxy before accepting passwords and session cookies from a non-loopback client."
+    "Implement stage 2 of NOTE-20260909-self-hosted-saas-plan/authentication-modes-and-plugin.md after the shared mode/provider boundary: an optional separately distributed Better Auth integration package.",
+    "First deliver one owner account with username/password login, whole-product sessions, logout, password change and local CLI recovery. Multi-user roles, organizations, public signup, email delivery, billing and SaaS tenancy are later slices.",
+    "Use a versioned MIT provider contract with controller-owned authorization and stable Switcher principal IDs. Explicit local plugin loading validates compatibility and provides lifecycle disposal; do not build a general plugin marketplace.",
+    "Mount Better Auth in the existing Node controller and preserve the static dashboard. Select a small core login screen or plugin-owned prebuilt static assets without bundling proprietary server implementation into Community.",
+    "Integrate provider storage and migrations with the single controller-owned SQLite connection. Validate adapter transaction and disposal behavior before implementation. PostgreSQL is not a prerequisite.",
+    "Resolve account provisioning before committing the username-only UX: the standard Better Auth username signup still requires email. Keep public registration disabled and provide local CLI recovery.",
+    "Verify password/session lifecycle, login rate limiting, safe cookies, origin/CSRF, HTTPS for remote password entry and invalidation across API, knowledge, downloads and SSE. Machine clients keep non-password credentials.",
+    "Separate plugin distribution from license entitlement. The core remains MIT and Better Auth retains its MIT notices. A proprietary integration and a later offline license file are candidates, not an approved commercial license or activation-server requirement.",
+    "Missing, incompatible or failed providers never fall back to anonymous access. Explicit CLI recovery to token mode preserves user data; Community remains installable and usable without the plugin."
   ],
-  "source": "Product discussion on 2026-08-29",
+  "source": "Owner authentication roadmap stage 2 on 2026-09-17",
   "status": "open",
-  "title": "Add simple local accounts for the web dashboard",
+  "title": "Add optional Better Auth plugin for username and password login",
   "trigger": [
-    "Revisit when the owner actually needs separate human identities or account recovery. The prior request remains recorded; personal use and reusable trials do not require a new account system."
+    "Begin after stage 1 global modes and provider contract pass acceptance; use the first owner login workflow to prove the plugin boundary."
   ],
   "type": "feature",
   "validation": [
-    "Bootstrap the first admin from the CLI, log in through the dashboard, create a user, and verify role restrictions across project operations, security settings, and credential issuance.",
-    "Verify password hashes use Argon2id with unique salts and neither plaintext passwords nor reset/session tokens appear in SQLite, arguments, API payloads, logs, errors, audit events, or process listings.",
-    "Reset a password from the CLI and verify all prior sessions are invalidated, the reset token is single-use and expires, and the user must perform a normal login afterward.",
-    "Verify login responses do not enumerate usernames, repeated failures are rate-limited, session IDs rotate, CSRF attempts fail, and disabled accounts cannot create or continue sessions.",
-    "Verify the last enabled admin cannot be disabled or removed while account mode is active and local CLI recovery remains available when no browser session works.",
-    "Verify account login from a non-loopback client is rejected over plaintext HTTP and accepted only through the documented secure transport path."
+    "Install the plugin against the supported core API, provision the owner, log in once and exercise runtime plus knowledge without a second credential.",
+    "Verify logout, password change/reset and account/session revocation invalidate access through all browser/API/SSE/download paths; CLI recovery works without email or a hosted activation service.",
+    "Verify login limits, uniform authentication failures, cookie/origin protections and remote HTTPS behavior using the actual pinned library configuration.",
+    "Verify shared SQLite ownership, migration ordering, upgrade/backup/restore and plugin disposal without an extra database connection or controller.",
+    "Verify absent/incompatible/crashing plugins fail closed and explicit return to token mode preserves data.",
+    "Build/install the Community artifact without private implementation and the plugin-enabled artifact with required dependency notices. Run relevant tests, pnpm check, build, browser and clean package verification."
   ],
   "value": [
-    "A small team or one developer with several devices can use recognizable, revocable browser identities without introducing a hosted authentication dependency."
+    "One reusable account integration supports paid self-hosted packaging and later hosted onboarding while keeping the MIT local product independent."
   ]
 }

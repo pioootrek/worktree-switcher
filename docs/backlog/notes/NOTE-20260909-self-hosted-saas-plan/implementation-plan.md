@@ -3,6 +3,13 @@
 Date: 2026-09-09. Inspected baseline: `5777634` (`main`; application code
 from `13e80fe`). Status: planning, not implemented or deployment evidence.
 
+Authentication update, 2026-09-17: follow the
+[global CLI modes and optional Better Auth plugin plan](authentication-modes-and-plugin.md)
+for the current owner direction. It supersedes independent Web/MCP modes and
+separate owner knowledge login in earlier plans. Open and unified-token modes
+are self-hosted choices; the organization-isolation gates below still apply to
+public SaaS. Earlier source observations in this document remain dated baselines.
+
 ## Direction and scope
 
 Owner direction: the product must support self-hosting and be prepared for a
@@ -19,8 +26,9 @@ owner's SaaS. Keep the static dashboard and shared application operations.
 
 Initial hosted scope assumes customer-owned execution hardware and worker-side
 secrets. Running customer code on operator infrastructure requires a separate
-execution-isolation design. Provider, proxy product, identity provider, central
-database, worker protocol and commercial terms are not selected by this plan.
+execution-isolation design. Hosting provider, proxy product, central database,
+worker protocol and commercial terms are not selected by this plan. The
+2026-09-17 authentication update selects Better Auth for the later account flow.
 Verify current official documentation when selecting implementation dependencies.
 
 The HTTPS feature owns stage 1 only. Stages 2-4 coordinate existing remote,
@@ -185,9 +193,10 @@ organization boundary. Resolve that boundary through authenticated membership
 and grants; a client-supplied organization ID is never sufficient authority.
 Separate reading knowledge, executing code and using a credentialed profile.
 
-Choose an authentication implementation supporting configurable self-hosted
-operation. Specify session lifetime/revocation, worker enrollment/rotation and
-separate public MCP authorization before exposing remote MCP. Retain local
+Use the optional Better Auth provider from the authentication update for account
+login, after its integration gates pass. Specify session lifetime/revocation,
+worker enrollment/rotation and separate public MCP authorization before exposing
+remote MCP. Retain local
 pairing only as an explicit local mode. Design local-data migration into an
 initial organization without losing ownership, history or access.
 
@@ -257,5 +266,5 @@ Record rollback compatibility before rollout, including database changes and
 old-client behavior. Never claim a restarted job completed its original run.
 
 Planning validation: canonical Hub fmt/validate, local-reference checks and
-`git diff --check`. No application execution, TLS deployment, identity-provider
-selection or new service restart is performed by saving this plan.
+`git diff --check`. Saving this plan does not execute the application, deploy
+TLS, install the selected authentication provider or restart a service.

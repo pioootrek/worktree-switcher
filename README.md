@@ -235,6 +235,13 @@ sandbox for untrusted code.
 
 ## Roadmap
 
+The [authentication roadmap](docs/backlog/notes/NOTE-20260909-self-hosted-saas-plan/authentication-modes-and-plugin.md)
+has two planned stages: CLI-selected `open` (no authentication), `token` (one
+CLI-generated token for all functions, including knowledge), and `better-auth`
+(initially unavailable); then an optional Better Auth plugin for account login.
+The core remains MIT. Plugin commercial terms and activation are undecided.
+These modes are planned, not currently available CLI commands.
+
 The next complete workflow is **push a commit, ask your worker to verify it, and
 read the result from your existing client**. The worker will fetch the requested
 SHA itself into an isolated run workspace, without moving your active dev worktree.

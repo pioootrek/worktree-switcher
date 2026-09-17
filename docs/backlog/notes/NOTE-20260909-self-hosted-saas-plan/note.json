@@ -1,17 +1,24 @@
 {
   "author": "agent:codex",
   "body": {
+    "authentication_baseline_commit": "a727fd8",
     "baseline_commit": "5777634",
+    "related_ids": [
+      "FEAT-20260829-independent-auth-modes",
+      "FEAT-20260829-local-web-accounts",
+      "FEAT-20260913-knowledge-k1-identity"
+    ],
     "remote_verification_baseline": "d429eb9",
-    "summary": "Staged self-hosted and owner-operated SaaS direction: HTTPS first, authenticated remote execution, organization isolation and repeatable hosting, with early negative tests and explicit delivery gates. Planning only."
+    "summary": "Staged self-hosted and SaaS direction with delivery gates. The 2026-09-17 authentication roadmap adds CLI-selected open/token/better-auth modes, one token across runtime and knowledge, then an optional Better Auth provider package. Commercial activation remains undecided. Planning only."
   },
   "created": "2026-09-09",
   "files": [
     "implementation-plan.md",
-    "remote-verification-implementation.md"
+    "remote-verification-implementation.md",
+    "authentication-modes-and-plugin.md"
   ],
   "id": "NOTE-20260909-self-hosted-saas-plan",
-  "last_reviewed": "2026-09-11",
+  "last_reviewed": "2026-09-17",
   "schema_version": 1,
   "status": "active",
   "tags": [
@@ -20,7 +27,10 @@
     "https",
     "self-hosted",
     "saas",
-    "validation"
+    "validation",
+    "authentication",
+    "plugin",
+    "open-core"
   ],
   "title": "Self-hosted and SaaS stages with early failure validation"
 }
